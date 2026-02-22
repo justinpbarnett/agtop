@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/justinpbarnett/agtop/internal/config"
+	"github.com/justinpbarnett/agtop/internal/cost"
 	"github.com/justinpbarnett/agtop/internal/process"
 	"github.com/justinpbarnett/agtop/internal/run"
 	"github.com/justinpbarnett/agtop/internal/runtime"
@@ -19,6 +20,7 @@ type Executor struct {
 	manager  *process.Manager
 	registry *Registry
 	cfg      *config.Config
+	limiter  *cost.LimitChecker
 	mu       sync.Mutex
 	active   map[string]context.CancelFunc
 }
@@ -29,6 +31,7 @@ func NewExecutor(store *run.Store, manager *process.Manager, registry *Registry,
 		manager:  manager,
 		registry: registry,
 		cfg:      cfg,
+		limiter:  &cost.LimitChecker{},
 		active:   make(map[string]context.CancelFunc),
 	}
 }
@@ -234,24 +237,59 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 }
 
 func (e *Executor) runSkill(ctx context.Context, runID string, prompt string, opts runtime.RunOptions, timeout int) (process.SkillResult, error) {
-	skillCtx := ctx
-	var cancel context.CancelFunc
-	if timeout > 0 {
-		skillCtx, cancel = context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
-		defer cancel()
-	}
+	maxRetries := e.cfg.Limits.RateLimitMaxRetries
+	backoff := time.Duration(e.cfg.Limits.RateLimitBackoff) * time.Second
 
-	ch, err := e.manager.StartSkill(runID, prompt, opts)
-	if err != nil {
-		return process.SkillResult{}, err
-	}
+	for attempt := 0; ; attempt++ {
+		skillCtx := ctx
+		var cancel context.CancelFunc
+		if timeout > 0 {
+			skillCtx, cancel = context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+		}
 
-	select {
-	case result := <-ch:
+		ch, err := e.manager.StartSkill(runID, prompt, opts)
+		if err != nil {
+			if cancel != nil {
+				cancel()
+			}
+			return process.SkillResult{}, err
+		}
+
+		var result process.SkillResult
+		select {
+		case result = <-ch:
+		case <-skillCtx.Done():
+			_ = e.manager.Stop(runID)
+			if cancel != nil {
+				cancel()
+			}
+			return process.SkillResult{}, skillCtx.Err()
+		}
+		if cancel != nil {
+			cancel()
+		}
+
+		if result.Err == nil {
+			return result, nil
+		}
+
+		// Check if the error is a rate limit and we can retry
+		if attempt < maxRetries && e.limiter.IsRateLimit(result.Err.Error()) {
+			buf := e.manager.Buffer(runID)
+			if buf != nil {
+				ts := time.Now().Format("15:04:05")
+				buf.Append(fmt.Sprintf("[%s] Rate limited, retrying in %ds (attempt %d/%d)", ts, int(backoff.Seconds()), attempt+1, maxRetries))
+			}
+
+			select {
+			case <-ctx.Done():
+				return process.SkillResult{}, ctx.Err()
+			case <-time.After(backoff):
+				continue
+			}
+		}
+
 		return result, result.Err
-	case <-skillCtx.Done():
-		_ = e.manager.Stop(runID)
-		return process.SkillResult{}, skillCtx.Err()
 	}
 }
 
@@ -414,7 +452,10 @@ func (e *Executor) runParallelSkill(ctx context.Context, taskRunID string, paren
 	if ok {
 		e.store.Update(parentRunID, func(r *run.Run) {
 			r.Tokens += taskRun.Tokens
+			r.TokensIn += taskRun.TokensIn
+			r.TokensOut += taskRun.TokensOut
 			r.Cost += taskRun.Cost
+			r.SkillCosts = append(r.SkillCosts, taskRun.SkillCosts...)
 		})
 	}
 
