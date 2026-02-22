@@ -1,0 +1,8 @@
+{
+  "tasks": [
+    {"name": "implement-auth-middleware", "parallel_group": "core", "dependencies": []},
+    {"name": "implement-auth-routes", "parallel_group": "core", "dependencies": []},
+    {"name": "implement-auth-ui", "parallel_group": "frontend", "dependencies": ["implement-auth-routes"]},
+    {"name": "implement-auth-tests", "parallel_group": "testing", "dependencies": ["implement-auth-middleware", "implement-auth-routes"]}
+  ]
+}
