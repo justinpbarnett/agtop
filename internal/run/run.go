@@ -38,8 +38,10 @@ type Run struct {
 	Model        string
 	Command      string
 	Error        string
-	PID          int
-	SkillCosts   []cost.SkillCost
+	PID            int
+	SkillCosts     []cost.SkillCost
+	DevServerPort  int
+	DevServerURL   string
 }
 
 func (r *Run) StatusIcon() string {

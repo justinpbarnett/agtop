@@ -119,7 +119,13 @@ func (d Detail) renderDetails() string {
 		fmt.Fprintf(&b, "  %s\n", leftCol("Worktree", r.Worktree))
 	}
 
-	// Row 5: Command (if present)
+	// Row 5: Dev Server (if running)
+	if r.DevServerURL != "" {
+		devStyle := lipgloss.NewStyle().Foreground(styles.StatusRunning)
+		fmt.Fprintf(&b, "  %s\n", styledRight("DevServer", r.DevServerURL, devStyle))
+	}
+
+	// Row 6: Command (if present)
 	if r.Command != "" {
 		fmt.Fprintf(&b, "  %s\n", leftCol("Command", r.Command))
 	}

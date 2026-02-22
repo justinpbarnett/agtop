@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,10 +12,12 @@ import (
 	"github.com/justinpbarnett/agtop/internal/config"
 	"github.com/justinpbarnett/agtop/internal/cost"
 	"github.com/justinpbarnett/agtop/internal/engine"
+	gitpkg "github.com/justinpbarnett/agtop/internal/git"
 	"github.com/justinpbarnett/agtop/internal/process"
 	"github.com/justinpbarnett/agtop/internal/run"
 	"github.com/justinpbarnett/agtop/internal/runtime"
 	"github.com/justinpbarnett/agtop/internal/safety"
+	"github.com/justinpbarnett/agtop/internal/server"
 	"github.com/justinpbarnett/agtop/internal/ui/layout"
 	"github.com/justinpbarnett/agtop/internal/ui/panels"
 	"github.com/justinpbarnett/agtop/internal/ui/styles"
@@ -39,6 +42,8 @@ type App struct {
 	manager      *process.Manager
 	registry     *engine.Registry
 	executor     *engine.Executor
+	worktrees    *gitpkg.WorktreeManager
+	devServers   *server.DevServerManager
 	width        int
 	height       int
 	layout       layout.Layout
@@ -92,6 +97,9 @@ func NewApp(cfg *config.Config) App {
 		exec = engine.NewExecutor(store, mgr, reg, cfg)
 	}
 
+	wt := gitpkg.NewWorktreeManager(projectRoot)
+	ds := server.NewDevServerManager(cfg.Project.DevServer)
+
 	seedMockData(store)
 
 	rl := panels.NewRunList(store)
@@ -106,16 +114,18 @@ func NewApp(cfg *config.Config) App {
 	}
 
 	return App{
-		config:    cfg,
-		store:     store,
-		manager:   mgr,
-		registry:  reg,
-		executor:  exec,
-		runList:   rl,
-		logView:   lv,
-		detail:    d,
-		statusBar: panels.NewStatusBar(store),
-		keys:      DefaultKeyMap(),
+		config:     cfg,
+		store:      store,
+		manager:    mgr,
+		registry:   reg,
+		executor:   exec,
+		worktrees:  wt,
+		devServers: ds,
+		runList:    rl,
+		logView:    lv,
+		detail:     d,
+		statusBar:  panels.NewStatusBar(store),
+		keys:       DefaultKeyMap(),
 	}
 }
 
@@ -141,32 +151,40 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.runList, cmd = a.runList.Update(msg)
 		a.syncSelection()
+		a.autoStartDevServers()
 		cmds := []tea.Cmd{cmd, listenForChanges(a.store.Changes())}
 		return a, tea.Batch(cmds...)
 
 	case StartRunMsg:
 		if a.executor != nil {
-			projectRoot := a.config.Project.Root
-			if projectRoot == "" || projectRoot == "." {
-				projectRoot, _ = os.Getwd()
-			}
 			newRun := &run.Run{
-				Branch:    fmt.Sprintf("agtop/run"),
-				Worktree:  projectRoot,
 				Workflow:  msg.Workflow,
 				State:     run.StateQueued,
 				CreatedAt: time.Now(),
 			}
 			runID := a.store.Add(newRun)
+
+			wtPath, branch, err := a.worktrees.Create(runID)
+			if err != nil {
+				a.store.Update(runID, func(r *run.Run) {
+					r.State = run.StateFailed
+					r.Error = fmt.Sprintf("worktree create: %v", err)
+				})
+				return a, nil
+			}
+
+			a.store.Update(runID, func(r *run.Run) {
+				r.Worktree = wtPath
+				r.Branch = branch
+			})
+
 			a.executor.Execute(runID, msg.Workflow, msg.Prompt)
 		}
 		return a, nil
 
 	case process.CostThresholdMsg:
 		a.statusBar.SetFlash(msg.Reason)
-		return a, tea.Tick(panels.FlashDuration(), func(time.Time) tea.Msg {
-			return ClearFlashMsg{}
-		})
+		return a, flashClearCmd()
 
 	case ClearFlashMsg:
 		a.statusBar.ClearFlash()
@@ -195,8 +213,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "ctrl+c":
+			a.devServers.StopAll()
 			return a, tea.Quit
 		case "q":
+			a.devServers.StopAll()
 			return a, tea.Quit
 		case "tab":
 			a.focusedPanel = (a.focusedPanel + 1) % numPanels
@@ -230,6 +250,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Workflow: "build",
 				}
 			}
+		case "a":
+			return a.handleAccept()
+		case "x":
+			return a.handleReject()
+		case "d":
+			return a.handleDevServerToggle()
 		}
 
 		return a.routeKey(msg)
@@ -327,6 +353,124 @@ func (a *App) updateFocusState() {
 	a.runList.SetFocused(a.focusedPanel == panelRunList)
 	a.logView.SetFocused(a.focusedPanel == panelLogView)
 	a.detail.SetFocused(a.focusedPanel == panelDetail)
+}
+
+func (a App) handleAccept() (tea.Model, tea.Cmd) {
+	selected := a.runList.SelectedRun()
+	if selected == nil {
+		return a, nil
+	}
+	if selected.State != run.StateCompleted && selected.State != run.StateReviewing {
+		return a, nil
+	}
+
+	runID := selected.ID
+	branch := selected.Branch
+
+	a.store.Update(runID, func(r *run.Run) {
+		r.State = run.StateAccepted
+	})
+
+	_ = a.devServers.Stop(runID)
+
+	go func() {
+		cmd := exec.Command("git", "push", "origin", branch)
+		if a.worktrees != nil {
+			r, ok := a.store.Get(runID)
+			if ok && r.Worktree != "" {
+				cmd.Dir = r.Worktree
+			}
+		}
+		_ = cmd.Run()
+		_ = a.worktrees.Remove(runID)
+	}()
+
+	return a, nil
+}
+
+func (a App) handleReject() (tea.Model, tea.Cmd) {
+	selected := a.runList.SelectedRun()
+	if selected == nil {
+		return a, nil
+	}
+	if selected.State != run.StateCompleted && selected.State != run.StateReviewing {
+		return a, nil
+	}
+
+	runID := selected.ID
+
+	a.store.Update(runID, func(r *run.Run) {
+		r.State = run.StateRejected
+	})
+
+	_ = a.devServers.Stop(runID)
+	go func() {
+		_ = a.worktrees.Remove(runID)
+	}()
+
+	return a, nil
+}
+
+func (a App) handleDevServerToggle() (tea.Model, tea.Cmd) {
+	selected := a.runList.SelectedRun()
+	if selected == nil {
+		return a, nil
+	}
+	if selected.State != run.StateCompleted && selected.State != run.StateReviewing {
+		return a, nil
+	}
+
+	runID := selected.ID
+
+	if a.devServers.Port(runID) > 0 {
+		_ = a.devServers.Stop(runID)
+		a.store.Update(runID, func(r *run.Run) {
+			r.DevServerPort = 0
+			r.DevServerURL = ""
+		})
+	} else if selected.Worktree != "" {
+		port, err := a.devServers.Start(runID, selected.Worktree)
+		if err != nil {
+			a.statusBar.SetFlash(fmt.Sprintf("dev server: %v", err))
+			return a, flashClearCmd()
+		} else if port > 0 {
+			url := fmt.Sprintf("http://localhost:%d", port)
+			a.store.Update(runID, func(r *run.Run) {
+				r.DevServerPort = port
+				r.DevServerURL = url
+			})
+			a.statusBar.SetFlash(fmt.Sprintf("Dev server: %s", url))
+			return a, flashClearCmd()
+		}
+	}
+
+	return a, nil
+}
+
+func (a *App) autoStartDevServers() {
+	if a.config.Project.DevServer.Command == "" {
+		return
+	}
+
+	for _, r := range a.store.List() {
+		if (r.State == run.StateCompleted || r.State == run.StateReviewing) &&
+			r.Worktree != "" && r.DevServerPort == 0 {
+			port, err := a.devServers.Start(r.ID, r.Worktree)
+			if err == nil && port > 0 {
+				url := fmt.Sprintf("http://localhost:%d", port)
+				a.store.Update(r.ID, func(r *run.Run) {
+					r.DevServerPort = port
+					r.DevServerURL = url
+				})
+			}
+		}
+	}
+}
+
+func flashClearCmd() tea.Cmd {
+	return tea.Tick(panels.FlashDuration(), func(time.Time) tea.Msg {
+		return ClearFlashMsg{}
+	})
 }
 
 func listenForChanges(ch <-chan struct{}) tea.Cmd {
