@@ -3,10 +3,12 @@ name: decompose
 description: >
   Analyzes a feature spec and decomposes it into smaller, focused sub-tasks
   when the feature is too large for a single agent. Produces a task graph
-  with mini-specs for each sub-task. Use when the SDLC pipeline needs to
-  break a large feature into manageable pieces. Triggers automatically
-  during the SDLC decompose phase. Do NOT use for implementing features
-  (use the implement skill). Do NOT use for creating specs (use the spec skill).
+  with mini-specs for each sub-task. Use when a user wants to break down
+  a large feature, decompose a spec, split a plan into subtasks, or when
+  a spec is too big to implement in one pass. Triggers on "decompose this
+  spec", "break this down", "split into subtasks", "this is too big".
+  Do NOT use for implementing features (use the implement skill).
+  Do NOT use for creating specs (use the spec skill).
 ---
 
 # Purpose
@@ -15,7 +17,7 @@ Analyzes a feature spec and determines whether it should be decomposed into smal
 
 ## Variables
 
-- `argument` — Two space-separated values: `{spec_file_path} {adw_id}` (e.g., `specs/feat-ADW-042-engagement-scoring.md ADW-042`).
+- `argument` — Two space-separated values: `{spec_file_path} {task_id}` (e.g., `specs/feat-user-auth.md AUTH-042`). If no task_id is provided, derive one from the spec filename.
 
 ## Instructions
 
@@ -50,7 +52,7 @@ Output this JSON to stdout:
 ```json
 {
   "parent_spec": "{spec_file_path}",
-  "adw_id": "{adw_id}",
+  "task_id": "{task_id}",
   "is_decomposed": false,
   "tasks": [
     {
@@ -76,24 +78,24 @@ If the feature needs decomposition:
    - **Route/API endpoints** → separate task, depends on services
    - **Components/Pages** → can often parallelize (assign same stage if independent)
    - **Tests** → bundled with the thing they test (each sub-task includes its own tests)
-   - **Seed data** → separate late task, depends on model + service
+   - **Seed/fixture data** → separate late task, depends on model + service
    - **Config/admin pages** → separate task, can parallelize with main UI
 
 2. **Assign stages** — Stage 1 has no dependencies. Stage N depends on all previous stages completing.
 
-3. **Create mini-specs** — For each sub-task, write a mini-spec file to `specs/subtasks/{adw_id}/{task_id}.md`
+3. **Create mini-specs** — For each sub-task, write a mini-spec file to `specs/subtasks/{task_id}/{sub_task_id}.md`
 
 4. **Output the task graph** as JSON to stdout
 
 ### Step 4: Write Mini-Specs
 
-Each mini-spec at `specs/subtasks/{adw_id}/{task_id}.md` must contain:
+Each mini-spec at `specs/subtasks/{task_id}/{sub_task_id}.md` must contain:
 
 ```markdown
 # Sub-task: {title}
 
 > Part of: [{parent feature title}]({parent_spec_path})
-> Sub-task {N} of {total} for ADW {adw_id}
+> Sub-task {N} of {total} for {task_id}
 
 ## Scope
 
@@ -129,14 +131,14 @@ After writing any mini-specs, output the task graph as **clean, parseable JSON**
 ```json
 {
   "parent_spec": "{spec_file_path}",
-  "adw_id": "{adw_id}",
+  "task_id": "{task_id}",
   "is_decomposed": true,
   "tasks": [
     {
       "id": "task-1-data-model",
       "title": "Add data model and migration",
       "stage": 1,
-      "spec_file": "specs/subtasks/{adw_id}/task-1-data-model.md",
+      "spec_file": "specs/subtasks/{task_id}/task-1-data-model.md",
       "depends_on": [],
       "status": "pending",
       "context_files": ["src/db/schema/", "src/db/index.ts"]
@@ -145,7 +147,7 @@ After writing any mini-specs, output the task graph as **clean, parseable JSON**
       "id": "task-2-service-layer",
       "title": "Implement service layer",
       "stage": 2,
-      "spec_file": "specs/subtasks/{adw_id}/task-2-service-layer.md",
+      "spec_file": "specs/subtasks/{task_id}/task-2-service-layer.md",
       "depends_on": ["task-1-data-model"],
       "status": "pending",
       "context_files": ["src/lib/"]
@@ -156,7 +158,7 @@ After writing any mini-specs, output the task graph as **clean, parseable JSON**
 
 ## Workflow
 
-1. **Read** — Parse the spec file path and ADW ID from arguments
+1. **Read** — Parse the spec file path and task ID from arguments
 2. **Analyze** — Count steps, files, and evaluate complexity
 3. **Decide** — Single task or decompose based on heuristics
 4. **Write** — Create mini-spec files if decomposing
@@ -167,10 +169,10 @@ After writing any mini-specs, output the task graph as **clean, parseable JSON**
 <If: spec has fewer than 5 steps and fewer than 8 files>
 <Then: output single-task graph with is_decomposed: false. Do not create mini-specs.>
 
-<If: steps have clear data → service → route → template layering>
+<If: steps have clear data → service → route → UI layering>
 <Then: decompose by layer, with each layer in a successive stage.>
 
-<If: multiple independent UI components (templates, pages)>
+<If: multiple independent UI components or pages>
 <Then: assign them the same stage so they can run in parallel.>
 
 <If: spec includes seed data or test fixtures>
@@ -200,15 +202,15 @@ After writing any mini-specs, output the task graph as **clean, parseable JSON**
 **Output:**
 ```json
 {
-  "parent_spec": "specs/feat-ADW-050-health-check.md",
-  "adw_id": "ADW-050",
+  "parent_spec": "specs/feat-health-check.md",
+  "task_id": "health-check",
   "is_decomposed": false,
   "tasks": [
     {
       "id": "single",
       "title": "Add health check endpoint",
       "stage": 1,
-      "spec_file": "specs/feat-ADW-050-health-check.md",
+      "spec_file": "specs/feat-health-check.md",
       "depends_on": [],
       "status": "pending",
       "context_files": []
@@ -219,7 +221,7 @@ After writing any mini-specs, output the task graph as **clean, parseable JSON**
 
 ### Example 2: Large Feature (Decomposed)
 
-**Spec:** 10 implementation steps, 15 files touched (model + service + routes + templates + seed data)
+**Spec:** 10 implementation steps, 15 files touched (model + service + routes + pages + seed data)
 
 **Output:** Task graph with 5 sub-tasks across 3 stages:
 - Stage 1: Data model

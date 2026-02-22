@@ -12,15 +12,25 @@ description: >
 
 # Purpose
 
-Creates a GitHub pull request from the current branch by analyzing commits against `origin/main`, generating a conventional title and structured body, and submitting via `gh pr create`.
+Creates a GitHub pull request from the current branch by analyzing commits against the base branch, generating a conventional title and structured body, and submitting via `gh pr create`.
 
 ## Variables
 
-- `argument` — Optional spec file path to enrich the PR body with specification context, optionally followed by a screenshot directory path (e.g., `specs/feat-abc.md review_img`).
+- `argument` — Optional spec file path to enrich the PR body with specification context (e.g., `specs/feat-auth.md`).
 
 ## Instructions
 
-### Step 1: Validate Branch State
+### Step 1: Determine the Base Branch
+
+Identify the default branch:
+
+```bash
+git remote show origin | grep 'HEAD branch' | sed 's/.*: //'
+```
+
+Use this as the base branch for comparisons. Falls back to `main` if detection fails.
+
+### Step 2: Validate Branch State
 
 Run these checks before proceeding:
 
@@ -28,8 +38,8 @@ Run these checks before proceeding:
 git branch --show-current
 ```
 
-- If on `main` or `master`, stop and tell the user they need to be on a feature branch.
-- If the branch has no commits ahead of `origin/main`, stop and tell the user there is nothing to PR.
+- If on the default branch (e.g., `main` or `master`), stop and tell the user they need to be on a feature branch.
+- If the branch has no commits ahead of the base branch, stop and tell the user there is nothing to PR.
 
 Check for uncommitted changes:
 
@@ -39,23 +49,23 @@ git status --short
 
 - If there are uncommitted changes, stop and tell the user to commit first (suggest `/commit`).
 
-### Step 2: Gather Context
+### Step 3: Gather Context
 
-Fetch the latest main from origin to ensure comparisons are accurate:
+Fetch the latest base branch from origin to ensure comparisons are accurate:
 
 ```bash
-git fetch origin main
+git fetch origin <base-branch>
 ```
 
 Run these commands to understand the branch:
 
 ```bash
-git log origin/main..HEAD --oneline
+git log origin/<base-branch>..HEAD --oneline
 ```
 
 If a spec path is provided as an argument, read the spec file to enrich the PR body.
 
-### Step 3: Generate PR Content
+### Step 4: Generate PR Content
 
 **Title:** Derive from the commit history. If there is a single commit, use its message. If there are multiple commits, summarize the overall change. Keep under 70 characters.
 
@@ -73,7 +83,7 @@ If a spec path is provided as an argument, read the spec file to enrich the PR b
 
 If a spec path was provided, add a `## Spec` section referencing it.
 
-### Step 4: Push and Create PR
+### Step 5: Push and Create PR
 
 Push the branch to origin:
 
@@ -92,63 +102,23 @@ EOF
 )"
 ```
 
-### Step 5: Post Screenshot Comment
-
-After the PR is created, check if there are new screenshots on this branch to include in a comment.
-
-1. Check for new `.png` files on this branch vs `origin/main` in `docs/assets/`:
-   ```bash
-   git diff origin/main --name-only -- docs/assets/*.png
-   ```
-
-2. If no new screenshots are found, skip this step entirely.
-
-3. If screenshots exist, get the GitHub repo info and current branch:
-   ```bash
-   gh repo view --json owner,name --jq '.owner.login + "/" + .name'
-   git branch --show-current
-   ```
-
-4. Build a markdown comment body with embedded images using GitHub blob URLs with `?raw=true` in the format `https://github.com/{owner}/{repo}/blob/{branch}/docs/assets/{filename}?raw=true`. This format works for both public and private repos because it goes through GitHub's authenticated web server. Use image alt text derived from the filename (strip the number prefix, replace underscores with spaces). Arrange images in a table layout for readability:
-   ```markdown
-   ## Screenshots
-
-   | | |
-   |---|---|
-   | ![description](url) | ![description](url) |
-   ```
-
-5. Post the comment using `gh pr comment`:
-   ```bash
-   gh pr comment --body "$(cat <<'EOF'
-   ## Screenshots
-
-   ...image markdown table...
-   EOF
-   )"
-   ```
-
-6. This step is **best-effort** — if `gh pr comment` fails, log the error but do not fail the overall PR creation.
-
 ### Step 6: Report
 
 Print the PR URL returned by `gh pr create`.
 
-If the command included an ADW ID context, include it in the output for traceability.
-
 ## Workflow
 
-1. **Validate** — Confirm feature branch, no uncommitted changes, commits ahead of main
-2. **Gather** — Fetch latest main, collect commit log, read spec if provided
-3. **Generate** — Create conventional title and structured body
-4. **Push** — Push branch to origin with tracking, create PR
-5. **Screenshot** — Post PR comment with embedded screenshots (if any new `.png` files exist on the branch)
+1. **Base branch** — Detect the default branch (main/master/etc.)
+2. **Validate** — Confirm feature branch, no uncommitted changes, commits ahead of base
+3. **Gather** — Fetch latest base, collect commit log, read spec if provided
+4. **Generate** — Create conventional title and structured body
+5. **Push** — Push branch to origin with tracking, create PR
 6. **Report** — Return the PR URL
 
 ## Cookbook
 
 <If: `gh` command not found>
-<Then: tell the user to install GitHub CLI (`brew install gh` on macOS or see https://cli.github.com/) and authenticate with `gh auth login`>
+<Then: tell the user to install GitHub CLI (see https://cli.github.com/) and authenticate with `gh auth login`>
 
 <If: not authenticated with GitHub>
 <Then: tell the user to run `gh auth login` and follow the prompts>
@@ -156,25 +126,19 @@ If the command included an ADW ID context, include it in the output for traceabi
 <If: a PR already exists for this branch>
 <Then: run `gh pr view --web` to open the existing PR instead of creating a duplicate>
 
-<If: branch has no commits ahead of origin/main>
+<If: branch has no commits ahead of the base branch>
 <Then: tell the user there are no changes to PR and check if work was done on a different branch>
 
 <If: invoked with a spec path>
 <Then: use the spec to write better summary bullets but don't paste the entire spec into the body>
 
-<If: new screenshots exist in `docs/assets/` on the branch>
-<Then: post a PR comment with embedded images in a table layout using raw GitHub URLs — this makes UI changes visible to reviewers without checking out the branch>
-
-<If: `gh pr comment` fails when posting screenshots>
-<Then: log the error but do not fail the PR creation — screenshot comments are best-effort and should never block shipping>
-
 ## Validation
 
 Before creating the PR:
 
-- Branch is not `main` or `master`
+- Branch is not the default branch (main/master/etc.)
 - No uncommitted changes exist
-- At least one commit exists ahead of `origin/main`
+- At least one commit exists ahead of the base branch
 - `gh auth status` succeeds (user is authenticated)
 - Title is under 70 characters
 - Title does not mention "claude", "ai", "automated", or "copilot"
@@ -189,7 +153,7 @@ Before creating the PR:
 
 1. Check branch: `feat/add-auth` — not main, good
 2. Check status: clean working tree
-3. Fetch `origin/main`, gather: 3 commits ahead of `origin/main`
+3. Fetch base, gather: 3 commits ahead
 4. Generate title from commits: "feat: add user authentication"
 5. Generate body with summary
 6. Push and create PR
@@ -197,37 +161,12 @@ Before creating the PR:
 
 ### Example 2: PR with Spec Reference
 
-**User says:** "/pr specs/feat-ADW-042-auth.md"
+**User says:** "/pr specs/feat-auth.md"
 
 **Actions:**
 
 1. Validate branch state
-2. Read `specs/feat-ADW-042-auth.md` for context
+2. Read `specs/feat-auth.md` for context
 3. Generate richer PR body incorporating spec details
 4. Push and create PR
 5. Report URL
-
-### Example 3: PR from ADW Pipeline with Screenshots
-
-**Invoked by SDLC as:** "/pr specs/feat-abc123-feature.md review_img"
-
-**Actions:**
-
-1. Validate branch state, gather commits, read spec
-2. Generate conventional title and structured body from spec context
-3. Push and create PR
-4. Detect new `.png` files on the branch in `docs/assets/`
-5. Build raw GitHub URLs for each screenshot and post a PR comment with embedded images in a table layout
-6. Report PR URL
-
-### Example 4: PR from ADW Pipeline without Screenshots
-
-**Invoked by SDLC as:** "/pr specs/feat-abc123-backend-fix.md"
-
-**Actions:**
-
-1. Validate branch state, gather commits, read spec
-2. Generate conventional title and structured body
-3. Push and create PR
-4. No new `.png` files found — skip screenshot comment step
-5. Report PR URL

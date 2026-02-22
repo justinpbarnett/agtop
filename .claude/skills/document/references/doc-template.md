@@ -7,7 +7,6 @@ Use this template when generating feature documentation. Omit sections that do n
 ```md
 # <Feature Title>
 
-**ADW ID:** <adw_id>
 **Date:** <current date>
 **Specification:** <spec_path or "N/A">
 
@@ -17,7 +16,7 @@ Use this template when generating feature documentation. Omit sections that do n
 
 ## Screenshots
 
-<Only include if documentation_screenshots_dir was provided and screenshots were copied>
+<Only include if screenshots were provided and copied to docs/assets/>
 
 ![<Description>](assets/<screenshot-filename.png>)
 
@@ -96,7 +95,7 @@ Use this template when generating feature documentation. Omit sections that do n
 
 ### Testing
 - Describe how to verify the feature works
-- Include specific commands if applicable (e.g., `just test`)
+- Include specific commands if applicable
 - Mention any test data setup required
 
 ### Notes

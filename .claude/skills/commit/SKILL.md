@@ -51,13 +51,11 @@ Analyze the diff and group changed files by logical concern, then immediately ex
 **Grouping rules:**
 
 - Files that work together for a single feature or fix belong in one commit
-- A Drizzle schema change and its corresponding migration are one commit
-- A new route (page.tsx) and its related components or server actions are one commit
-- Dependency updates (`package.json`, `pnpm-lock.yaml`) are their own commit
+- A schema/model change and its corresponding migration are one commit
+- A new route/endpoint and its related components or handlers are one commit
+- Dependency updates (lockfiles, manifests) are their own commit
 - Formatting or lint fixes are their own commit, separate from behavioral changes
 - Test additions/changes accompany the code they test, unless they are standalone test improvements
-- Spec files (`specs/`) are their own commit unless created alongside the implementation
-- Skill or ADW changes (`.claude/skills/`, `adws/`) are their own commit
 - Config changes group with the feature they support, or stand alone if independent
 
 **Revert test:** "Could this commit be reverted independently without breaking the other changes?" If yes, it should be its own commit.
@@ -124,25 +122,25 @@ Before executing each commit:
 
 **User says:** "commit my changes"
 
-**Git status shows:** Modified `src/app/oauth/page.tsx`, `src/lib/planning-center.ts`, `src/app/oauth/actions.ts`
+**Git status shows:** Modified `src/auth/login.ts`, `src/auth/session.ts`, `src/auth/middleware.ts`
 
 **Result:**
 ```
 Planned commits:
-1. feat: add planning center oauth flow — src/app/oauth/page.tsx, src/lib/planning-center.ts, src/app/oauth/actions.ts
+1. feat: add session-based authentication — src/auth/login.ts, src/auth/session.ts, src/auth/middleware.ts
 ```
 
 ### Example 2: Mixed Changes Requiring Multiple Commits
 
 **User says:** "commit everything"
 
-**Git status shows:** Modified `package.json`, `pnpm-lock.yaml`, new `src/db/schema/users.ts`, modified `src/app/oauth/page.tsx`, new `src/__tests__/oauth.test.ts`, modified `justfile`
+**Git status shows:** Modified `package.json`, `package-lock.json`, new `src/models/user.ts`, modified `src/routes/auth.ts`, new `tests/auth.test.ts`, modified `Makefile`
 
 **Result:**
 ```
 Planned commits:
-1. chore: update dependencies — package.json, pnpm-lock.yaml
-2. feat: add user schema and oauth page — src/db/schema/users.ts, src/app/oauth/page.tsx
-3. test: add oauth integration tests — src/__tests__/oauth.test.ts
-4. chore: add new just recipes — justfile
+1. chore: update dependencies — package.json, package-lock.json
+2. feat: add user model and auth route — src/models/user.ts, src/routes/auth.ts
+3. test: add auth integration tests — tests/auth.test.ts
+4. chore: add new build recipes — Makefile
 ```

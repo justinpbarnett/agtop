@@ -6,8 +6,8 @@ description: >
   test, build, ci). Use when a user wants to spec, plan, design, or
   scope work before implementing it. Triggers on "spec a feature", "create
   a spec", "scope this work", "design the approach", "write a spec for",
-  "spec this fix", "spec a refactor", or when given an ADW ID with a task
-  description. Do NOT use for implementing or executing existing specs.
+  "spec this fix", "spec a refactor", or when given a task description.
+  Do NOT use for implementing or executing existing specs.
   Do NOT use for quick single-line changes that need no spec phase.
 ---
 
@@ -17,7 +17,7 @@ Creates structured, type-aware implementation specs for development tasks. Categ
 
 ## Variables
 
-- `argument` — Task description and optional ADW ID (e.g., "spec a feature for engagement scoring — ADW ID is ADW-042").
+- `argument` — Task description and optional tracking ID (e.g., "spec a feature for user authentication — ID is AUTH-042").
 
 ## Instructions
 
@@ -27,7 +27,7 @@ Identify these values from the user's request:
 
 - **type** — One of the types below. If ambiguous, ask the user. If they say "feature" map to `feat`, "bug" or "bugfix" map to `fix`, etc.
 - **prompt** — The task description. If not provided, stop and ask.
-- **adw_id** — An optional tracking identifier. If not provided, use a descriptive slug (no timestamp needed).
+- **task_id** — An optional tracking identifier. If not provided, use a descriptive slug.
 
 ### Task Types
 
@@ -51,16 +51,7 @@ Before writing the spec, research the codebase to understand context:
 2. Explore files relevant to the task using Glob and Grep
 3. Read existing code that will be modified or extended
 4. Check `specs/` for related specs that provide context
-5. Review `justfile` for available development commands
-
-**Codebase Structure:**
-
-- `README.md` — Project overview and instructions (start here)
-- `adws/` — AI Developer Workflow scripts and modules
-- `src/` — Application layer (Next.js + React + TypeScript)
-- `.claude/commands/` — Claude command templates
-- `specs/` — Specification and plan documents
-- `justfile` — Development task runner
+5. Check for a task runner (justfile, Makefile, package.json scripts) to understand available commands
 
 ### Step 3: Select Template and Create Spec
 
@@ -71,10 +62,10 @@ Based on the task type, consult `references/spec-templates.md` for the appropria
 - **refactor**, **perf** — Use the Architectural Spec template
 - **chore**, **docs**, **test**, **build**, **ci** — Use the Lightweight Spec template
 
-Create the spec file at: `specs/{type}-{adw_id}-{descriptive-name}.md`
+Create the spec file at: `specs/{type}-{task_id}-{descriptive-name}.md`
 
 - Replace `{type}` with the conventional commit type
-- Replace `{adw_id}` with the provided ID or descriptive slug
+- Replace `{task_id}` with the provided ID or descriptive slug
 - Replace `{descriptive-name}` with a short kebab-case name derived from the task
 
 Fill in every section of the template. Replace all placeholders with researched, specific content. Do not leave generic placeholder text.
@@ -102,7 +93,7 @@ Return the path to the created spec file.
 
 ## Workflow
 
-1. **Gather** — Extract type, prompt, and ADW ID from the user's request
+1. **Gather** — Extract type, prompt, and task ID from the user's request
 2. **Research** — Read relevant codebase files, existing specs, and project docs
 3. **Template** — Select the appropriate spec template for the task type
 4. **Create** — Write the spec file with researched, specific content
@@ -114,7 +105,7 @@ Return the path to the created spec file.
 <If: user doesn't specify a task type>
 <Then: ask the user to clarify. Present the type table and let them choose. If it's clearly one type from context, infer it and state your reasoning.>
 
-<If: no adw_id provided>
+<If: no task_id provided>
 <Then: generate a descriptive kebab-case slug from the task description. Do not block on missing IDs.>
 
 <If: spec references files that don't exist>
@@ -128,24 +119,24 @@ Return the path to the created spec file.
 
 ## Validation
 
-Run these commands to verify the spec is sound:
+Run these checks to verify the spec is sound:
 
-- `just check` — Ensure existing code still passes lint, typecheck, and tests
 - Review that the spec file exists in `specs/` with the correct naming convention
 - Verify all files referenced in "Relevant Files" exist or are clearly marked as new
+- Verify validation commands are appropriate for the project's tooling
 
 ## Examples
 
 ### Example 1: Speccing a New Feature
 
-**User says:** "Spec a feature for household engagement scoring — ADW ID is ADW-042"
+**User says:** "Spec a feature for user authentication"
 
 **Actions:**
 
-1. Type: `feat`, adw_id: `ADW-042`, prompt extracted from request
-2. Research codebase: read README.md, explore app/ models, check existing specs
+1. Type: `feat`, task_id: `user-auth`, prompt extracted from request
+2. Research codebase: read README.md, explore relevant directories, check existing specs
 3. Use Comprehensive Spec template from `references/spec-templates.md`
-4. Create `specs/feat-ADW-042-household-engagement-scoring.md`
+4. Create `specs/feat-user-auth.md`
 5. Report the file path
 
 ### Example 2: Speccing a Bug Fix
@@ -154,20 +145,20 @@ Run these commands to verify the spec is sound:
 
 **Actions:**
 
-1. Type: `fix`, adw_id: `health-endpoint-db-error`, prompt extracted
-2. Research: read src/app/api/health/route.ts, src/db/index.ts
+1. Type: `fix`, task_id: `health-endpoint-db-error`, prompt extracted
+2. Research: read the health endpoint code, database connection code
 3. Use Diagnostic Spec template
 4. Create `specs/fix-health-endpoint-db-error.md`
 5. Report the file path
 
 ### Example 3: Speccing a Chore
 
-**User says:** "Spec — update all dependencies to latest versions, ADW-099"
+**User says:** "Spec — update all dependencies to latest versions"
 
 **Actions:**
 
-1. Type: `chore`, adw_id: `ADW-099`, prompt extracted
-2. Research: read package.json, pnpm-lock.yaml, check for breaking changes
+1. Type: `chore`, task_id: `update-dependencies`, prompt extracted
+2. Research: read dependency manifests, check for breaking changes
 3. Use Lightweight Spec template
-4. Create `specs/chore-ADW-099-update-dependencies.md`
+4. Create `specs/chore-update-dependencies.md`
 5. Report the file path

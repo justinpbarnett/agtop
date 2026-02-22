@@ -18,7 +18,7 @@ Executes a development plan by methodically reading the spec, implementing each 
 
 ## Variables
 
-- `argument` — Spec file path (e.g., `specs/feat-ADW-042-engagement-scoring.md`) or inline plan text.
+- `argument` — Spec file path (e.g., `specs/feat-user-auth.md`) or inline plan text.
 
 ## Instructions
 
@@ -26,7 +26,7 @@ Executes a development plan by methodically reading the spec, implementing each 
 
 Determine the plan source from the user's input:
 
-- **Spec file path** — If the user provides a path (e.g., `specs/feat-ADW-042-engagement-scoring.md`), read that file.
+- **Spec file path** — If the user provides a path (e.g., `specs/feat-user-auth.md`), read that file.
 - **Inline plan text** — If the user provides the plan directly as text, use it as-is.
 - **Ambiguous reference** — If the user says "implement the plan" without specifying which one, check `specs/` for recent plans and ask the user to confirm which one.
 
@@ -39,7 +39,18 @@ Read the plan thoroughly. Identify:
 5. **New files** — What files need to be created?
 6. **Validation criteria** — How do we know the implementation is correct?
 
-### Step 2: Research Before Coding
+### Step 2: Discover Validation Commands
+
+Before coding, identify which validation commands are available:
+
+1. Check for a `justfile` — look for `check`, `lint`, `typecheck`, `test` recipes
+2. Check `package.json` — look for `lint`, `typecheck`, `test`, `check` scripts
+3. Check for a `Makefile` — look for `check`, `lint`, `test` targets
+4. For Python projects — check for `pytest`, `ruff`, `mypy` in config
+
+Note the discovered commands for use in Steps 4 and 5.
+
+### Step 3: Research Before Coding
 
 Before writing any code, build context:
 
@@ -48,7 +59,7 @@ Before writing any code, build context:
 3. Identify any conflicts between the plan and current codebase state
 4. If the plan references files that don't exist or have changed significantly since the plan was written, pause and inform the user
 
-### Step 3: Implement
+### Step 4: Implement
 
 Work through the plan's tasks in dependency order:
 
@@ -58,24 +69,17 @@ Work through the plan's tasks in dependency order:
 - **Self-documenting code** — Write clear, readable code rather than adding comments
 - **Run validation early** — After completing a logical chunk of work, run available checks to catch issues before they compound
 
-When implementing, use the project's tools:
+### Step 5: Validate
 
-- `just lint` — Check linting after code changes
-- `just typecheck` — Verify type correctness
-- `just test` — Run the test suite
-- `just check` — Run all checks (lint + typecheck + test)
+After all implementation tasks are complete, run the full validation suite using the commands discovered in Step 2:
 
-### Step 4: Validate
-
-After all implementation tasks are complete, run the full validation suite:
-
-1. Run `just check` to verify lint, typecheck, and tests all pass
+1. Run the project's check/lint/typecheck/test commands
 2. If any checks fail, fix the issues before proceeding
 3. Review your changes holistically — do they match the plan's intent?
 4. Verify all new files referenced in the plan were created
 5. Verify all modifications described in the plan were made
 
-### Step 5: Report
+### Step 6: Report
 
 Summarize the completed work:
 
@@ -97,10 +101,11 @@ Format the report as:
 ## Workflow
 
 1. **Parse** — Read the plan, identify scope, tasks, dependencies, and files
-2. **Research** — Read all relevant files to understand current codebase state
-3. **Implement** — Execute tasks in dependency order, validating after each chunk
-4. **Validate** — Run `just check` to confirm lint, types, and tests pass
-5. **Report** — Bullet summary + `git diff --stat`
+2. **Discover** — Detect available validation commands from the project's tooling
+3. **Research** — Read all relevant files to understand current codebase state
+4. **Implement** — Execute tasks in dependency order, validating after each chunk
+5. **Validate** — Run discovered check commands to confirm everything passes
+6. **Report** — Bullet summary + `git diff --stat`
 
 ## Cookbook
 
@@ -108,7 +113,7 @@ Format the report as:
 <Then: inform the user of the discrepancy. Suggest either updating the plan or adapting the implementation to the current state. Do not silently ignore missing files.>
 
 <If: validation fails after implementation>
-<Then: read the error output carefully. Fix issues iteratively — address one category at a time (lint first, then types, then tests). Re-run `just check` after each fix.>
+<Then: read the error output carefully. Fix issues iteratively — address one category at a time (lint first, then types, then tests). Re-run checks after each fix.>
 
 <If: plan is ambiguous or incomplete>
 <Then: ask the user for clarification on specific ambiguous points. Do not guess at requirements — it's faster to ask than to implement the wrong thing and redo it.>
@@ -119,12 +124,15 @@ Format the report as:
 <If: implementation reveals the plan missed something>
 <Then: implement what's needed to make the feature work, note the addition in the report>
 
+<If: no validation commands are available>
+<Then: note this in the report. Manually review the changes for correctness.>
+
 ## Validation
 
 Before reporting completion, verify:
 
 - All plan tasks have been addressed
-- `just check` passes (lint + typecheck + test)
+- Available validation commands pass (lint + typecheck + tests)
 - No placeholder or TODO code was left behind
 - Changes match the plan's stated scope — nothing more, nothing less
 
@@ -132,16 +140,17 @@ Before reporting completion, verify:
 
 ### Example 1: Implementing a Spec File
 
-**User says:** "Implement specs/feat-ADW-042-engagement-scoring.md"
+**User says:** "Implement specs/feat-user-auth.md"
 
 **Actions:**
 
-1. Read `specs/feat-ADW-042-engagement-scoring.md`
-2. Identify tasks, relevant files, and dependencies
-3. Read all relevant files to understand current state
-4. Implement each task in order, running `just check` after each chunk
-5. Validate all checks pass
-6. Report summary and `git diff --stat`
+1. Read `specs/feat-user-auth.md`
+2. Discover validation commands (e.g., `just check` or `npm test`)
+3. Identify tasks, relevant files, and dependencies
+4. Read all relevant files to understand current state
+5. Implement each task in order, running checks after each chunk
+6. Validate all checks pass
+7. Report summary and `git diff --stat`
 
 ### Example 2: Implementing an Inline Plan
 
@@ -150,10 +159,10 @@ Before reporting completion, verify:
 **Actions:**
 
 1. Parse inline plan text
-2. Research: read `src/app/`, check existing route patterns in the App Router
+2. Research: read existing route structure and patterns
 3. Implement the endpoint following existing patterns
 4. Add tests for the new endpoint
-5. Run `just check` to validate
+5. Run validation commands
 6. Report summary and `git diff --stat`
 
 ### Example 3: Implementing from Context

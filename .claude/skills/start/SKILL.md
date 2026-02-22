@@ -1,18 +1,19 @@
 ---
 name: start
 description: >
-  Start your applications by running the development server and any
-  required background services. Use when a user wants to start, run,
-  launch, or boot the application. Triggers on "start the app",
-  "run the dev server", "launch the application", "boot it up",
-  "start the server", "spin up the app". Do NOT use for running tests,
-  linting, or type checking (use just commands directly). Do NOT use
+  Start your application by discovering and running the development server
+  and any required background services. Auto-detects the start command from
+  the project's task runner or package manager. Use when a user wants to
+  start, run, launch, or boot the application. Triggers on "start the app",
+  "run the dev server", "launch the application", "boot it up", "start the
+  server", "spin up the app". Do NOT use for running tests, linting, or
+  type checking (use the test skill or run commands directly). Do NOT use
   for deploying to production or staging environments.
 ---
 
 # Purpose
 
-Starts the Keep development server and any required background services so the application is available for local development.
+Starts the project's development server and any required background services so the application is available for local development.
 
 ## Variables
 
@@ -20,68 +21,81 @@ This skill requires no additional input.
 
 ## Instructions
 
-### Step 1: Start the Development Server
+### Step 1: Discover the Start Command
 
-Run the development server using the justfile recipe:
+Detect how to start the project by checking these sources in priority order:
 
-```
-just start
-```
+1. **justfile** — Look for a `start` or `dev` recipe
+2. **package.json** — Look for `start`, `dev`, or `serve` scripts
+3. **Makefile** — Look for a `start`, `dev`, or `run` target
+4. **docker-compose.yml** — If present, use `docker compose up`
+5. **pyproject.toml / manage.py** — For Python projects, look for `runserver` or similar
 
-This launches the Next.js development server:
+If no start command is found, report this and ask the user how to start their project.
 
-- Serves the application on `http://localhost:3000`
-- Enables hot-reload so code changes take effect immediately
+### Step 2: Start the Development Server
 
-### Step 2: Confirm Startup
+Run the discovered start command. Common examples:
+
+- `just start` or `just dev`
+- `npm run dev` or `pnpm dev`
+- `make dev`
+- `docker compose up`
+- `python manage.py runserver`
+
+### Step 3: Confirm Startup
 
 Watch the output for successful startup indicators:
 
-- `Ready on http://localhost:3000` or `Local: http://localhost:3000` confirms the server is live
+- A URL like `http://localhost:<port>` confirms the server is live
 - Any startup errors (missing dependencies, database connection failures) will appear in the output
 
 If startup fails, see the Cookbook section below.
 
 ## Workflow
 
-1. **Start** — Run `just start` to launch the development server
-2. **Confirm** — Verify the server starts without errors and is reachable at `http://localhost:3000`
+1. **Discover** — Detect the start command from justfile, package.json, Makefile, etc.
+2. **Start** — Run the discovered command
+3. **Confirm** — Verify the server starts without errors
 
 ## Cookbook
 
-<If: ModuleNotFoundError or missing dependencies>
-<Then: run `pnpm install` to install/update dependencies, then retry `just start`>
+<If: missing dependencies or ModuleNotFoundError>
+<Then: install dependencies first (e.g., `npm install`, `pnpm install`, `pip install -r requirements.txt`, `bundle install`) then retry the start command>
 
-<If: port 3000 already in use>
-<Then: find and stop the conflicting process with `lsof -i :3000`, or kill it with `kill $(lsof -ti :3000)`, then retry `just start`>
+<If: port already in use>
+<Then: find and stop the conflicting process with `lsof -i :<port>`, or kill it with `kill $(lsof -ti :<port>)`, then retry>
 
 <If: database connection failure>
-<Then: check that the database is running and that `.env.local` has correct connection settings. Run `just db-upgrade` if migrations are pending.>
+<Then: check that the database is running and that environment files (.env, .env.local) have correct connection settings. Run any pending migrations.>
+
+<If: no start command discovered>
+<Then: ask the user how to start their project. Common patterns: framework CLIs (next dev, rails server, flask run), docker compose, or custom scripts.>
 
 <If: server runs in the foreground and user needs a terminal>
-<Then: Next.js watches for file changes and hot-reloads automatically — use a separate terminal for other commands.>
+<Then: the dev server watches for file changes and hot-reloads — use a separate terminal for other commands.>
 
 ## Validation
 
 - The server process starts without errors
-- `http://localhost:3000` is reachable
+- A local URL is reachable
 
 ## Examples
 
-### Example 1: Direct Start Request
+### Example 1: Node.js Project with justfile
 
 **User says:** "Start the app"
+**Discovery:** justfile has a `start` recipe
+**Action:** Run `just start`
 
-**Actions:**
-
-1. Run `just start`
-2. Confirm server starts successfully
-
-### Example 2: Run the Server
+### Example 2: Python Django Project
 
 **User says:** "Run the dev server"
+**Discovery:** manage.py found
+**Action:** Run `python manage.py runserver`
 
-**Actions:**
+### Example 3: Docker-based Project
 
-1. Run `just start`
-2. Confirm server starts successfully
+**User says:** "Boot it up"
+**Discovery:** docker-compose.yml found
+**Action:** Run `docker compose up`

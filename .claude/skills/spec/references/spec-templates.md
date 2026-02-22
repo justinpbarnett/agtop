@@ -12,7 +12,7 @@ All plans start with this metadata block:
 ## Metadata
 
 type: `{type}`
-adw_id: `{adw_id}`
+task_id: `{task_id}`
 prompt: `{prompt}`
 ```
 
@@ -28,7 +28,7 @@ Use for new features. Most detailed template with user stories, phased implement
 ## Metadata
 
 type: `feat`
-adw_id: `{adw_id}`
+task_id: `{task_id}`
 prompt: `{prompt}`
 
 ## Feature Description
@@ -107,8 +107,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 Execute these commands to validate the feature is complete:
 
-<list specific commands to validate the work>
-- Example: `just check` — Run full lint, typecheck, and test suite
+<list specific commands to validate the work — use the project's actual check/lint/test commands>
 
 ## Notes
 
@@ -127,7 +126,7 @@ Use for bug fixes. Focuses on reproduction, root cause analysis, and regression 
 ## Metadata
 
 type: `fix`
-adw_id: `{adw_id}`
+task_id: `{task_id}`
 prompt: `{prompt}`
 
 ## Bug Description
@@ -190,8 +189,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 Execute these commands to validate the fix is complete:
 
-<list specific commands to validate the work>
-- Example: `just check` — Run full lint, typecheck, and test suite
+<list specific commands to validate the work — use the project's actual check/lint/test commands>
 
 ## Notes
 
@@ -212,7 +210,7 @@ Use for refactoring and performance improvements. Emphasizes current vs. target 
 ## Metadata
 
 type: `refactor`
-adw_id: `{adw_id}`
+task_id: `{task_id}`
 prompt: `{prompt}`
 
 ## Refactor Description
@@ -265,8 +263,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 Execute these commands to validate the refactor is complete:
 
-<list specific commands to validate the work>
-- Example: `just check` — Run full lint, typecheck, and test suite
+<list specific commands to validate the work — use the project's actual check/lint/test commands>
 
 ## Notes
 
@@ -281,7 +278,7 @@ Execute these commands to validate the refactor is complete:
 ## Metadata
 
 type: `perf`
-adw_id: `{adw_id}`
+task_id: `{task_id}`
 prompt: `{prompt}`
 
 ## Performance Issue Description
@@ -340,8 +337,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 Execute these commands to validate the optimization is complete:
 
-<list specific commands to validate the work>
-- Example: `just check` — Run full lint, typecheck, and test suite
+<list specific commands to validate the work — use the project's actual check/lint/test commands>
 
 ## Notes
 
@@ -360,7 +356,7 @@ Use for maintenance tasks, documentation, tests, build changes, and CI updates. 
 ## Metadata
 
 type: `{type}`
-adw_id: `{adw_id}`
+task_id: `{task_id}`
 prompt: `{prompt}`
 
 ## Description
@@ -397,8 +393,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 Execute these commands to validate the task is complete:
 
-<list specific commands to validate the work>
-- Example: `just check` — Run full lint, typecheck, and test suite
+<list specific commands to validate the work — use the project's actual check/lint/test commands>
 
 ## Notes
 
