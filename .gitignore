@@ -1,0 +1,6 @@
+bin/
+*.exe
+.agtop/worktrees/
+.DS_Store
+*.swp
+*.swo

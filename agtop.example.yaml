@@ -1,0 +1,85 @@
+# agtop.yaml — project-level configuration
+project:
+  name: my-project
+  root: .
+  test_command: "npm test"
+  dev_server:
+    command: "npm run dev"
+    port_strategy: hash # hash | sequential | fixed
+    base_port: 3100
+
+runtime:
+  default: claude # claude | opencode
+  claude:
+    model: sonnet # Default model for skills
+    permission_mode: acceptEdits # acceptEdits | acceptAll | manual
+    max_turns: 50
+    allowed_tools:
+      - Read
+      - Write
+      - Edit
+      - MultiEdit
+      - Bash
+      - Grep
+      - Glob
+  opencode:
+    model: anthropic/claude-sonnet-4-5
+    agent: build
+
+workflows:
+  build:
+    skills: [route, build, test]
+  plan-build:
+    skills: [route, spec, build, test]
+  sdlc:
+    skills: [route, spec, decompose, build, test, review, document]
+  quick-fix:
+    skills: [build, test, commit]
+
+skills:
+  route:
+    model: haiku
+    timeout: 60
+  spec:
+    model: opus
+  decompose:
+    model: opus
+  build:
+    model: sonnet
+    timeout: 300
+    parallel: true
+  test:
+    model: sonnet
+    timeout: 120
+  review:
+    model: opus
+  document:
+    model: haiku
+  commit:
+    model: haiku
+    timeout: 30
+  pr:
+    model: haiku
+    timeout: 30
+
+safety:
+  blocked_patterns:
+    - 'rm\s+-[rf]+\s+/'
+    - 'git\s+push.*--force'
+    - 'DROP\s+TABLE'
+    - '(curl|wget).*\|\s*(sh|bash)'
+    - 'chmod\s+777'
+    - ":(){.*};" # Fork bomb
+  allow_overrides: false
+
+limits:
+  max_tokens_per_run: 500000
+  max_cost_per_run: 5.00
+  max_concurrent_runs: 5
+  rate_limit_backoff: 60 # Seconds
+
+ui:
+  theme: default
+  show_token_count: true
+  show_cost: true
+  log_scroll_speed: 5
