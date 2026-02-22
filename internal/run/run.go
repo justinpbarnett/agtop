@@ -1,5 +1,7 @@
 package run
 
+import "time"
+
 type State string
 
 const (
@@ -15,15 +17,19 @@ const (
 )
 
 type Run struct {
-	ID         string
-	Branch     string
-	Worktree   string
-	Workflow   string
-	State      State
-	SkillIndex int
-	SkillTotal int
-	Tokens     int
-	Cost       float64
+	ID           string
+	Branch       string
+	Worktree     string
+	Workflow     string
+	State        State
+	SkillIndex   int
+	SkillTotal   int
+	Tokens       int
+	Cost         float64
+	CreatedAt    time.Time
+	StartedAt    time.Time
+	CurrentSkill string
+	Error        string
 }
 
 func (r *Run) StatusIcon() string {
@@ -51,4 +57,11 @@ func (r *Run) IsTerminal() bool {
 		return true
 	}
 	return false
+}
+
+func (r *Run) ElapsedTime() time.Duration {
+	if r.StartedAt.IsZero() {
+		return 0
+	}
+	return time.Since(r.StartedAt)
 }
