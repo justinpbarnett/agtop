@@ -420,3 +420,86 @@ Custom content.
 		t.Errorf("opts.Model = %q, want %q (runtime default)", opts.Model, "sonnet")
 	}
 }
+
+func TestRegistrySkillForRunOpenCode(t *testing.T) {
+	tmp := t.TempDir()
+	skillsDir := filepath.Join(tmp, ".agtop", "skills")
+
+	writeSkillFile(t, skillsDir, "build", `---
+name: build
+description: Build skill
+---
+
+Build content.
+`)
+
+	cfg := testConfig()
+	cfg.Runtime.Default = "opencode"
+	cfg.Runtime.OpenCode.Model = "anthropic/claude-sonnet-4-5"
+	cfg.Runtime.OpenCode.Agent = "code"
+
+	reg := NewRegistry(cfg)
+	_ = reg.Load(tmp)
+
+	skill, opts, ok := reg.SkillForRun("build")
+	if !ok {
+		t.Fatal("SkillForRun('build') returned false")
+	}
+	if skill.Name != "build" {
+		t.Errorf("skill.Name = %q, want %q", skill.Name, "build")
+	}
+	// Model should come from OpenCode config since skill config overrides to "sonnet"
+	// but the registry mergeConfig already set skill.Model to "sonnet" from defaults.
+	// The skill-level model override takes precedence.
+	if opts.Model != "sonnet" {
+		t.Errorf("opts.Model = %q, want %q (skill config override)", opts.Model, "sonnet")
+	}
+	if opts.Agent != "code" {
+		t.Errorf("opts.Agent = %q, want %q", opts.Agent, "code")
+	}
+	// OpenCode doesn't set these
+	if opts.MaxTurns != 0 {
+		t.Errorf("opts.MaxTurns = %d, want 0 for OpenCode", opts.MaxTurns)
+	}
+	if opts.PermissionMode != "" {
+		t.Errorf("opts.PermissionMode = %q, want empty for OpenCode", opts.PermissionMode)
+	}
+	if len(opts.AllowedTools) != 0 {
+		t.Errorf("opts.AllowedTools = %v, want empty for OpenCode", opts.AllowedTools)
+	}
+}
+
+func TestRegistrySkillForRunOpenCodeFallsBackToRuntimeDefault(t *testing.T) {
+	tmp := t.TempDir()
+	skillsDir := filepath.Join(tmp, ".agtop", "skills")
+
+	// Skill with no model override
+	writeSkillFile(t, skillsDir, "custom", `---
+name: custom
+description: Custom skill
+---
+
+Custom content.
+`)
+
+	cfg := testConfig()
+	cfg.Runtime.Default = "opencode"
+	cfg.Runtime.OpenCode.Model = "openai/gpt-4o"
+	cfg.Runtime.OpenCode.Agent = "build"
+	// Remove any config override for "custom"
+	delete(cfg.Skills, "custom")
+
+	reg := NewRegistry(cfg)
+	_ = reg.Load(tmp)
+
+	_, opts, ok := reg.SkillForRun("custom")
+	if !ok {
+		t.Fatal("SkillForRun('custom') returned false")
+	}
+	if opts.Model != "openai/gpt-4o" {
+		t.Errorf("opts.Model = %q, want %q (opencode runtime default)", opts.Model, "openai/gpt-4o")
+	}
+	if opts.Agent != "build" {
+		t.Errorf("opts.Agent = %q, want %q", opts.Agent, "build")
+	}
+}

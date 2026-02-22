@@ -142,12 +142,20 @@ func (r *Registry) Names() []string {
 // SkillForRun returns the skill and fully-resolved RunOptions for a given
 // skill name. Model resolution order: skill config → skill frontmatter →
 // runtime default. WorkDir is NOT set — the caller provides it.
+// The runtime config used depends on config.Runtime.Default.
 func (r *Registry) SkillForRun(name string) (*Skill, runtime.RunOptions, bool) {
 	skill, ok := r.skills[name]
 	if !ok {
 		return nil, runtime.RunOptions{}, false
 	}
 
+	if r.cfg.Runtime.Default == "opencode" {
+		return r.skillForOpenCode(skill)
+	}
+	return r.skillForClaude(skill)
+}
+
+func (r *Registry) skillForClaude(skill *Skill) (*Skill, runtime.RunOptions, bool) {
 	model := r.cfg.Runtime.Claude.Model
 	if skill.Model != "" {
 		model = skill.Model
@@ -164,6 +172,18 @@ func (r *Registry) SkillForRun(name string) (*Skill, runtime.RunOptions, bool) {
 		MaxTurns:       r.cfg.Runtime.Claude.MaxTurns,
 		PermissionMode: r.cfg.Runtime.Claude.PermissionMode,
 	}
+	return skill, opts, true
+}
 
+func (r *Registry) skillForOpenCode(skill *Skill) (*Skill, runtime.RunOptions, bool) {
+	model := r.cfg.Runtime.OpenCode.Model
+	if skill.Model != "" {
+		model = skill.Model
+	}
+
+	opts := runtime.RunOptions{
+		Model: model,
+		Agent: r.cfg.Runtime.OpenCode.Agent,
+	}
 	return skill, opts, true
 }
