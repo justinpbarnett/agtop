@@ -5,23 +5,16 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/justinpbarnett/agtop/internal/run"
 )
 
 type StatusBar struct {
-	width       int
-	totalRuns   int
-	activeRuns  int
-	totalTokens int
-	totalCost   float64
+	width int
+	store *run.Store
 }
 
-func NewStatusBar() StatusBar {
-	return StatusBar{
-		totalRuns:   4,
-		activeRuns:  2,
-		totalTokens: 69400,
-		totalCost:   2.04,
-	}
+func NewStatusBar(store *run.Store) StatusBar {
+	return StatusBar{store: store}
 }
 
 func (s StatusBar) Update(msg tea.Msg) (StatusBar, tea.Cmd) {
@@ -30,7 +23,7 @@ func (s StatusBar) Update(msg tea.Msg) (StatusBar, tea.Cmd) {
 
 func (s StatusBar) View() string {
 	left := fmt.Sprintf("Runs: %d (%d active) │ Tokens: %s │ Cost: $%.2f",
-		s.totalRuns, s.activeRuns, formatTokens(s.totalTokens), s.totalCost)
+		s.store.Count(), s.store.ActiveRuns(), formatTokens(s.store.TotalTokens()), s.store.TotalCost())
 	right := "j/k:navigate  h/l:tabs  Tab:focus  ?:help  q:quit"
 
 	gap := s.width - len(left) - len(right) - 2

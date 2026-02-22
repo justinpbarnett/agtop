@@ -5,8 +5,8 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/jpb/agtop/internal/config"
-	"github.com/jpb/agtop/internal/tui"
+	"github.com/justinpbarnett/agtop/internal/config"
+	"github.com/justinpbarnett/agtop/internal/tui"
 )
 
 func main() {

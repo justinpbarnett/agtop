@@ -16,7 +16,7 @@ The goal is a project that runs `go build ./...` and `go vet ./...` cleanly afte
 
 ### New Files
 
-- `go.mod` — Go module definition (`github.com/jpb/agtop`, Go 1.23+)
+- `go.mod` — Go module definition (`github.com/justinpbarnett/agtop`, Go 1.23+)
 - `cmd/agtop/main.go` — Entry point; initializes Bubble Tea app and runs it
 - `internal/tui/app.go` — Root Bubble Tea model (stub `Init`, `Update`, `View`)
 - `internal/tui/runlist.go` — Run list panel model (stub)
@@ -59,7 +59,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 ### 1. Initialize Go Module
 
-- Run `go mod init github.com/jpb/agtop`
+- Run `go mod init github.com/justinpbarnett/agtop`
 - Require Go 1.23 or later in `go.mod`
 
 ### 2. Create Directory Structure

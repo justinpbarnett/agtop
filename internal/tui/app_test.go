@@ -5,7 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/jpb/agtop/internal/config"
+	"github.com/justinpbarnett/agtop/internal/config"
+	"github.com/justinpbarnett/agtop/internal/run"
 )
 
 func newTestApp() App {
@@ -183,5 +184,29 @@ func TestAppKeyRoutingToDetail(t *testing.T) {
 	a = sendKey(a, "l")
 	if a.detail.activeTab != initial+1 {
 		t.Errorf("expected tab to advance, got %d", a.detail.activeTab)
+	}
+}
+
+func TestAppStoreUpdate(t *testing.T) {
+	a := newTestApp()
+	a = sendWindowSize(a, 120, 40)
+
+	// Update a run in the store
+	a.store.Update("001", func(r *run.Run) {
+		r.Tokens = 99999
+		r.Cost = 9.99
+	})
+
+	// Send RunStoreUpdatedMsg
+	m, _ := a.Update(RunStoreUpdatedMsg{})
+	a = m.(App)
+
+	view := a.View()
+	if !strings.Contains(view, "$9.99") || !strings.Contains(view, "100.0k") {
+		// StatusBar should reflect new totals from store
+		statusView := a.statusBar.View()
+		if !strings.Contains(statusView, "100.0k") {
+			t.Error("expected status bar to reflect updated token total")
+		}
 	}
 }

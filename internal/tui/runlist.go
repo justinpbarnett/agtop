@@ -5,50 +5,75 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/jpb/agtop/internal/run"
+	"github.com/justinpbarnett/agtop/internal/run"
 )
 
 type RunList struct {
-	runs     []run.Run
-	selected int
-	width    int
-	height   int
-	lastKeyG bool
-	lastKeyT time.Time
+	store       *run.Store
+	filtered    []run.Run
+	selected    int
+	offset      int
+	width       int
+	height      int
+	lastKeyG    bool
+	lastKeyT    time.Time
+	filterActive bool
+	filterText  string
+	filterInput textinput.Model
 }
 
-func NewRunList() RunList {
-	return RunList{
-		runs: []run.Run{
-			{ID: "001", Branch: "feat/add-auth", Workflow: "sdlc", State: run.StateRunning, SkillIndex: 3, SkillTotal: 7, Tokens: 12400, Cost: 0.42},
-			{ID: "002", Branch: "fix/nav-bug", Workflow: "quick-fix", State: run.StatePaused, SkillIndex: 1, SkillTotal: 3, Tokens: 3100, Cost: 0.08},
-			{ID: "003", Branch: "feat/dashboard", Workflow: "plan-build", State: run.StateReviewing, SkillIndex: 3, SkillTotal: 3, Tokens: 45200, Cost: 1.23},
-			{ID: "004", Branch: "fix/css-overflow", Workflow: "build", State: run.StateFailed, SkillIndex: 2, SkillTotal: 3, Tokens: 8700, Cost: 0.31},
-		},
+func NewRunList(store *run.Store) RunList {
+	ti := textinput.New()
+	ti.Placeholder = "Filter..."
+	ti.CharLimit = 64
+
+	rl := RunList{
+		store:       store,
+		filterInput: ti,
 	}
+	rl.applyFilter()
+	return rl
 }
 
 func (r RunList) Update(msg tea.Msg) (RunList, tea.Cmd) {
 	switch msg := msg.(type) {
+	case RunStoreUpdatedMsg:
+		r.applyFilter()
+		r.clampSelection()
+		return r, nil
+
 	case tea.KeyMsg:
+		if r.filterActive {
+			return r.updateFilter(msg)
+		}
+
 		switch msg.String() {
+		case "/":
+			r.filterActive = true
+			r.filterInput.Focus()
+			return r, nil
 		case "j", "down":
-			if r.selected < len(r.runs)-1 {
+			if r.selected < len(r.filtered)-1 {
 				r.selected++
+				r.scrollToSelection()
 			}
 			r.lastKeyG = false
 		case "k", "up":
 			if r.selected > 0 {
 				r.selected--
+				r.scrollToSelection()
 			}
 			r.lastKeyG = false
 		case "G":
-			r.selected = len(r.runs) - 1
+			r.selected = max(len(r.filtered)-1, 0)
+			r.scrollToSelection()
 			r.lastKeyG = false
 		case "g":
 			if r.lastKeyG && time.Since(r.lastKeyT) < 500*time.Millisecond {
 				r.selected = 0
+				r.scrollToSelection()
 				r.lastKeyG = false
 			} else {
 				r.lastKeyG = true
@@ -61,13 +86,56 @@ func (r RunList) Update(msg tea.Msg) (RunList, tea.Cmd) {
 	return r, nil
 }
 
+func (r *RunList) updateFilter(msg tea.KeyMsg) (RunList, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEnter, tea.KeyEsc:
+		if msg.Type == tea.KeyEsc {
+			r.filterText = ""
+			r.filterInput.SetValue("")
+		}
+		r.filterActive = false
+		r.filterInput.Blur()
+		r.applyFilter()
+		r.clampSelection()
+		return *r, nil
+	}
+
+	var cmd tea.Cmd
+	r.filterInput, cmd = r.filterInput.Update(msg)
+	r.filterText = r.filterInput.Value()
+	r.applyFilter()
+	r.clampSelection()
+	return *r, cmd
+}
+
 func (r RunList) View() string {
-	if len(r.runs) == 0 {
+	if len(r.filtered) == 0 {
+		if r.filterActive || r.filterText != "" {
+			return r.renderFilterBar() + "\nNo matching runs."
+		}
 		return "No runs. Press n to start one."
 	}
 
 	var b strings.Builder
-	for i, rn := range r.runs {
+
+	if r.filterActive {
+		b.WriteString(r.renderFilterBar())
+		b.WriteString("\n")
+	}
+
+	visibleRows := r.visibleRows()
+	end := r.offset + visibleRows
+	if end > len(r.filtered) {
+		end = len(r.filtered)
+	}
+
+	if r.offset > 0 {
+		b.WriteString(DimStyle.Render("  ▲"))
+		b.WriteString("\n")
+	}
+
+	for i := r.offset; i < end; i++ {
+		rn := r.filtered[i]
 		icon := RunStateStyle(rn.State).Render(rn.StatusIcon())
 
 		progress := ""
@@ -87,24 +155,111 @@ func (r RunList) View() string {
 		}
 
 		b.WriteString(line)
-		if i < len(r.runs)-1 {
+		if i < end-1 {
 			b.WriteString("\n")
 		}
 	}
+
+	if end < len(r.filtered) {
+		b.WriteString("\n")
+		b.WriteString(DimStyle.Render("  ▼"))
+	}
+
 	return b.String()
 }
 
 func (r *RunList) SetSize(w, h int) {
 	r.width = w
 	r.height = h
+	r.filterInput.Width = w - 4
+	r.clampSelection()
 }
 
 func (r RunList) SelectedRun() *run.Run {
-	if len(r.runs) == 0 {
+	if len(r.filtered) == 0 || r.selected >= len(r.filtered) {
 		return nil
 	}
-	rn := r.runs[r.selected]
+	rn := r.filtered[r.selected]
 	return &rn
+}
+
+func (r *RunList) applyFilter() {
+	all := r.store.List()
+	if r.filterText == "" {
+		r.filtered = all
+		return
+	}
+	query := strings.ToLower(r.filterText)
+	filtered := make([]run.Run, 0, len(all))
+	for _, rn := range all {
+		if strings.Contains(strings.ToLower(rn.ID), query) ||
+			strings.Contains(strings.ToLower(rn.Branch), query) ||
+			strings.Contains(strings.ToLower(rn.Workflow), query) ||
+			strings.Contains(strings.ToLower(string(rn.State)), query) ||
+			strings.Contains(strings.ToLower(rn.CurrentSkill), query) {
+			filtered = append(filtered, rn)
+		}
+	}
+	r.filtered = filtered
+}
+
+func (r *RunList) clampSelection() {
+	if len(r.filtered) == 0 {
+		r.selected = 0
+		r.offset = 0
+		return
+	}
+	if r.selected >= len(r.filtered) {
+		r.selected = len(r.filtered) - 1
+	}
+	if r.selected < 0 {
+		r.selected = 0
+	}
+	r.scrollToSelection()
+}
+
+func (r *RunList) scrollToSelection() {
+	visible := r.visibleRows()
+	if visible <= 0 {
+		return
+	}
+	if r.selected < r.offset {
+		r.offset = r.selected
+	}
+	if r.selected >= r.offset+visible {
+		r.offset = r.selected - visible + 1
+	}
+	maxOffset := len(r.filtered) - visible
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if r.offset > maxOffset {
+		r.offset = maxOffset
+	}
+	if r.offset < 0 {
+		r.offset = 0
+	}
+}
+
+func (r RunList) visibleRows() int {
+	rows := r.height
+	if r.filterActive {
+		rows--
+	}
+	if r.offset > 0 {
+		rows--
+	}
+	if r.offset+rows < len(r.filtered) {
+		rows--
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	return rows
+}
+
+func (r RunList) renderFilterBar() string {
+	return "/ " + r.filterInput.View()
 }
 
 func formatTokens(n int) string {

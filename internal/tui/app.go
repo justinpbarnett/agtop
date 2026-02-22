@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/jpb/agtop/internal/config"
+	"github.com/justinpbarnett/agtop/internal/config"
+	"github.com/justinpbarnett/agtop/internal/run"
 )
 
 const minWidth = 40
@@ -11,6 +14,7 @@ const minHeight = 10
 
 type App struct {
 	config       *config.Config
+	store        *run.Store
 	width        int
 	height       int
 	focusedPanel int
@@ -23,20 +27,24 @@ type App struct {
 }
 
 func NewApp(cfg *config.Config) App {
-	rl := NewRunList()
+	store := run.NewStore()
+	seedMockData(store)
+
+	rl := NewRunList(store)
 	d := NewDetail()
 	d.SetRun(rl.SelectedRun())
 	return App{
 		config:    cfg,
+		store:     store,
 		runList:   rl,
 		detail:    d,
-		statusBar: NewStatusBar(),
+		statusBar: NewStatusBar(store),
 		keys:      DefaultKeyMap(),
 	}
 }
 
 func (a App) Init() tea.Cmd {
-	return nil
+	return listenForChanges(a.store.Changes())
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -51,6 +59,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CloseModalMsg:
 		a.modal = nil
 		return a, nil
+
+	case RunStoreUpdatedMsg:
+		var cmd tea.Cmd
+		a.runList, cmd = a.runList.Update(msg)
+		a.detail.SetRun(a.runList.SelectedRun())
+		cmds := []tea.Cmd{cmd, listenForChanges(a.store.Changes())}
+		return a, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
 		if a.modal != nil {
@@ -155,4 +170,62 @@ func (a App) panelDimensions() (leftWidth, rightWidth, contentHeight int) {
 		contentHeight = 0
 	}
 	return
+}
+
+func listenForChanges(ch <-chan struct{}) tea.Cmd {
+	return func() tea.Msg {
+		<-ch
+		return RunStoreUpdatedMsg{}
+	}
+}
+
+func seedMockData(store *run.Store) {
+	now := time.Now()
+	store.Add(&run.Run{
+		Branch:       "feat/add-auth",
+		Workflow:     "sdlc",
+		State:        run.StateRunning,
+		SkillIndex:   3,
+		SkillTotal:   7,
+		Tokens:       12400,
+		Cost:         0.42,
+		CreatedAt:    now.Add(-30 * time.Minute),
+		StartedAt:    now.Add(-25 * time.Minute),
+		CurrentSkill: "build",
+	})
+	store.Add(&run.Run{
+		Branch:       "fix/nav-bug",
+		Workflow:     "quick-fix",
+		State:        run.StatePaused,
+		SkillIndex:   1,
+		SkillTotal:   3,
+		Tokens:       3100,
+		Cost:         0.08,
+		CreatedAt:    now.Add(-20 * time.Minute),
+		StartedAt:    now.Add(-18 * time.Minute),
+		CurrentSkill: "build",
+	})
+	store.Add(&run.Run{
+		Branch:       "feat/dashboard",
+		Workflow:     "plan-build",
+		State:        run.StateReviewing,
+		SkillIndex:   3,
+		SkillTotal:   3,
+		Tokens:       45200,
+		Cost:         1.23,
+		CreatedAt:    now.Add(-60 * time.Minute),
+		StartedAt:    now.Add(-55 * time.Minute),
+	})
+	store.Add(&run.Run{
+		Branch:       "fix/css-overflow",
+		Workflow:     "build",
+		State:        run.StateFailed,
+		SkillIndex:   2,
+		SkillTotal:   3,
+		Tokens:       8700,
+		Cost:         0.31,
+		CreatedAt:    now.Add(-10 * time.Minute),
+		StartedAt:    now.Add(-8 * time.Minute),
+		Error:        "build skill timed out",
+	})
 }

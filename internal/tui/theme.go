@@ -2,7 +2,7 @@ package tui
 
 import (
 	"github.com/charmbracelet/lipgloss"
-	"github.com/jpb/agtop/internal/run"
+	"github.com/justinpbarnett/agtop/internal/run"
 )
 
 var (

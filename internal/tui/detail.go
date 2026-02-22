@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/jpb/agtop/internal/run"
+	"github.com/justinpbarnett/agtop/internal/run"
 )
 
 type Detail struct {

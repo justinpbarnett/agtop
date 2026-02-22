@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/jpb/agtop/internal/run"
+	"github.com/justinpbarnett/agtop/internal/run"
 )
 
 func TestDetailTabCycle(t *testing.T) {
