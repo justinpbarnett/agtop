@@ -1,4 +1,5 @@
 bin/
+agtop
 *.exe
 .agtop/worktrees/
 .DS_Store
