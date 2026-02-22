@@ -18,6 +18,12 @@ type LogLineMsg struct {
 	RunID string
 }
 
+// SkillResult captures the outcome of a single skill subprocess execution.
+type SkillResult struct {
+	ResultText string // Final result text from the stream-json "result" event
+	Err        error  // Non-nil if the process exited with error
+}
+
 type ManagedProcess struct {
 	proc   *runtime.Process
 	cancel context.CancelFunc
@@ -170,7 +176,181 @@ func (m *Manager) ActiveCount() int {
 	return len(m.processes)
 }
 
+// StartSkill launches a skill subprocess and returns a channel that receives
+// the result when the process exits. Unlike Start(), it does NOT set the run's
+// terminal state (Completed/Failed) on exit — the caller (executor) manages state.
+// It still logs to the ring buffer and tracks tokens/cost.
+func (m *Manager) StartSkill(runID string, prompt string, opts runtime.RunOptions) (<-chan SkillResult, error) {
+	m.mu.Lock()
+	if _, exists := m.processes[runID]; exists {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("run %s already has an active process", runID)
+	}
+	m.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	proc, err := m.rt.Start(ctx, prompt, opts)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("start process: %w", err)
+	}
+
+	buf := m.buffers[runID]
+	if buf == nil {
+		buf = NewRingBuffer(10000)
+	}
+
+	mp := &ManagedProcess{
+		proc:   proc,
+		cancel: cancel,
+		runID:  runID,
+	}
+
+	resultCh := make(chan SkillResult, 1)
+
+	m.mu.Lock()
+	m.processes[runID] = mp
+	m.buffers[runID] = buf
+	m.mu.Unlock()
+
+	m.store.Update(runID, func(r *run.Run) {
+		r.PID = proc.PID
+	})
+
+	go m.consumeSkillEvents(runID, mp, buf, resultCh)
+
+	return resultCh, nil
+}
+
+func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *RingBuffer, resultCh chan<- SkillResult) {
+	defer close(resultCh)
+
+	var resultText string
+
+	skillName := func() string {
+		r, ok := m.store.Get(runID)
+		if !ok {
+			return ""
+		}
+		return r.CurrentSkill
+	}
+
+	parser := NewStreamParser(mp.proc.Stdout, 256)
+	go parser.Parse(context.Background())
+
+	go func() {
+		scanner := bufio.NewScanner(mp.proc.Stderr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			ts := time.Now().Format("15:04:05")
+			skill := skillName()
+			var formatted string
+			if skill != "" {
+				formatted = fmt.Sprintf("[%s %s] %s", ts, skill, line)
+			} else {
+				formatted = fmt.Sprintf("[%s] %s", ts, line)
+			}
+			buf.Append(formatted)
+			m.sendLogLine(runID)
+		}
+	}()
+
+	for event := range parser.Events() {
+		ts := time.Now().Format("15:04:05")
+		skill := skillName()
+
+		var logLine string
+		switch event.Type {
+		case EventText:
+			if skill != "" {
+				logLine = fmt.Sprintf("[%s %s] %s", ts, skill, event.Text)
+			} else {
+				logLine = fmt.Sprintf("[%s] %s", ts, event.Text)
+			}
+		case EventToolUse:
+			if skill != "" {
+				logLine = fmt.Sprintf("[%s %s] Tool: %s", ts, skill, event.ToolName)
+			} else {
+				logLine = fmt.Sprintf("[%s] Tool: %s", ts, event.ToolName)
+			}
+		case EventToolResult:
+			if skill != "" {
+				logLine = fmt.Sprintf("[%s %s] Result: %s", ts, skill, event.Text)
+			} else {
+				logLine = fmt.Sprintf("[%s] Result: %s", ts, event.Text)
+			}
+		case EventResult:
+			resultText = event.Text
+
+			if event.Usage != nil {
+				m.store.Update(runID, func(r *run.Run) {
+					r.Tokens += event.Usage.TotalTokens
+					r.Cost += event.Usage.CostUSD
+				})
+
+				if m.cfg.MaxCostPerRun > 0 || m.cfg.MaxTokensPerRun > 0 {
+					r, ok := m.store.Get(runID)
+					if ok {
+						if m.cfg.MaxCostPerRun > 0 && r.Cost >= m.cfg.MaxCostPerRun {
+							warning := fmt.Sprintf("[%s] WARNING: Cost threshold exceeded ($%.2f >= $%.2f), pausing run", ts, r.Cost, m.cfg.MaxCostPerRun)
+							buf.Append(warning)
+							_ = m.Pause(runID)
+						}
+						if m.cfg.MaxTokensPerRun > 0 && r.Tokens >= m.cfg.MaxTokensPerRun {
+							warning := fmt.Sprintf("[%s] WARNING: Token threshold exceeded (%d >= %d), pausing run", ts, r.Tokens, m.cfg.MaxTokensPerRun)
+							buf.Append(warning)
+							_ = m.Pause(runID)
+						}
+					}
+				}
+
+				if skill != "" {
+					logLine = fmt.Sprintf("[%s %s] Completed — %d tokens, $%.4f", ts, skill, event.Usage.TotalTokens, event.Usage.CostUSD)
+				} else {
+					logLine = fmt.Sprintf("[%s] Completed — %d tokens, $%.4f", ts, event.Usage.TotalTokens, event.Usage.CostUSD)
+				}
+			}
+		case EventError:
+			if skill != "" {
+				logLine = fmt.Sprintf("[%s %s] ERROR: %s", ts, skill, event.Text)
+			} else {
+				logLine = fmt.Sprintf("[%s] ERROR: %s", ts, event.Text)
+			}
+		case EventRaw:
+			if skill != "" {
+				logLine = fmt.Sprintf("[%s %s] %s", ts, skill, event.Text)
+			} else {
+				logLine = fmt.Sprintf("[%s] %s", ts, event.Text)
+			}
+		}
+
+		if logLine != "" {
+			buf.Append(logLine)
+			m.sendLogLine(runID)
+		}
+	}
+
+	var exitErr error
+	select {
+	case exitErr = <-mp.proc.Done:
+	default:
+		exitErr = <-mp.proc.Done
+	}
+
+	m.store.Update(runID, func(r *run.Run) {
+		r.PID = 0
+	})
+
+	m.mu.Lock()
+	delete(m.processes, runID)
+	m.mu.Unlock()
+
+	resultCh <- SkillResult{ResultText: resultText, Err: exitErr}
+}
+
 func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffer) {
+	var resultText string
+
 	// Get current skill name for log prefix
 	skillName := func() string {
 		r, ok := m.store.Get(runID)
@@ -227,6 +407,8 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 				logLine = fmt.Sprintf("[%s] Result: %s", ts, event.Text)
 			}
 		case EventResult:
+			resultText = event.Text
+
 			if event.Usage != nil {
 				m.store.Update(runID, func(r *run.Run) {
 					r.Tokens += event.Usage.TotalTokens
@@ -275,6 +457,8 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 			m.sendLogLine(runID)
 		}
 	}
+
+	_ = resultText // captured for future use (e.g., executor chaining)
 
 	// Wait for process to exit
 	var exitErr error
