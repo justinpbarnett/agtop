@@ -19,6 +19,7 @@ type RunOptions struct {
 	AllowedTools   []string
 	MaxTurns       int
 	PermissionMode string
+	Agent          string
 }
 
 type Process struct {
