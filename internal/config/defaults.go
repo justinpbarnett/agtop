@@ -1,5 +1,7 @@
 package config
 
+func boolPtr(b bool) *bool { return &b }
+
 func DefaultConfig() Config {
 	return Config{
 		Project: ProjectConfig{
@@ -29,15 +31,15 @@ func DefaultConfig() Config {
 			"quick-fix":  {Skills: []string{"build", "test", "commit"}},
 		},
 		Skills: map[string]SkillConfig{
-			"route":    {Model: "haiku", Timeout: 60},
-			"spec":     {Model: "opus"},
+			"route":     {Model: "haiku", Timeout: 60},
+			"spec":      {Model: "opus"},
 			"decompose": {Model: "opus"},
-			"build":    {Model: "sonnet", Timeout: 300, Parallel: true},
-			"test":     {Model: "sonnet", Timeout: 120},
-			"review":   {Model: "opus"},
-			"document": {Model: "haiku"},
-			"commit":   {Model: "haiku", Timeout: 30},
-			"pr":       {Model: "haiku", Timeout: 30},
+			"build":     {Model: "sonnet", Timeout: 300, Parallel: true},
+			"test":      {Model: "sonnet", Timeout: 120},
+			"review":    {Model: "opus"},
+			"document":  {Model: "haiku"},
+			"commit":    {Model: "haiku", Timeout: 30},
+			"pr":        {Model: "haiku", Timeout: 30},
 		},
 		Safety: SafetyConfig{
 			BlockedPatterns: []string{
@@ -48,7 +50,7 @@ func DefaultConfig() Config {
 				`chmod\s+777`,
 				`:(){.*};`,
 			},
-			AllowOverrides: false,
+			AllowOverrides: boolPtr(false),
 		},
 		Limits: LimitsConfig{
 			MaxTokensPerRun:   500000,
@@ -58,8 +60,8 @@ func DefaultConfig() Config {
 		},
 		UI: UIConfig{
 			Theme:          "default",
-			ShowTokenCount: true,
-			ShowCost:       true,
+			ShowTokenCount: boolPtr(true),
+			ShowCost:       boolPtr(true),
 			LogScrollSpeed: 5,
 		},
 	}

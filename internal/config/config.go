@@ -53,7 +53,7 @@ type SkillConfig struct {
 
 type SafetyConfig struct {
 	BlockedPatterns []string `yaml:"blocked_patterns"`
-	AllowOverrides  bool     `yaml:"allow_overrides"`
+	AllowOverrides  *bool    `yaml:"allow_overrides"`
 }
 
 type LimitsConfig struct {
@@ -65,7 +65,7 @@ type LimitsConfig struct {
 
 type UIConfig struct {
 	Theme          string `yaml:"theme"`
-	ShowTokenCount bool   `yaml:"show_token_count"`
-	ShowCost       bool   `yaml:"show_cost"`
+	ShowTokenCount *bool  `yaml:"show_token_count"`
+	ShowCost       *bool  `yaml:"show_cost"`
 	LogScrollSpeed int    `yaml:"log_scroll_speed"`
 }

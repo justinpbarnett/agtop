@@ -5,11 +5,18 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jpb/agtop/internal/config"
 	"github.com/jpb/agtop/internal/tui"
 )
 
 func main() {
-	model := tui.NewApp()
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	model := tui.NewApp(cfg)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

@@ -2,12 +2,15 @@ package tui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jpb/agtop/internal/config"
 )
 
-type App struct{}
+type App struct {
+	config *config.Config
+}
 
-func NewApp() App {
-	return App{}
+func NewApp(cfg *config.Config) App {
+	return App{config: cfg}
 }
 
 func (a App) Init() tea.Cmd {
