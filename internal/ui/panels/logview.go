@@ -239,11 +239,11 @@ func (l LogView) View() string {
 
 	var title string
 	if l.activeTab == tabLog {
-		title = "3 " + styles.TitleStyle.Render(logLabel) +
+		title = "[3] " + styles.TitleStyle.Render(logLabel) +
 			styles.TextDimStyle.Render(" │ ") +
 			styles.TextDimStyle.Render(diffLabel)
 	} else {
-		title = "3 " + styles.TextDimStyle.Render(logLabel) +
+		title = "[3] " + styles.TextDimStyle.Render(logLabel) +
 			styles.TextDimStyle.Render(" │ ") +
 			styles.TitleStyle.Render(diffLabel)
 	}

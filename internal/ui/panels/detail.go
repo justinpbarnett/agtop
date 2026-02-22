@@ -23,7 +23,7 @@ func NewDetail() Detail {
 }
 
 func (d Detail) View() string {
-	title := "2 Details"
+	title := "[2] Details"
 
 	var keybinds []border.Keybind
 

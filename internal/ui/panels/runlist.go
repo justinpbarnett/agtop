@@ -133,7 +133,7 @@ func (r RunList) View() string {
 			activeCount++
 		}
 	}
-	title := fmt.Sprintf("1 Runs (%d active)", activeCount)
+	title := fmt.Sprintf("[1] Runs (%d active)", activeCount)
 
 	var keybinds []border.Keybind
 	if r.focused {
