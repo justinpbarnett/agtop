@@ -25,11 +25,18 @@ const (
 	numPanels    = 3
 )
 
+// StartRunMsg triggers the executor to create and start a new run.
+type StartRunMsg struct {
+	Prompt   string
+	Workflow string
+}
+
 type App struct {
 	config       *config.Config
 	store        *run.Store
 	manager      *process.Manager
 	registry     *engine.Registry
+	executor     *engine.Executor
 	width        int
 	height       int
 	layout       layout.Layout
@@ -63,6 +70,11 @@ func NewApp(cfg *config.Config) App {
 		log.Printf("warning: skill registry load: %v", err)
 	}
 
+	var exec *engine.Executor
+	if mgr != nil {
+		exec = engine.NewExecutor(store, mgr, reg, cfg)
+	}
+
 	seedMockData(store)
 
 	rl := panels.NewRunList(store)
@@ -81,6 +93,7 @@ func NewApp(cfg *config.Config) App {
 		store:     store,
 		manager:   mgr,
 		registry:  reg,
+		executor:  exec,
 		runList:   rl,
 		logView:   lv,
 		detail:    d,
@@ -113,6 +126,24 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.syncSelection()
 		cmds := []tea.Cmd{cmd, listenForChanges(a.store.Changes())}
 		return a, tea.Batch(cmds...)
+
+	case StartRunMsg:
+		if a.executor != nil {
+			projectRoot := a.config.Project.Root
+			if projectRoot == "" || projectRoot == "." {
+				projectRoot, _ = os.Getwd()
+			}
+			newRun := &run.Run{
+				Branch:    fmt.Sprintf("agtop/run"),
+				Worktree:  projectRoot,
+				Workflow:  msg.Workflow,
+				State:     run.StateQueued,
+				CreatedAt: time.Now(),
+			}
+			runID := a.store.Add(newRun)
+			a.executor.Execute(runID, msg.Workflow, msg.Prompt)
+		}
+		return a, nil
 
 	case process.LogLineMsg:
 		selected := a.runList.SelectedRun()
@@ -165,6 +196,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.helpOverlay = nil
 			}
 			return a, nil
+		case "n":
+			return a, func() tea.Msg {
+				return StartRunMsg{
+					Prompt:   "placeholder task",
+					Workflow: "build",
+				}
+			}
 		}
 
 		return a.routeKey(msg)
@@ -213,6 +251,10 @@ func (a App) Manager() *process.Manager {
 
 func (a App) Registry() *engine.Registry {
 	return a.registry
+}
+
+func (a App) Executor() *engine.Executor {
+	return a.executor
 }
 
 func (a App) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
