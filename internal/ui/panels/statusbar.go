@@ -3,6 +3,7 @@ package panels
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/justinpbarnett/agtop/internal/run"
@@ -10,9 +11,16 @@ import (
 	"github.com/justinpbarnett/agtop/internal/ui/text"
 )
 
+const flashDurationVal = 5 * time.Second
+
+// FlashDuration returns how long the status bar flash is shown.
+func FlashDuration() time.Duration { return flashDurationVal }
+
 type StatusBar struct {
-	width int
-	store *run.Store
+	width      int
+	store      *run.Store
+	flash      string
+	flashUntil time.Time
 }
 
 func NewStatusBar(store *run.Store) StatusBar {
@@ -46,13 +54,24 @@ func (s StatusBar) View() string {
 		lipgloss.NewStyle().Foreground(styles.StatusSuccess).Render(fmt.Sprintf("%d done", done)),
 	)
 
+	totalTokens := s.store.TotalTokens()
+	tokensStr := styles.TextSecondaryStyle.Render(
+		fmt.Sprintf("Tokens: %s", text.FormatTokens(totalTokens)),
+	)
+
 	costStr := lipgloss.NewStyle().Foreground(styles.CostColor(totalCost)).Render(
 		fmt.Sprintf("Total: %s", text.FormatCost(totalCost)),
 	)
 
 	helpHint := styles.TextSecondaryStyle.Render("?:help")
 
-	left := " " + version + sep + counts + sep + costStr
+	left := " " + version + sep + counts + sep + tokensStr + sep + costStr
+
+	if s.flash != "" && time.Now().Before(s.flashUntil) {
+		flashStr := lipgloss.NewStyle().Foreground(styles.StatusError).Bold(true).Render("⚠ " + s.flash)
+		left += sep + flashStr
+	}
+
 	right := helpHint + " "
 
 	leftWidth := lipgloss.Width(left)
@@ -63,6 +82,16 @@ func (s StatusBar) View() string {
 	}
 
 	return left + strings.Repeat(" ", gap) + right
+}
+
+func (s *StatusBar) SetFlash(msg string) {
+	s.flash = msg
+	s.flashUntil = time.Now().Add(flashDurationVal)
+}
+
+func (s *StatusBar) ClearFlash() {
+	s.flash = ""
+	s.flashUntil = time.Time{}
 }
 
 func (s *StatusBar) SetSize(w int) {

@@ -130,5 +130,32 @@ func (d Detail) renderDetails() string {
 		fmt.Fprintf(&b, "  %s\n", styledRight("Error", r.Error, errorStyle))
 	}
 
+	// Per-skill cost breakdown
+	if len(r.SkillCosts) > 0 {
+		b.WriteString("\n")
+		headerStyle := styles.TextSecondaryStyle
+		b.WriteString(fmt.Sprintf("  %s\n", headerStyle.Render(fmt.Sprintf("%-12s %8s %8s", "Skill", "Tokens", "Cost"))))
+
+		for _, sc := range r.SkillCosts {
+			name := sc.SkillName
+			if name == "" {
+				name = "—"
+			}
+			scCostStyle := lipgloss.NewStyle().Foreground(styles.CostColor(sc.CostUSD))
+			b.WriteString(fmt.Sprintf("  %-12s %8s %s\n",
+				valStyle.Render(text.Truncate(name, 12)),
+				valStyle.Render(text.FormatTokens(sc.TotalTokens)),
+				scCostStyle.Render(text.FormatCost(sc.CostUSD)),
+			))
+		}
+
+		b.WriteString(fmt.Sprintf("  %s\n", headerStyle.Render(strings.Repeat("─", 32))))
+		b.WriteString(fmt.Sprintf("  %-12s %8s %s\n",
+			valStyle.Render("Total"),
+			valStyle.Render(text.FormatTokens(r.Tokens)),
+			costColor.Render(text.FormatCost(r.Cost)),
+		))
+	}
+
 	return b.String()
 }

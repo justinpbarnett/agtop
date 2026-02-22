@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/justinpbarnett/agtop/internal/config"
+	"github.com/justinpbarnett/agtop/internal/cost"
 	"github.com/justinpbarnett/agtop/internal/engine"
 	"github.com/justinpbarnett/agtop/internal/process"
 	"github.com/justinpbarnett/agtop/internal/run"
@@ -53,12 +54,18 @@ type App struct {
 func NewApp(cfg *config.Config) App {
 	store := run.NewStore()
 
+	tracker := cost.NewTracker()
+	limiter := &cost.LimitChecker{
+		MaxTokensPerRun: cfg.Limits.MaxTokensPerRun,
+		MaxCostPerRun:   cfg.Limits.MaxCostPerRun,
+	}
+
 	var mgr *process.Manager
 	rt, err := runtime.NewClaudeRuntime()
 	if err != nil {
 		log.Printf("warning: %v (running with mock data)", err)
 	} else {
-		mgr = process.NewManager(store, rt, &cfg.Limits)
+		mgr = process.NewManager(store, rt, &cfg.Limits, tracker, limiter)
 	}
 
 	reg := engine.NewRegistry(cfg)
@@ -143,6 +150,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			runID := a.store.Add(newRun)
 			a.executor.Execute(runID, msg.Workflow, msg.Prompt)
 		}
+		return a, nil
+
+	case process.CostThresholdMsg:
+		a.statusBar.SetFlash(msg.Reason)
+		return a, tea.Tick(panels.FlashDuration(), func(time.Time) tea.Msg {
+			return ClearFlashMsg{}
+		})
+
+	case ClearFlashMsg:
+		a.statusBar.ClearFlash()
 		return a, nil
 
 	case process.LogLineMsg:

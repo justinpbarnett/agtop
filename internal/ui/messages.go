@@ -12,3 +12,6 @@ type LogLineMsg = panels.LogLineMsg
 
 // CloseModalMsg signals that the modal should be closed.
 type CloseModalMsg = panels.CloseModalMsg
+
+// ClearFlashMsg signals the status bar flash should be cleared.
+type ClearFlashMsg = panels.ClearFlashMsg

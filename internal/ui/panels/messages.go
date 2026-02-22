@@ -10,3 +10,6 @@ type LogLineMsg struct {
 
 // CloseModalMsg signals that the modal should be closed.
 type CloseModalMsg struct{}
+
+// ClearFlashMsg signals the status bar flash should be cleared.
+type ClearFlashMsg struct{}
