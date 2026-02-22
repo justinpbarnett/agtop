@@ -25,10 +25,14 @@ type Run struct {
 	SkillIndex   int
 	SkillTotal   int
 	Tokens       int
+	TokensIn     int
+	TokensOut    int
 	Cost         float64
 	CreatedAt    time.Time
 	StartedAt    time.Time
 	CurrentSkill string
+	Model        string
+	Command      string
 	Error        string
 	PID          int
 }
@@ -46,7 +50,7 @@ func (r *Run) StatusIcon() string {
 	case StateReviewing:
 		return "◉"
 	case StateQueued:
-		return "○"
+		return "◌"
 	default:
 		return "·"
 	}
