@@ -1,26 +1,30 @@
 package runtime
 
-import "context"
+import (
+	"context"
+	"io"
+	"os/exec"
+)
 
 type Runtime interface {
 	Start(ctx context.Context, prompt string, opts RunOptions) (*Process, error)
 	Stop(proc *Process) error
+	Pause(proc *Process) error
+	Resume(proc *Process) error
 }
 
 type RunOptions struct {
-	Model        string
-	WorkDir      string
-	AllowedTools []string
-	MaxTurns     int
+	Model          string
+	WorkDir        string
+	AllowedTools   []string
+	MaxTurns       int
+	PermissionMode string
 }
 
 type Process struct {
 	PID    int
-	Events chan Event
-	Done   chan error
-}
-
-type Event struct {
-	Type string
-	Data string
+	Cmd    *exec.Cmd
+	Stdout io.ReadCloser
+	Stderr io.ReadCloser
+	Done   <-chan error
 }
