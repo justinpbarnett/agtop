@@ -1,0 +1,519 @@
+package process
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os/exec"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/justinpbarnett/agtop/internal/config"
+	"github.com/justinpbarnett/agtop/internal/run"
+	"github.com/justinpbarnett/agtop/internal/runtime"
+)
+
+type mockRuntime struct {
+	startFn  func(ctx context.Context, prompt string, opts runtime.RunOptions) (*runtime.Process, error)
+	stopFn   func(proc *runtime.Process) error
+	pauseFn  func(proc *runtime.Process) error
+	resumeFn func(proc *runtime.Process) error
+}
+
+func (m *mockRuntime) Start(ctx context.Context, prompt string, opts runtime.RunOptions) (*runtime.Process, error) {
+	if m.startFn != nil {
+		return m.startFn(ctx, prompt, opts)
+	}
+	return nil, nil
+}
+
+func (m *mockRuntime) Stop(proc *runtime.Process) error {
+	if m.stopFn != nil {
+		return m.stopFn(proc)
+	}
+	return nil
+}
+
+func (m *mockRuntime) Pause(proc *runtime.Process) error {
+	if m.pauseFn != nil {
+		return m.pauseFn(proc)
+	}
+	return nil
+}
+
+func (m *mockRuntime) Resume(proc *runtime.Process) error {
+	if m.resumeFn != nil {
+		return m.resumeFn(proc)
+	}
+	return nil
+}
+
+func newMockProcess(events <-chan StreamEvent, done <-chan error) *runtime.Process {
+	return &runtime.Process{
+		PID:    12345,
+		Cmd:    &exec.Cmd{},
+		Stdout: io.NopCloser(strings.NewReader("")),
+		Stderr: io.NopCloser(strings.NewReader("")),
+		Done:   done,
+	}
+}
+
+func makeMockRuntime(eventsCh chan StreamEvent, doneCh chan error) *mockRuntime {
+	// Create a pipe that the stream parser will read from
+	pr, pw := io.Pipe()
+
+	// Write events as JSON lines to the pipe in a goroutine
+	go func() {
+		for event := range eventsCh {
+			var line string
+			switch event.Type {
+			case EventText:
+				line = `{"type":"assistant","message":{"content":[{"type":"text","text":"` + event.Text + `"}]}}`
+			case EventResult:
+				if event.Usage != nil {
+					line = `{"type":"result","result":"done","usage":{"input_tokens":` +
+						itoa(event.Usage.InputTokens) + `,"output_tokens":` +
+						itoa(event.Usage.OutputTokens) + `},"total_cost_usd":` +
+						ftoa(event.Usage.CostUSD) + `}`
+				}
+			default:
+				line = event.Text
+			}
+			if line != "" {
+				pw.Write([]byte(line + "\n"))
+			}
+		}
+		pw.Close()
+	}()
+
+	return &mockRuntime{
+		startFn: func(ctx context.Context, prompt string, opts runtime.RunOptions) (*runtime.Process, error) {
+			return &runtime.Process{
+				PID:    12345,
+				Cmd:    &exec.Cmd{},
+				Stdout: pr,
+				Stderr: io.NopCloser(strings.NewReader("")),
+				Done:   doneCh,
+			}, nil
+		},
+	}
+}
+
+func itoa(n int) string {
+	return fmt.Sprintf("%d", n)
+}
+
+func ftoa(f float64) string {
+	return fmt.Sprintf("%g", f)
+}
+
+func testManager(rt runtime.Runtime) (*Manager, *run.Store) {
+	store := run.NewStore()
+	cfg := &config.LimitsConfig{
+		MaxConcurrentRuns: 5,
+		MaxTokensPerRun:   500000,
+		MaxCostPerRun:     5.00,
+	}
+	mgr := NewManager(store, rt, cfg)
+	return mgr, store
+}
+
+func TestManagerStart(t *testing.T) {
+	doneCh := make(chan error, 1)
+	eventsCh := make(chan StreamEvent)
+	rt := makeMockRuntime(eventsCh, doneCh)
+	mgr, store := testManager(rt)
+
+	store.Add(&run.Run{State: run.StateQueued})
+	runID := "001"
+
+	err := mgr.Start(runID, "test prompt", runtime.RunOptions{})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	// Check run state updated
+	r, ok := store.Get(runID)
+	if !ok {
+		t.Fatal("run not found in store")
+	}
+	if r.State != run.StateRunning {
+		t.Errorf("expected state Running, got %s", r.State)
+	}
+	if r.PID != 12345 {
+		t.Errorf("expected PID 12345, got %d", r.PID)
+	}
+
+	// Cleanup
+	close(eventsCh)
+	doneCh <- nil
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestManagerConcurrencyLimit(t *testing.T) {
+	store := run.NewStore()
+	cfg := &config.LimitsConfig{MaxConcurrentRuns: 2}
+
+	doneCh1 := make(chan error, 1)
+	doneCh2 := make(chan error, 1)
+
+	callCount := 0
+	rt := &mockRuntime{
+		startFn: func(ctx context.Context, prompt string, opts runtime.RunOptions) (*runtime.Process, error) {
+			callCount++
+			done := doneCh1
+			if callCount == 2 {
+				done = doneCh2
+			}
+			return &runtime.Process{
+				PID:    callCount,
+				Cmd:    &exec.Cmd{},
+				Stdout: io.NopCloser(strings.NewReader("")),
+				Stderr: io.NopCloser(strings.NewReader("")),
+				Done:   done,
+			}, nil
+		},
+	}
+
+	mgr := NewManager(store, rt, cfg)
+
+	store.Add(&run.Run{State: run.StateQueued})
+	store.Add(&run.Run{State: run.StateQueued})
+	store.Add(&run.Run{State: run.StateQueued})
+
+	err := mgr.Start("001", "prompt 1", runtime.RunOptions{})
+	if err != nil {
+		t.Fatalf("start 1: %v", err)
+	}
+
+	err = mgr.Start("002", "prompt 2", runtime.RunOptions{})
+	if err != nil {
+		t.Fatalf("start 2: %v", err)
+	}
+
+	err = mgr.Start("003", "prompt 3", runtime.RunOptions{})
+	if err == nil {
+		t.Error("expected concurrency limit error for 3rd start")
+	}
+	if !strings.Contains(err.Error(), "concurrency limit") {
+		t.Errorf("expected 'concurrency limit' in error, got %q", err.Error())
+	}
+
+	// Cleanup
+	doneCh1 <- nil
+	doneCh2 <- nil
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestManagerPause(t *testing.T) {
+	paused := false
+	doneCh := make(chan error, 1)
+	rt := &mockRuntime{
+		startFn: func(ctx context.Context, prompt string, opts runtime.RunOptions) (*runtime.Process, error) {
+			return &runtime.Process{
+				PID:    1,
+				Cmd:    &exec.Cmd{},
+				Stdout: io.NopCloser(strings.NewReader("")),
+				Stderr: io.NopCloser(strings.NewReader("")),
+				Done:   doneCh,
+			}, nil
+		},
+		pauseFn: func(proc *runtime.Process) error {
+			paused = true
+			return nil
+		},
+	}
+
+	mgr, store := testManager(rt)
+	store.Add(&run.Run{State: run.StateQueued})
+
+	mgr.Start("001", "test", runtime.RunOptions{})
+	time.Sleep(50 * time.Millisecond)
+
+	err := mgr.Pause("001")
+	if err != nil {
+		t.Fatalf("pause error: %v", err)
+	}
+
+	if !paused {
+		t.Error("expected runtime.Pause to be called")
+	}
+
+	r, _ := store.Get("001")
+	if r.State != run.StatePaused {
+		t.Errorf("expected state Paused, got %s", r.State)
+	}
+
+	// Cleanup
+	doneCh <- nil
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestManagerResume(t *testing.T) {
+	resumed := false
+	doneCh := make(chan error, 1)
+	rt := &mockRuntime{
+		startFn: func(ctx context.Context, prompt string, opts runtime.RunOptions) (*runtime.Process, error) {
+			return &runtime.Process{
+				PID:    1,
+				Cmd:    &exec.Cmd{},
+				Stdout: io.NopCloser(strings.NewReader("")),
+				Stderr: io.NopCloser(strings.NewReader("")),
+				Done:   doneCh,
+			}, nil
+		},
+		pauseFn: func(proc *runtime.Process) error {
+			return nil
+		},
+		resumeFn: func(proc *runtime.Process) error {
+			resumed = true
+			return nil
+		},
+	}
+
+	mgr, store := testManager(rt)
+	store.Add(&run.Run{State: run.StateQueued})
+
+	mgr.Start("001", "test", runtime.RunOptions{})
+	time.Sleep(50 * time.Millisecond)
+
+	mgr.Pause("001")
+	err := mgr.Resume("001")
+	if err != nil {
+		t.Fatalf("resume error: %v", err)
+	}
+
+	if !resumed {
+		t.Error("expected runtime.Resume to be called")
+	}
+
+	r, _ := store.Get("001")
+	if r.State != run.StateRunning {
+		t.Errorf("expected state Running after resume, got %s", r.State)
+	}
+
+	// Cleanup
+	doneCh <- nil
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestManagerProcessExit(t *testing.T) {
+	doneCh := make(chan error, 1)
+	rt := &mockRuntime{
+		startFn: func(ctx context.Context, prompt string, opts runtime.RunOptions) (*runtime.Process, error) {
+			return &runtime.Process{
+				PID:    1,
+				Cmd:    &exec.Cmd{},
+				Stdout: io.NopCloser(strings.NewReader("")),
+				Stderr: io.NopCloser(strings.NewReader("")),
+				Done:   doneCh,
+			}, nil
+		},
+	}
+
+	mgr, store := testManager(rt)
+	store.Add(&run.Run{State: run.StateQueued})
+
+	mgr.Start("001", "test", runtime.RunOptions{})
+	time.Sleep(50 * time.Millisecond)
+
+	// Signal clean exit
+	doneCh <- nil
+	time.Sleep(200 * time.Millisecond)
+
+	r, _ := store.Get("001")
+	if r.State != run.StateCompleted {
+		t.Errorf("expected state Completed after clean exit, got %s", r.State)
+	}
+	if r.PID != 0 {
+		t.Errorf("expected PID 0 after exit, got %d", r.PID)
+	}
+
+	if mgr.ActiveCount() != 0 {
+		t.Errorf("expected 0 active processes, got %d", mgr.ActiveCount())
+	}
+}
+
+func TestManagerProcessExitError(t *testing.T) {
+	doneCh := make(chan error, 1)
+	rt := &mockRuntime{
+		startFn: func(ctx context.Context, prompt string, opts runtime.RunOptions) (*runtime.Process, error) {
+			return &runtime.Process{
+				PID:    1,
+				Cmd:    &exec.Cmd{},
+				Stdout: io.NopCloser(strings.NewReader("")),
+				Stderr: io.NopCloser(strings.NewReader("")),
+				Done:   doneCh,
+			}, nil
+		},
+	}
+
+	mgr, store := testManager(rt)
+	store.Add(&run.Run{State: run.StateQueued})
+
+	mgr.Start("001", "test", runtime.RunOptions{})
+	time.Sleep(50 * time.Millisecond)
+
+	// Signal error exit
+	doneCh <- io.ErrUnexpectedEOF
+	time.Sleep(200 * time.Millisecond)
+
+	r, _ := store.Get("001")
+	if r.State != run.StateFailed {
+		t.Errorf("expected state Failed after error exit, got %s", r.State)
+	}
+	if r.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+func TestManagerEventConsumption(t *testing.T) {
+	eventsCh := make(chan StreamEvent, 10)
+	doneCh := make(chan error, 1)
+	rt := makeMockRuntime(eventsCh, doneCh)
+	mgr, store := testManager(rt)
+
+	store.Add(&run.Run{State: run.StateQueued, CurrentSkill: "build"})
+
+	err := mgr.Start("001", "test", runtime.RunOptions{})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	// Send a text event
+	eventsCh <- StreamEvent{Type: EventText, Text: "Building feature..."}
+	time.Sleep(100 * time.Millisecond)
+
+	buf := mgr.Buffer("001")
+	if buf == nil {
+		t.Fatal("expected non-nil buffer")
+	}
+	if buf.Len() == 0 {
+		t.Fatal("expected buffer to have lines after text event")
+	}
+
+	// Send a result event with usage data
+	eventsCh <- StreamEvent{
+		Type: EventResult,
+		Usage: &UsageData{
+			InputTokens:  1000,
+			OutputTokens: 500,
+			TotalTokens:  1500,
+			CostUSD:      0.05,
+		},
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	r, _ := store.Get("001")
+	if r.Tokens != 1500 {
+		t.Errorf("expected 1500 tokens, got %d", r.Tokens)
+	}
+	if r.Cost != 0.05 {
+		t.Errorf("expected 0.05 cost, got %f", r.Cost)
+	}
+
+	// Cleanup
+	close(eventsCh)
+	doneCh <- nil
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestManagerStopNonExistent(t *testing.T) {
+	rt := &mockRuntime{}
+	mgr, _ := testManager(rt)
+
+	err := mgr.Stop("nonexistent")
+	if err == nil {
+		t.Error("expected error stopping non-existent run")
+	}
+}
+
+func TestManagerPauseNonExistent(t *testing.T) {
+	rt := &mockRuntime{}
+	mgr, _ := testManager(rt)
+
+	err := mgr.Pause("nonexistent")
+	if err == nil {
+		t.Error("expected error pausing non-existent run")
+	}
+}
+
+func TestManagerDuplicateStart(t *testing.T) {
+	doneCh := make(chan error, 1)
+	rt := &mockRuntime{
+		startFn: func(ctx context.Context, prompt string, opts runtime.RunOptions) (*runtime.Process, error) {
+			return &runtime.Process{
+				PID:    1,
+				Cmd:    &exec.Cmd{},
+				Stdout: io.NopCloser(strings.NewReader("")),
+				Stderr: io.NopCloser(strings.NewReader("")),
+				Done:   doneCh,
+			}, nil
+		},
+	}
+
+	mgr, store := testManager(rt)
+	store.Add(&run.Run{State: run.StateQueued})
+
+	mgr.Start("001", "test", runtime.RunOptions{})
+	time.Sleep(50 * time.Millisecond)
+
+	err := mgr.Start("001", "test again", runtime.RunOptions{})
+	if err == nil {
+		t.Error("expected error for duplicate start")
+	}
+	if !strings.Contains(err.Error(), "already has an active process") {
+		t.Errorf("expected 'already has an active process', got %q", err.Error())
+	}
+
+	// Cleanup
+	doneCh <- nil
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestManagerActiveCount(t *testing.T) {
+	doneCh := make(chan error, 1)
+	rt := &mockRuntime{
+		startFn: func(ctx context.Context, prompt string, opts runtime.RunOptions) (*runtime.Process, error) {
+			return &runtime.Process{
+				PID:    1,
+				Cmd:    &exec.Cmd{},
+				Stdout: io.NopCloser(strings.NewReader("")),
+				Stderr: io.NopCloser(strings.NewReader("")),
+				Done:   doneCh,
+			}, nil
+		},
+	}
+
+	mgr, store := testManager(rt)
+	store.Add(&run.Run{State: run.StateQueued})
+
+	if mgr.ActiveCount() != 0 {
+		t.Errorf("expected 0 active, got %d", mgr.ActiveCount())
+	}
+
+	mgr.Start("001", "test", runtime.RunOptions{})
+	time.Sleep(50 * time.Millisecond)
+
+	if mgr.ActiveCount() != 1 {
+		t.Errorf("expected 1 active, got %d", mgr.ActiveCount())
+	}
+
+	doneCh <- nil
+	time.Sleep(200 * time.Millisecond)
+
+	if mgr.ActiveCount() != 0 {
+		t.Errorf("expected 0 active after exit, got %d", mgr.ActiveCount())
+	}
+}
+
+func TestManagerBufferNonExistent(t *testing.T) {
+	rt := &mockRuntime{}
+	mgr, _ := testManager(rt)
+
+	buf := mgr.Buffer("nonexistent")
+	if buf != nil {
+		t.Error("expected nil buffer for non-existent run")
+	}
+}

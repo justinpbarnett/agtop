@@ -30,6 +30,7 @@ type Run struct {
 	StartedAt    time.Time
 	CurrentSkill string
 	Error        string
+	PID          int
 }
 
 func (r *Run) StatusIcon() string {
