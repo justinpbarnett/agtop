@@ -126,6 +126,14 @@ func (s *Store) TotalCost() float64 {
 	return total
 }
 
+func (s *Store) SetNextID(id int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id > s.nextID {
+		s.nextID = id
+	}
+}
+
 func (s *Store) Subscribe(fn func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

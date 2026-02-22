@@ -38,26 +38,28 @@ type StartRunMsg struct {
 }
 
 type App struct {
-	config       *config.Config
-	store        *run.Store
-	manager      *process.Manager
-	registry     *engine.Registry
-	executor     *engine.Executor
-	worktrees    *gitpkg.WorktreeManager
-	devServers   *server.DevServerManager
-	diffGen      *gitpkg.DiffGenerator
-	width        int
-	height       int
-	layout       layout.Layout
-	focusedPanel int
-	runList      panels.RunList
-	logView      panels.LogView
-	detail       panels.Detail
-	statusBar    panels.StatusBar
-	helpOverlay  *panels.HelpOverlay
-	newRunModal  *panels.NewRunModal
-	keys         KeyMap
-	ready        bool
+	config         *config.Config
+	store          *run.Store
+	manager        *process.Manager
+	registry       *engine.Registry
+	executor       *engine.Executor
+	worktrees      *gitpkg.WorktreeManager
+	devServers     *server.DevServerManager
+	diffGen        *gitpkg.DiffGenerator
+	persistence    *run.Persistence
+	pidWatchCancel func()
+	width          int
+	height         int
+	layout         layout.Layout
+	focusedPanel   int
+	runList        panels.RunList
+	logView        panels.LogView
+	detail         panels.Detail
+	statusBar      panels.StatusBar
+	helpOverlay    *panels.HelpOverlay
+	newRunModal    *panels.NewRunModal
+	keys           KeyMap
+	ready          bool
 }
 
 func NewApp(cfg *config.Config) App {
@@ -104,7 +106,42 @@ func NewApp(cfg *config.Config) App {
 	dg := gitpkg.NewDiffGenerator(projectRoot)
 	ds := server.NewDevServerManager(cfg.Project.DevServer)
 
-	seedMockData(store)
+	// Session persistence: rehydrate previous runs
+	var persist *run.Persistence
+	var pidWatchCancel func()
+	persist, err = run.NewPersistence(projectRoot)
+	if err != nil {
+		log.Printf("warning: session persistence: %v", err)
+	}
+	if persist != nil {
+		cb := run.RehydrateCallbacks{}
+		if mgr != nil {
+			cb.InjectBuffer = mgr.InjectBuffer
+			cb.RecordCost = func(runID string, sc cost.SkillCost) {
+				tracker.Record(runID, sc)
+			}
+		}
+		count, cancel, rehydrateErr := persist.RehydrateWithWatcher(store, cb)
+		if rehydrateErr != nil {
+			log.Printf("warning: rehydrate sessions: %v", rehydrateErr)
+		}
+		pidWatchCancel = cancel
+		if count > 0 {
+			log.Printf("rehydrated %d runs from session", count)
+		}
+
+		// Bind auto-save
+		persist.BindStore(store, func(runID string) []string {
+			if mgr == nil {
+				return nil
+			}
+			buf := mgr.Buffer(runID)
+			if buf == nil {
+				return nil
+			}
+			return buf.Tail(1000)
+		})
+	}
 
 	rl := panels.NewRunList(store)
 	rl.SetFocused(true)
@@ -121,19 +158,21 @@ func NewApp(cfg *config.Config) App {
 	}
 
 	return App{
-		config:     cfg,
-		store:      store,
-		manager:    mgr,
-		registry:   reg,
-		executor:   exec,
-		worktrees:  wt,
-		diffGen:    dg,
-		devServers: ds,
-		runList:    rl,
-		logView:    lv,
-		detail:     d,
-		statusBar:  panels.NewStatusBar(store),
-		keys:       DefaultKeyMap(),
+		config:         cfg,
+		store:          store,
+		manager:        mgr,
+		registry:       reg,
+		executor:       exec,
+		worktrees:      wt,
+		diffGen:        dg,
+		devServers:     ds,
+		persistence:    persist,
+		pidWatchCancel: pidWatchCancel,
+		runList:        rl,
+		logView:        lv,
+		detail:         d,
+		statusBar:      panels.NewStatusBar(store),
+		keys:           DefaultKeyMap(),
 	}
 }
 
@@ -267,6 +306,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "ctrl+c":
 				a.devServers.StopAll()
+				if a.pidWatchCancel != nil {
+					a.pidWatchCancel()
+				}
 				return a, tea.Quit
 			}
 			var cmd tea.Cmd
@@ -277,9 +319,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			a.devServers.StopAll()
+			if a.pidWatchCancel != nil {
+				a.pidWatchCancel()
+			}
 			return a, tea.Quit
 		case "q":
 			a.devServers.StopAll()
+			if a.pidWatchCancel != nil {
+				a.pidWatchCancel()
+			}
 			return a, tea.Quit
 		case "tab":
 			a.focusedPanel = (a.focusedPanel + 1) % numPanels
@@ -587,66 +635,3 @@ func listenForChanges(ch <-chan struct{}) tea.Cmd {
 	}
 }
 
-func seedMockData(store *run.Store) {
-	now := time.Now()
-	store.Add(&run.Run{
-		Branch:       "feat/add-auth",
-		Workflow:     "sdlc",
-		State:        run.StateRunning,
-		SkillIndex:   3,
-		SkillTotal:   7,
-		Tokens:       12400,
-		TokensIn:     8200,
-		TokensOut:    4200,
-		Cost:         0.42,
-		CreatedAt:    now.Add(-30 * time.Minute),
-		StartedAt:    now.Add(-25 * time.Minute),
-		CurrentSkill: "build",
-		Model:        "claude-sonnet-4-5",
-		Command:      `claude -p "add JWT auth" --output-format stream-json`,
-	})
-	store.Add(&run.Run{
-		Branch:       "fix/nav-bug",
-		Workflow:     "quick-fix",
-		State:        run.StatePaused,
-		SkillIndex:   1,
-		SkillTotal:   3,
-		Tokens:       3100,
-		TokensIn:     2100,
-		TokensOut:    1000,
-		Cost:         0.08,
-		CreatedAt:    now.Add(-20 * time.Minute),
-		StartedAt:    now.Add(-18 * time.Minute),
-		CurrentSkill: "build",
-		Model:        "claude-sonnet-4-5",
-	})
-	store.Add(&run.Run{
-		Branch:       "feat/dashboard",
-		Workflow:     "plan-build",
-		State:        run.StateReviewing,
-		SkillIndex:   3,
-		SkillTotal:   3,
-		Tokens:       45200,
-		TokensIn:     32000,
-		TokensOut:    13200,
-		Cost:         1.23,
-		CreatedAt:    now.Add(-60 * time.Minute),
-		StartedAt:    now.Add(-55 * time.Minute),
-		Model:        "claude-sonnet-4-5",
-	})
-	store.Add(&run.Run{
-		Branch:       "fix/css-overflow",
-		Workflow:     "build",
-		State:        run.StateFailed,
-		SkillIndex:   2,
-		SkillTotal:   3,
-		Tokens:       8700,
-		TokensIn:     6200,
-		TokensOut:    2500,
-		Cost:         0.31,
-		CreatedAt:    now.Add(-10 * time.Minute),
-		StartedAt:    now.Add(-8 * time.Minute),
-		Model:        "claude-sonnet-4-5",
-		Error:        "build skill timed out",
-	})
-}

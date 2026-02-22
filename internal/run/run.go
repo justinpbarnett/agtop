@@ -21,28 +21,28 @@ const (
 )
 
 type Run struct {
-	ID           string
-	Prompt       string
-	Branch       string
-	Worktree     string
-	Workflow     string
-	State        State
-	SkillIndex   int
-	SkillTotal   int
-	Tokens       int
-	TokensIn     int
-	TokensOut    int
-	Cost         float64
-	CreatedAt    time.Time
-	StartedAt    time.Time
-	CurrentSkill string
-	Model        string
-	Command      string
-	Error        string
-	PID            int
-	SkillCosts     []cost.SkillCost
-	DevServerPort  int
-	DevServerURL   string
+	ID           string        `json:"id"`
+	Prompt       string        `json:"prompt"`
+	Branch       string        `json:"branch"`
+	Worktree     string        `json:"worktree"`
+	Workflow     string        `json:"workflow"`
+	State        State         `json:"state"`
+	SkillIndex   int           `json:"skill_index"`
+	SkillTotal   int           `json:"skill_total"`
+	Tokens       int           `json:"tokens"`
+	TokensIn     int           `json:"tokens_in"`
+	TokensOut    int           `json:"tokens_out"`
+	Cost         float64       `json:"cost"`
+	CreatedAt    time.Time     `json:"created_at"`
+	StartedAt    time.Time     `json:"started_at"`
+	CurrentSkill string        `json:"current_skill"`
+	Model        string        `json:"model"`
+	Command      string        `json:"command"`
+	Error        string        `json:"error"`
+	PID          int           `json:"pid"`
+	SkillCosts   []cost.SkillCost `json:"skill_costs"`
+	DevServerPort int          `json:"dev_server_port"`
+	DevServerURL  string       `json:"dev_server_url"`
 }
 
 func (r *Run) StatusIcon() string {

@@ -195,6 +195,18 @@ func (m *Manager) Buffer(runID string) *RingBuffer {
 	return m.buffers[runID]
 }
 
+// InjectBuffer creates a ring buffer pre-populated with log lines.
+// Used to restore log history for rehydrated runs.
+func (m *Manager) InjectBuffer(runID string, lines []string) {
+	buf := NewRingBuffer(10000)
+	for _, line := range lines {
+		buf.Append(line)
+	}
+	m.mu.Lock()
+	m.buffers[runID] = buf
+	m.mu.Unlock()
+}
+
 func (m *Manager) ActiveCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
