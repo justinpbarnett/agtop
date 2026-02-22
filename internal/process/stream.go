@@ -60,6 +60,13 @@ type streamUsage struct {
 	OutputTokens int `json:"output_tokens"`
 }
 
+// EventStream is the interface consumed by the process manager.
+type EventStream interface {
+	Parse(ctx context.Context)
+	Events() <-chan StreamEvent
+	Done() <-chan error
+}
+
 type StreamParser struct {
 	reader io.Reader
 	events chan StreamEvent
