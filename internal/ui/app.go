@@ -3,11 +3,13 @@ package ui
 import (
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/justinpbarnett/agtop/internal/config"
+	"github.com/justinpbarnett/agtop/internal/engine"
 	"github.com/justinpbarnett/agtop/internal/process"
 	"github.com/justinpbarnett/agtop/internal/run"
 	"github.com/justinpbarnett/agtop/internal/runtime"
@@ -27,6 +29,7 @@ type App struct {
 	config       *config.Config
 	store        *run.Store
 	manager      *process.Manager
+	registry     *engine.Registry
 	width        int
 	height       int
 	layout       layout.Layout
@@ -51,6 +54,15 @@ func NewApp(cfg *config.Config) App {
 		mgr = process.NewManager(store, rt, &cfg.Limits)
 	}
 
+	reg := engine.NewRegistry(cfg)
+	projectRoot := cfg.Project.Root
+	if projectRoot == "" || projectRoot == "." {
+		projectRoot, _ = os.Getwd()
+	}
+	if err := reg.Load(projectRoot); err != nil {
+		log.Printf("warning: skill registry load: %v", err)
+	}
+
 	seedMockData(store)
 
 	rl := panels.NewRunList(store)
@@ -68,6 +80,7 @@ func NewApp(cfg *config.Config) App {
 		config:    cfg,
 		store:     store,
 		manager:   mgr,
+		registry:  reg,
 		runList:   rl,
 		logView:   lv,
 		detail:    d,
@@ -196,6 +209,10 @@ func (a App) View() string {
 
 func (a App) Manager() *process.Manager {
 	return a.manager
+}
+
+func (a App) Registry() *engine.Registry {
+	return a.registry
 }
 
 func (a App) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

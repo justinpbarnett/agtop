@@ -46,9 +46,10 @@ type WorkflowConfig struct {
 }
 
 type SkillConfig struct {
-	Model    string `yaml:"model"`
-	Timeout  int    `yaml:"timeout"`
-	Parallel bool   `yaml:"parallel"`
+	Model        string   `yaml:"model"`
+	Timeout      int      `yaml:"timeout"`
+	Parallel     bool     `yaml:"parallel"`
+	AllowedTools []string `yaml:"allowed_tools"`
 }
 
 type SafetyConfig struct {
