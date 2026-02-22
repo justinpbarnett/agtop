@@ -1,6 +1,10 @@
 package run
 
-import "time"
+import (
+	"time"
+
+	"github.com/justinpbarnett/agtop/internal/cost"
+)
 
 type State string
 
@@ -35,6 +39,7 @@ type Run struct {
 	Command      string
 	Error        string
 	PID          int
+	SkillCosts   []cost.SkillCost
 }
 
 func (r *Run) StatusIcon() string {

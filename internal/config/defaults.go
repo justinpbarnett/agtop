@@ -53,10 +53,11 @@ func DefaultConfig() Config {
 			AllowOverrides: boolPtr(false),
 		},
 		Limits: LimitsConfig{
-			MaxTokensPerRun:   500000,
-			MaxCostPerRun:     5.00,
-			MaxConcurrentRuns: 5,
-			RateLimitBackoff:  60,
+			MaxTokensPerRun:     500000,
+			MaxCostPerRun:       5.00,
+			MaxConcurrentRuns:   5,
+			RateLimitBackoff:    60,
+			RateLimitMaxRetries: 3,
 		},
 		UI: UIConfig{
 			Theme:          "default",

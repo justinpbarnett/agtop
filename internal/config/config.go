@@ -58,10 +58,11 @@ type SafetyConfig struct {
 }
 
 type LimitsConfig struct {
-	MaxTokensPerRun   int     `yaml:"max_tokens_per_run"`
-	MaxCostPerRun     float64 `yaml:"max_cost_per_run"`
-	MaxConcurrentRuns int     `yaml:"max_concurrent_runs"`
-	RateLimitBackoff  int     `yaml:"rate_limit_backoff"`
+	MaxTokensPerRun     int     `yaml:"max_tokens_per_run"`
+	MaxCostPerRun       float64 `yaml:"max_cost_per_run"`
+	MaxConcurrentRuns   int     `yaml:"max_concurrent_runs"`
+	RateLimitBackoff    int     `yaml:"rate_limit_backoff"`
+	RateLimitMaxRetries int     `yaml:"rate_limit_max_retries"`
 }
 
 type UIConfig struct {
