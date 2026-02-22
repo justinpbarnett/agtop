@@ -14,7 +14,7 @@ func NewDiffGenerator(repoRoot string) *DiffGenerator {
 }
 
 func (d *DiffGenerator) Diff(branch string) (string, error) {
-	cmd := exec.Command("git", "diff", "main..."+branch)
+	cmd := exec.Command("git", "diff", "--color=never", "main..."+branch)
 	cmd.Dir = d.repoRoot
 	out, err := cmd.Output()
 	if err != nil {
@@ -24,7 +24,7 @@ func (d *DiffGenerator) Diff(branch string) (string, error) {
 }
 
 func (d *DiffGenerator) DiffStat(branch string) (string, error) {
-	cmd := exec.Command("git", "diff", "--stat", "main..."+branch)
+	cmd := exec.Command("git", "diff", "--color=never", "--stat", "main..."+branch)
 	cmd.Dir = d.repoRoot
 	out, err := cmd.Output()
 	if err != nil {

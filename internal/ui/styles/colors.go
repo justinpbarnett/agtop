@@ -23,6 +23,11 @@ var (
 	StatusPending = lipgloss.AdaptiveColor{Light: "#8890a8", Dark: "#565f89"}
 
 	SelectedRowBg = lipgloss.AdaptiveColor{Light: "#e0e0e0", Dark: "#292e42"}
+
+	DiffAdded   = lipgloss.AdaptiveColor{Light: "#1a7f37", Dark: "#9ece6a"}
+	DiffRemoved = lipgloss.AdaptiveColor{Light: "#cf222e", Dark: "#f7768e"}
+	DiffHeader  = lipgloss.AdaptiveColor{Light: "#0969da", Dark: "#7dcfff"}
+	DiffHunk    = lipgloss.AdaptiveColor{Light: "#8250df", Dark: "#bb9af7"}
 )
 
 // CostColor returns the appropriate color for a cost value per §2.3 thresholds.

@@ -18,4 +18,9 @@ var (
 	CurrentMatchStyle = lipgloss.NewStyle().
 				Background(lipgloss.Color("208")).
 				Foreground(lipgloss.Color("0"))
+
+	DiffAddedStyle   = lipgloss.NewStyle().Foreground(DiffAdded)
+	DiffRemovedStyle = lipgloss.NewStyle().Foreground(DiffRemoved)
+	DiffHeaderStyle  = lipgloss.NewStyle().Foreground(DiffHeader).Bold(true)
+	DiffHunkStyle    = lipgloss.NewStyle().Foreground(DiffHunk)
 )

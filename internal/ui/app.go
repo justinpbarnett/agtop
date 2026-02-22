@@ -44,6 +44,7 @@ type App struct {
 	executor     *engine.Executor
 	worktrees    *gitpkg.WorktreeManager
 	devServers   *server.DevServerManager
+	diffGen      *gitpkg.DiffGenerator
 	width        int
 	height       int
 	layout       layout.Layout
@@ -98,6 +99,7 @@ func NewApp(cfg *config.Config) App {
 	}
 
 	wt := gitpkg.NewWorktreeManager(projectRoot)
+	dg := gitpkg.NewDiffGenerator(projectRoot)
 	ds := server.NewDevServerManager(cfg.Project.DevServer)
 
 	seedMockData(store)
@@ -123,6 +125,7 @@ func NewApp(cfg *config.Config) App {
 		registry:   reg,
 		executor:   exec,
 		worktrees:  wt,
+		diffGen:    dg,
 		devServers: ds,
 		runList:    rl,
 		logView:    lv,
@@ -150,12 +153,29 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.helpOverlay = nil
 		return a, nil
 
+	case DiffResultMsg:
+		selected := a.runList.SelectedRun()
+		if selected == nil || selected.ID != msg.RunID {
+			return a, nil
+		}
+		if msg.Err != nil {
+			a.detail.SetDiffError(msg.Err.Error())
+		} else {
+			a.detail.SetDiff(msg.Diff, msg.DiffStat)
+		}
+		return a, nil
+
+	case panels.DiffGTimerExpiredMsg:
+		var cmd tea.Cmd
+		a.detail, cmd = a.detail.Update(msg)
+		return a, cmd
+
 	case RunStoreUpdatedMsg:
 		var cmd tea.Cmd
 		a.runList, cmd = a.runList.Update(msg)
-		a.syncSelection()
+		diffCmd := a.syncSelection()
 		a.autoStartDevServers()
-		cmds := []tea.Cmd{cmd, listenForChanges(a.store.Changes())}
+		cmds := []tea.Cmd{cmd, diffCmd, listenForChanges(a.store.Changes())}
 		return a, tea.Batch(cmds...)
 
 	case StartRunMsg:
@@ -244,14 +264,21 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.updateFocusState()
 			return a, nil
 		case "h", "left":
-			// Spatial: in top row, move between run list and log view
+			// Spatial: in top row, move between run list and log view.
+			// When the detail panel is focused, delegate to routeKey so
+			// the detail panel can use h/l for tab switching.
+			if a.focusedPanel == panelDetail {
+				return a.routeKey(msg)
+			}
 			if a.focusedPanel == panelLogView {
 				a.focusedPanel = panelRunList
 				a.updateFocusState()
 			}
 			return a, nil
 		case "l", "right":
-			// Spatial: in top row, move between run list and log view
+			if a.focusedPanel == panelDetail {
+				return a.routeKey(msg)
+			}
 			if a.focusedPanel == panelRunList {
 				a.focusedPanel = panelLogView
 				a.updateFocusState()
@@ -336,8 +363,8 @@ func (a App) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case panelRunList:
 		var cmd tea.Cmd
 		a.runList, cmd = a.runList.Update(msg)
-		a.syncSelection()
-		return a, cmd
+		diffCmd := a.syncSelection()
+		return a, tea.Batch(cmd, diffCmd)
 	case panelLogView:
 		var cmd tea.Cmd
 		a.logView, cmd = a.logView.Update(msg)
@@ -350,7 +377,7 @@ func (a App) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-func (a *App) syncSelection() {
+func (a *App) syncSelection() tea.Cmd {
 	selected := a.runList.SelectedRun()
 	a.detail.SetRun(selected)
 	if selected != nil {
@@ -359,6 +386,29 @@ func (a *App) syncSelection() {
 			buf = a.manager.Buffer(selected.ID)
 		}
 		a.logView.SetRun(selected.ID, selected.CurrentSkill, selected.Branch, buf, !selected.IsTerminal())
+
+		if selected.Branch != "" {
+			a.detail.SetDiffLoading()
+			return a.fetchDiff(selected.ID, selected.Branch)
+		}
+		if selected.State == run.StateQueued || selected.State == run.StateRouting {
+			a.detail.SetDiffWaiting()
+		} else {
+			a.detail.SetDiffNoBranch()
+		}
+	}
+	return nil
+}
+
+func (a *App) fetchDiff(runID, branch string) tea.Cmd {
+	dg := a.diffGen
+	return func() tea.Msg {
+		diff, err := dg.Diff(branch)
+		if err != nil {
+			return DiffResultMsg{RunID: runID, Err: err}
+		}
+		stat, _ := dg.DiffStat(branch)
+		return DiffResultMsg{RunID: runID, Diff: diff, DiffStat: stat}
 	}
 }
 

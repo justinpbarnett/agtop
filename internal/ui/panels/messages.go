@@ -13,3 +13,11 @@ type CloseModalMsg struct{}
 
 // ClearFlashMsg signals the status bar flash should be cleared.
 type ClearFlashMsg struct{}
+
+// DiffResultMsg delivers async diff results for a run.
+type DiffResultMsg struct {
+	RunID    string
+	Diff     string
+	DiffStat string
+	Err      error
+}

@@ -15,3 +15,6 @@ type CloseModalMsg = panels.CloseModalMsg
 
 // ClearFlashMsg signals the status bar flash should be cleared.
 type ClearFlashMsg = panels.ClearFlashMsg
+
+// DiffResultMsg delivers async diff results for a run.
+type DiffResultMsg = panels.DiffResultMsg
