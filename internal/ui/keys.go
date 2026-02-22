@@ -1,4 +1,4 @@
-package tui
+package ui
 
 import "github.com/charmbracelet/bubbles/key"
 
@@ -8,8 +8,8 @@ type KeyMap struct {
 	Top       key.Binding
 	Bottom    key.Binding
 	GPrefix   key.Binding
-	TabNext   key.Binding
-	TabPrev   key.Binding
+	Left      key.Binding
+	Right     key.Binding
 	FocusNext key.Binding
 	Filter    key.Binding
 	Help      key.Binding
@@ -36,17 +36,17 @@ func DefaultKeyMap() KeyMap {
 		GPrefix: key.NewBinding(
 			key.WithKeys("g"),
 		),
-		TabNext: key.NewBinding(
-			key.WithKeys("l", "right"),
-			key.WithHelp("l", "next tab"),
-		),
-		TabPrev: key.NewBinding(
+		Left: key.NewBinding(
 			key.WithKeys("h", "left"),
-			key.WithHelp("h", "prev tab"),
+			key.WithHelp("h", "panel left"),
+		),
+		Right: key.NewBinding(
+			key.WithKeys("l", "right"),
+			key.WithHelp("l", "panel right"),
 		),
 		FocusNext: key.NewBinding(
 			key.WithKeys("tab"),
-			key.WithHelp("Tab", "focus"),
+			key.WithHelp("Tab", "next panel"),
 		),
 		Filter: key.NewBinding(
 			key.WithKeys("/"),
@@ -60,17 +60,5 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("q"),
 			key.WithHelp("q", "quit"),
 		),
-	}
-}
-
-func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.TabNext, k.TabPrev, k.FocusNext, k.Help, k.Quit}
-}
-
-func (k KeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{k.Up, k.Down, k.Top, k.Bottom},
-		{k.TabNext, k.TabPrev, k.FocusNext},
-		{k.Filter, k.Help, k.Quit},
 	}
 }

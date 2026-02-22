@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/justinpbarnett/agtop/internal/config"
-	"github.com/justinpbarnett/agtop/internal/tui"
+	"github.com/justinpbarnett/agtop/internal/ui"
 )
 
 func main() {
@@ -16,7 +16,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	model := tui.NewApp(cfg)
+	model := ui.NewApp(cfg)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	if mgr := model.Manager(); mgr != nil {

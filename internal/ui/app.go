@@ -1,6 +1,7 @@
-package tui
+package ui
 
 import (
+	"fmt"
 	"log"
 	"time"
 
@@ -10,10 +11,17 @@ import (
 	"github.com/justinpbarnett/agtop/internal/process"
 	"github.com/justinpbarnett/agtop/internal/run"
 	"github.com/justinpbarnett/agtop/internal/runtime"
+	"github.com/justinpbarnett/agtop/internal/ui/layout"
+	"github.com/justinpbarnett/agtop/internal/ui/panels"
+	"github.com/justinpbarnett/agtop/internal/ui/styles"
 )
 
-const minWidth = 40
-const minHeight = 10
+const (
+	panelRunList = 0
+	panelLogView = 1
+	panelDetail  = 2
+	numPanels    = 3
+)
 
 type App struct {
 	config       *config.Config
@@ -21,11 +29,13 @@ type App struct {
 	manager      *process.Manager
 	width        int
 	height       int
+	layout       layout.Layout
 	focusedPanel int
-	runList      RunList
-	detail       Detail
-	statusBar    StatusBar
-	modal        *Modal
+	runList      panels.RunList
+	logView      panels.LogView
+	detail       panels.Detail
+	statusBar    panels.StatusBar
+	helpOverlay  *panels.HelpOverlay
 	keys         KeyMap
 	ready        bool
 }
@@ -43,19 +53,25 @@ func NewApp(cfg *config.Config) App {
 
 	seedMockData(store)
 
-	rl := NewRunList(store)
-	d := NewDetail()
-	if mgr != nil {
-		d.SetManager(mgr)
+	rl := panels.NewRunList(store)
+	rl.SetFocused(true)
+	lv := panels.NewLogView()
+	d := panels.NewDetail()
+
+	selected := rl.SelectedRun()
+	d.SetRun(selected)
+	if selected != nil && mgr != nil {
+		lv.SetRun(selected.ID, selected.CurrentSkill, selected.Branch, mgr.Buffer(selected.ID), !selected.IsTerminal())
 	}
-	d.SetRun(rl.SelectedRun())
+
 	return App{
 		config:    cfg,
 		store:     store,
 		manager:   mgr,
 		runList:   rl,
+		logView:   lv,
 		detail:    d,
-		statusBar: NewStatusBar(store),
+		statusBar: panels.NewStatusBar(store),
 		keys:      DefaultKeyMap(),
 	}
 }
@@ -70,40 +86,39 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		a.ready = true
+		a.layout = layout.Calculate(msg.Width, msg.Height)
 		a.propagateSizes()
 		return a, nil
 
 	case CloseModalMsg:
-		a.modal = nil
+		a.helpOverlay = nil
 		return a, nil
 
 	case RunStoreUpdatedMsg:
 		var cmd tea.Cmd
 		a.runList, cmd = a.runList.Update(msg)
-		a.detail.SetRun(a.runList.SelectedRun())
+		a.syncSelection()
 		cmds := []tea.Cmd{cmd, listenForChanges(a.store.Changes())}
 		return a, tea.Batch(cmds...)
 
 	case process.LogLineMsg:
-		// Convert to tui.LogLineMsg and route to detail
 		selected := a.runList.SelectedRun()
 		if selected != nil && selected.ID == msg.RunID {
-			tuiMsg := LogLineMsg{RunID: msg.RunID}
 			var cmd tea.Cmd
-			a.detail, cmd = a.detail.Update(tuiMsg)
+			a.logView, cmd = a.logView.Update(LogLineMsg{RunID: msg.RunID})
 			return a, cmd
 		}
 		return a, nil
 
 	case LogLineMsg:
 		var cmd tea.Cmd
-		a.detail, cmd = a.detail.Update(msg)
+		a.logView, cmd = a.logView.Update(msg)
 		return a, cmd
 
 	case tea.KeyMsg:
-		if a.modal != nil {
+		if a.helpOverlay != nil {
 			var cmd tea.Cmd
-			*a.modal, cmd = a.modal.Update(msg)
+			*a.helpOverlay, cmd = a.helpOverlay.Update(msg)
 			return a, cmd
 		}
 
@@ -113,13 +128,28 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q":
 			return a, tea.Quit
 		case "tab":
-			a.focusedPanel = (a.focusedPanel + 1) % 2
+			a.focusedPanel = (a.focusedPanel + 1) % numPanels
+			a.updateFocusState()
+			return a, nil
+		case "h", "left":
+			// Spatial: in top row, move between run list and log view
+			if a.focusedPanel == panelLogView {
+				a.focusedPanel = panelRunList
+				a.updateFocusState()
+			}
+			return a, nil
+		case "l", "right":
+			// Spatial: in top row, move between run list and log view
+			if a.focusedPanel == panelRunList {
+				a.focusedPanel = panelLogView
+				a.updateFocusState()
+			}
 			return a, nil
 		case "?":
-			if a.modal == nil {
-				a.modal = NewHelpModal()
+			if a.helpOverlay == nil {
+				a.helpOverlay = panels.NewHelpOverlay()
 			} else {
-				a.modal = nil
+				a.helpOverlay = nil
 			}
 			return a, nil
 		}
@@ -135,38 +165,33 @@ func (a App) View() string {
 			lipgloss.Center, lipgloss.Center, "Loading...")
 	}
 
-	if a.width < minWidth || a.height < minHeight {
+	if a.layout.TooSmall {
+		msg := fmt.Sprintf("Terminal too small (%d×%d)\nMinimum: %d×%d",
+			a.width, a.height, layout.MinWidth, layout.MinHeight)
 		return lipgloss.Place(a.width, a.height,
-			lipgloss.Center, lipgloss.Center, "Terminal too small")
+			lipgloss.Center, lipgloss.Center, msg)
 	}
 
-	leftWidth, rightWidth, contentHeight := a.panelDimensions()
+	// Render panels
+	runListView := a.runList.View()
+	logViewView := a.logView.View()
+	detailView := a.detail.View()
+	statusBarView := a.statusBar.View()
 
-	var leftStyle, rightStyle lipgloss.Style
-	if a.focusedPanel == 0 {
-		leftStyle = ActivePanelStyle(leftWidth, contentHeight)
-		rightStyle = PanelStyle(rightWidth, contentHeight)
-	} else {
-		leftStyle = PanelStyle(leftWidth, contentHeight)
-		rightStyle = ActivePanelStyle(rightWidth, contentHeight)
-	}
+	// Assemble layout: top row (runlist | logview), bottom row (detail), status bar
+	topRow := lipgloss.JoinHorizontal(lipgloss.Top, runListView, logViewView)
+	fullLayout := lipgloss.JoinVertical(lipgloss.Left, topRow, detailView, statusBarView)
 
-	left := leftStyle.Render(a.runList.View())
-	right := rightStyle.Render(a.detail.View())
-
-	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-	layout := lipgloss.JoinVertical(lipgloss.Left, panels, a.statusBar.View())
-
-	if a.modal != nil {
-		modalView := a.modal.View()
-		layout = lipgloss.Place(a.width, a.height,
+	if a.helpOverlay != nil {
+		modalView := a.helpOverlay.View()
+		fullLayout = lipgloss.Place(a.width, a.height,
 			lipgloss.Center, lipgloss.Center, modalView,
 			lipgloss.WithWhitespaceChars(" "),
-			lipgloss.WithWhitespaceForeground(lipgloss.Color("0")),
+			lipgloss.WithWhitespaceForeground(styles.TextDim),
 		)
 	}
 
-	return layout
+	return fullLayout
 }
 
 func (a App) Manager() *process.Manager {
@@ -174,39 +199,48 @@ func (a App) Manager() *process.Manager {
 }
 
 func (a App) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if a.focusedPanel == 0 {
+	switch a.focusedPanel {
+	case panelRunList:
 		var cmd tea.Cmd
 		a.runList, cmd = a.runList.Update(msg)
-		a.detail.SetRun(a.runList.SelectedRun())
+		a.syncSelection()
+		return a, cmd
+	case panelLogView:
+		var cmd tea.Cmd
+		a.logView, cmd = a.logView.Update(msg)
+		return a, cmd
+	case panelDetail:
+		var cmd tea.Cmd
+		a.detail, cmd = a.detail.Update(msg)
 		return a, cmd
 	}
+	return a, nil
+}
 
-	var cmd tea.Cmd
-	a.detail, cmd = a.detail.Update(msg)
-	return a, cmd
+func (a *App) syncSelection() {
+	selected := a.runList.SelectedRun()
+	a.detail.SetRun(selected)
+	if selected != nil {
+		var buf *process.RingBuffer
+		if a.manager != nil {
+			buf = a.manager.Buffer(selected.ID)
+		}
+		a.logView.SetRun(selected.ID, selected.CurrentSkill, selected.Branch, buf, !selected.IsTerminal())
+	}
 }
 
 func (a *App) propagateSizes() {
-	leftWidth, rightWidth, contentHeight := a.panelDimensions()
-	a.runList.SetSize(leftWidth, contentHeight)
-	a.detail.SetSize(rightWidth, contentHeight)
-	a.statusBar.SetSize(a.width)
+	l := a.layout
+	a.runList.SetSize(l.RunListWidth, l.RunListHeight)
+	a.logView.SetSize(l.LogViewWidth, l.LogViewHeight)
+	a.detail.SetSize(l.DetailWidth, l.DetailHeight)
+	a.statusBar.SetSize(l.StatusBarWidth)
 }
 
-func (a App) panelDimensions() (leftWidth, rightWidth, contentHeight int) {
-	leftWidth = a.width*30/100 - 2
-	rightWidth = a.width - leftWidth - 6
-	contentHeight = a.height - 4
-	if leftWidth < 0 {
-		leftWidth = 0
-	}
-	if rightWidth < 0 {
-		rightWidth = 0
-	}
-	if contentHeight < 0 {
-		contentHeight = 0
-	}
-	return
+func (a *App) updateFocusState() {
+	a.runList.SetFocused(a.focusedPanel == panelRunList)
+	a.logView.SetFocused(a.focusedPanel == panelLogView)
+	a.detail.SetFocused(a.focusedPanel == panelDetail)
 }
 
 func listenForChanges(ch <-chan struct{}) tea.Cmd {
@@ -225,10 +259,14 @@ func seedMockData(store *run.Store) {
 		SkillIndex:   3,
 		SkillTotal:   7,
 		Tokens:       12400,
+		TokensIn:     8200,
+		TokensOut:    4200,
 		Cost:         0.42,
 		CreatedAt:    now.Add(-30 * time.Minute),
 		StartedAt:    now.Add(-25 * time.Minute),
 		CurrentSkill: "build",
+		Model:        "claude-sonnet-4-5",
+		Command:      `claude -p "add JWT auth" --output-format stream-json`,
 	})
 	store.Add(&run.Run{
 		Branch:       "fix/nav-bug",
@@ -237,10 +275,13 @@ func seedMockData(store *run.Store) {
 		SkillIndex:   1,
 		SkillTotal:   3,
 		Tokens:       3100,
+		TokensIn:     2100,
+		TokensOut:    1000,
 		Cost:         0.08,
 		CreatedAt:    now.Add(-20 * time.Minute),
 		StartedAt:    now.Add(-18 * time.Minute),
 		CurrentSkill: "build",
+		Model:        "claude-sonnet-4-5",
 	})
 	store.Add(&run.Run{
 		Branch:       "feat/dashboard",
@@ -249,9 +290,12 @@ func seedMockData(store *run.Store) {
 		SkillIndex:   3,
 		SkillTotal:   3,
 		Tokens:       45200,
+		TokensIn:     32000,
+		TokensOut:    13200,
 		Cost:         1.23,
 		CreatedAt:    now.Add(-60 * time.Minute),
 		StartedAt:    now.Add(-55 * time.Minute),
+		Model:        "claude-sonnet-4-5",
 	})
 	store.Add(&run.Run{
 		Branch:       "fix/css-overflow",
@@ -260,9 +304,12 @@ func seedMockData(store *run.Store) {
 		SkillIndex:   2,
 		SkillTotal:   3,
 		Tokens:       8700,
+		TokensIn:     6200,
+		TokensOut:    2500,
 		Cost:         0.31,
 		CreatedAt:    now.Add(-10 * time.Minute),
 		StartedAt:    now.Add(-8 * time.Minute),
+		Model:        "claude-sonnet-4-5",
 		Error:        "build skill timed out",
 	})
 }

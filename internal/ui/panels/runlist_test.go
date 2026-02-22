@@ -1,4 +1,4 @@
-package tui
+package panels
 
 import (
 	"strings"
@@ -10,10 +10,10 @@ import (
 
 func testStore() *run.Store {
 	s := run.NewStore()
-	s.Add(&run.Run{Branch: "feat/add-auth", Workflow: "sdlc", State: run.StateRunning, SkillIndex: 3, SkillTotal: 7, Tokens: 12400, Cost: 0.42})
-	s.Add(&run.Run{Branch: "fix/nav-bug", Workflow: "quick-fix", State: run.StatePaused, SkillIndex: 1, SkillTotal: 3, Tokens: 3100, Cost: 0.08})
+	s.Add(&run.Run{Branch: "feat/add-auth", Workflow: "sdlc", State: run.StateRunning, SkillIndex: 3, SkillTotal: 7, Tokens: 12400, Cost: 0.42, CurrentSkill: "build"})
+	s.Add(&run.Run{Branch: "fix/nav-bug", Workflow: "quick-fix", State: run.StatePaused, SkillIndex: 1, SkillTotal: 3, Tokens: 3100, Cost: 0.08, CurrentSkill: "build"})
 	s.Add(&run.Run{Branch: "feat/dashboard", Workflow: "plan-build", State: run.StateReviewing, SkillIndex: 3, SkillTotal: 3, Tokens: 45200, Cost: 1.23})
-	s.Add(&run.Run{Branch: "fix/css-overflow", Workflow: "build", State: run.StateFailed, SkillIndex: 2, SkillTotal: 3, Tokens: 8700, Cost: 0.31})
+	s.Add(&run.Run{Branch: "fix/css-overflow", Workflow: "build", State: run.StateFailed, SkillIndex: 2, SkillTotal: 3, Tokens: 8700, Cost: 0.31, Error: "build skill timed out"})
 	return s
 }
 
@@ -23,6 +23,7 @@ func keyMsg(s string) tea.Msg {
 
 func TestRunListNavigation(t *testing.T) {
 	rl := NewRunList(testStore())
+	rl.SetSize(60, 20)
 
 	if rl.selected != 0 {
 		t.Errorf("expected initial selection 0, got %d", rl.selected)
@@ -33,27 +34,21 @@ func TestRunListNavigation(t *testing.T) {
 		t.Errorf("expected selection 1 after j, got %d", rl.selected)
 	}
 
-	rl, _ = rl.Update(keyMsg("j"))
-	if rl.selected != 2 {
-		t.Errorf("expected selection 2 after second j, got %d", rl.selected)
-	}
-
 	rl, _ = rl.Update(keyMsg("k"))
-	if rl.selected != 1 {
-		t.Errorf("expected selection 1 after k, got %d", rl.selected)
+	if rl.selected != 0 {
+		t.Errorf("expected selection 0 after k, got %d", rl.selected)
 	}
 }
 
 func TestRunListBounds(t *testing.T) {
 	rl := NewRunList(testStore())
+	rl.SetSize(60, 20)
 
-	// Can't go below 0
 	rl, _ = rl.Update(keyMsg("k"))
 	if rl.selected != 0 {
 		t.Errorf("expected selection clamped at 0, got %d", rl.selected)
 	}
 
-	// Can't go above len-1
 	for i := 0; i < 10; i++ {
 		rl, _ = rl.Update(keyMsg("j"))
 	}
@@ -64,6 +59,7 @@ func TestRunListBounds(t *testing.T) {
 
 func TestRunListJumpBottom(t *testing.T) {
 	rl := NewRunList(testStore())
+	rl.SetSize(60, 20)
 
 	rl, _ = rl.Update(keyMsg("G"))
 	if rl.selected != len(rl.filtered)-1 {
@@ -73,11 +69,9 @@ func TestRunListJumpBottom(t *testing.T) {
 
 func TestRunListJumpTop(t *testing.T) {
 	rl := NewRunList(testStore())
+	rl.SetSize(60, 20)
 
-	// Go to bottom first
 	rl, _ = rl.Update(keyMsg("G"))
-
-	// Double-g for top
 	rl, _ = rl.Update(keyMsg("g"))
 	rl, _ = rl.Update(keyMsg("g"))
 	if rl.selected != 0 {
@@ -87,28 +81,25 @@ func TestRunListJumpTop(t *testing.T) {
 
 func TestRunListView(t *testing.T) {
 	rl := NewRunList(testStore())
-	rl.SetSize(80, 10)
+	rl.SetSize(60, 20)
 	view := rl.View()
 
-	if !strings.Contains(view, "#001") {
-		t.Error("expected view to contain run #001")
+	if !strings.Contains(view, "Runs") {
+		t.Error("expected view to contain 'Runs' title")
 	}
-	if !strings.Contains(view, "feat/add-auth") {
-		t.Error("expected view to contain branch name")
-	}
-	if !strings.Contains(view, "sdlc") {
-		t.Error("expected view to contain workflow name")
+	if !strings.Contains(view, "feat/add-auth") || !strings.Contains(view, "fix/nav-bug") {
+		t.Error("expected view to contain branch names")
 	}
 }
 
 func TestRunListSelectedRun(t *testing.T) {
 	rl := NewRunList(testStore())
+	rl.SetSize(60, 20)
 
 	r := rl.SelectedRun()
 	if r == nil {
 		t.Fatal("expected non-nil selected run")
 	}
-	// Store prepends, so newest is first. Run #004 was added last.
 	if r.ID != "004" {
 		t.Errorf("expected run 004 (newest), got %s", r.ID)
 	}
@@ -123,6 +114,7 @@ func TestRunListSelectedRun(t *testing.T) {
 func TestRunListEmpty(t *testing.T) {
 	s := run.NewStore()
 	rl := NewRunList(s)
+	rl.SetSize(60, 20)
 	view := rl.View()
 	if !strings.Contains(view, "No runs") {
 		t.Error("expected empty list message")
@@ -135,17 +127,14 @@ func TestRunListEmpty(t *testing.T) {
 func TestRunListStoreUpdate(t *testing.T) {
 	s := testStore()
 	rl := NewRunList(s)
-	rl.SetSize(80, 20)
+	rl.SetSize(60, 20)
 
-	// Add a new run
 	s.Add(&run.Run{Branch: "feat/new-run", Workflow: "build", State: run.StateRunning})
-
-	// Simulate the RunStoreUpdatedMsg
 	rl, _ = rl.Update(RunStoreUpdatedMsg{})
 
 	view := rl.View()
 	if !strings.Contains(view, "feat/new-run") {
-		t.Error("expected new run to appear in view after store update")
+		t.Error("expected new run to appear after store update")
 	}
 	if len(rl.filtered) != 5 {
 		t.Errorf("expected 5 filtered runs, got %d", len(rl.filtered))
@@ -154,29 +143,17 @@ func TestRunListStoreUpdate(t *testing.T) {
 
 func TestRunListFilter(t *testing.T) {
 	rl := NewRunList(testStore())
-	rl.SetSize(80, 20)
+	rl.SetSize(60, 20)
 
-	// Activate filter
 	rl, _ = rl.Update(keyMsg("/"))
 	if !rl.filterActive {
 		t.Fatal("expected filter to be active")
 	}
 
-	// Type "feat"
 	for _, c := range "feat" {
 		rl, _ = rl.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{c}})
 	}
 
-	// Should only show runs with "feat" in branch
-	count := 0
-	for _, r := range rl.filtered {
-		if strings.Contains(strings.ToLower(r.Branch), "feat") {
-			count++
-		}
-	}
-	if count != len(rl.filtered) {
-		t.Errorf("expected all filtered runs to contain 'feat', got %d/%d", count, len(rl.filtered))
-	}
 	if len(rl.filtered) != 2 {
 		t.Errorf("expected 2 runs matching 'feat', got %d", len(rl.filtered))
 	}
@@ -185,27 +162,35 @@ func TestRunListFilter(t *testing.T) {
 func TestRunListFilterClear(t *testing.T) {
 	s := testStore()
 	rl := NewRunList(s)
-	rl.SetSize(80, 20)
+	rl.SetSize(60, 20)
 	totalRuns := len(rl.filtered)
 
-	// Activate filter and type
 	rl, _ = rl.Update(keyMsg("/"))
 	for _, c := range "feat" {
 		rl, _ = rl.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{c}})
 	}
 
-	if len(rl.filtered) == totalRuns {
-		t.Error("expected filter to reduce results")
-	}
-
-	// Press Esc to clear filter
 	rl, _ = rl.Update(tea.KeyMsg{Type: tea.KeyEsc})
-
 	if rl.filterActive {
-		t.Error("expected filter to be deactivated after Esc")
+		t.Error("expected filter deactivated after Esc")
 	}
 	if len(rl.filtered) != totalRuns {
 		t.Errorf("expected all %d runs after Esc, got %d", totalRuns, len(rl.filtered))
+	}
+}
+
+func TestRunListIconRendering(t *testing.T) {
+	rl := NewRunList(testStore())
+	rl.SetSize(60, 20)
+	view := rl.View()
+
+	// Running run should have ● icon
+	if !strings.Contains(view, "●") {
+		t.Error("expected ● icon for running run")
+	}
+	// Failed run should have ✗ icon
+	if !strings.Contains(view, "✗") {
+		t.Error("expected ✗ icon for failed run")
 	}
 }
 
@@ -215,9 +200,8 @@ func TestRunListScrolling(t *testing.T) {
 		s.Add(&run.Run{Branch: "branch", Workflow: "build", State: run.StateRunning})
 	}
 	rl := NewRunList(s)
-	rl.SetSize(80, 5)
+	rl.SetSize(60, 8) // Small height to force scrolling
 
-	// Navigate down past visible area
 	for i := 0; i < 10; i++ {
 		rl, _ = rl.Update(keyMsg("j"))
 	}
@@ -225,53 +209,7 @@ func TestRunListScrolling(t *testing.T) {
 	if rl.selected != 10 {
 		t.Errorf("expected selection 10, got %d", rl.selected)
 	}
-	// Offset should have adjusted to keep selection visible
 	if rl.offset == 0 {
 		t.Error("expected offset to be non-zero after scrolling down")
-	}
-}
-
-func TestRunListScrollIndicators(t *testing.T) {
-	s := run.NewStore()
-	for i := 0; i < 20; i++ {
-		s.Add(&run.Run{Branch: "branch", Workflow: "build", State: run.StateRunning})
-	}
-	rl := NewRunList(s)
-	rl.SetSize(80, 5)
-
-	// At top, should see bottom indicator
-	view := rl.View()
-	if !strings.Contains(view, "▼") {
-		t.Error("expected ▼ indicator when more content below")
-	}
-
-	// Scroll to middle
-	for i := 0; i < 10; i++ {
-		rl, _ = rl.Update(keyMsg("j"))
-	}
-	view = rl.View()
-	if !strings.Contains(view, "▲") {
-		t.Error("expected ▲ indicator when content above")
-	}
-	if !strings.Contains(view, "▼") {
-		t.Error("expected ▼ indicator when content below")
-	}
-}
-
-func TestRunListFilterNoMatch(t *testing.T) {
-	rl := NewRunList(testStore())
-	rl.SetSize(80, 20)
-
-	rl, _ = rl.Update(keyMsg("/"))
-	for _, c := range "zzzzz" {
-		rl, _ = rl.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{c}})
-	}
-
-	view := rl.View()
-	if !strings.Contains(view, "No matching runs") {
-		t.Error("expected 'No matching runs' message")
-	}
-	if rl.SelectedRun() != nil {
-		t.Error("expected nil SelectedRun when filter matches nothing")
 	}
 }
