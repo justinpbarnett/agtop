@@ -1,20 +1,33 @@
 package layout
 
 // Layout holds the computed pixel dimensions for all panels.
+//
+// The layout arranges panels as:
+//
+//	┌─RunList──┬──LogView──┐
+//	│          │           │
+//	├─Detail───┤           │
+//	│          │           │
+//	└──────StatusBar───────┘
+//
+// RunList and Detail share the left column width.
+// LogView spans the full usable height on the right.
 type Layout struct {
 	TermWidth  int
 	TermHeight int
 	TooSmall   bool
 
-	// Top row panels
+	// Left column — top
 	RunListWidth  int
 	RunListHeight int
-	LogViewWidth  int
-	LogViewHeight int
 
-	// Bottom row panel
+	// Left column — bottom
 	DetailWidth  int
 	DetailHeight int
+
+	// Right column — full height
+	LogViewWidth  int
+	LogViewHeight int
 
 	// Status bar
 	StatusBarWidth int
@@ -24,10 +37,8 @@ const (
 	MinWidth  = 80
 	MinHeight = 24
 
-	TopRowWeight    = 0.65
-	BottomRowWeight = 0.35
-	LeftColWeight   = 0.40
-	RightColWeight  = 0.60
+	LeftColWeight    = 0.40
+	RunListRowWeight = 0.55
 )
 
 // Calculate computes panel dimensions from terminal size.
@@ -46,19 +57,19 @@ func Calculate(termWidth, termHeight int) Layout {
 
 	usableHeight := termHeight - 1 // status bar
 
-	topRowHeight := int(float64(usableHeight) * TopRowWeight)
-	bottomRowHeight := usableHeight - topRowHeight
+	leftWidth := int(float64(termWidth) * LeftColWeight)
+	rightWidth := termWidth - leftWidth
 
-	runListWidth := int(float64(termWidth) * LeftColWeight)
-	logViewWidth := termWidth - runListWidth
+	runListHeight := int(float64(usableHeight) * RunListRowWeight)
+	detailHeight := usableHeight - runListHeight
 
-	l.RunListWidth = runListWidth
-	l.RunListHeight = topRowHeight
-	l.LogViewWidth = logViewWidth
-	l.LogViewHeight = topRowHeight
+	l.RunListWidth = leftWidth
+	l.RunListHeight = runListHeight
+	l.DetailWidth = leftWidth
+	l.DetailHeight = detailHeight
 
-	l.DetailWidth = termWidth
-	l.DetailHeight = bottomRowHeight
+	l.LogViewWidth = rightWidth
+	l.LogViewHeight = usableHeight
 
 	l.StatusBarWidth = termWidth
 
