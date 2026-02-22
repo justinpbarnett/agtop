@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -13,25 +15,43 @@ import (
 	"github.com/justinpbarnett/agtop/internal/ui/styles"
 )
 
+const gTimeout = 300 * time.Millisecond
+
 // logLineRe matches log lines like "[14:32:01 route] message"
 var logLineRe = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\s+(\S+)\]\s*(.*)$`)
 
+// GTimerExpiredMsg is sent when the gg double-tap window expires.
+type GTimerExpiredMsg struct{}
+
 type LogView struct {
-	viewport viewport.Model
-	width    int
-	height   int
-	buffer   *process.RingBuffer
-	runID    string
-	skill    string
-	branch   string
-	active   bool
-	follow   bool
-	focused  bool
+	viewport    viewport.Model
+	width       int
+	height      int
+	buffer      *process.RingBuffer
+	runID       string
+	skill       string
+	branch      string
+	active      bool
+	follow      bool
+	focused     bool
+	gPending    bool
+	scrollSpeed int
+
+	// Search state
+	searching    bool
+	searchInput  textinput.Model
+	searchQuery  string
+	matchIndices []int
+	currentMatch int
 }
 
 func NewLogView() LogView {
 	vp := viewport.New(0, 0)
-	return LogView{viewport: vp, follow: true}
+	ti := textinput.New()
+	ti.Prompt = "/"
+	ti.Placeholder = "Search..."
+	ti.CharLimit = 256
+	return LogView{viewport: vp, follow: true, searchInput: ti, scrollSpeed: 3}
 }
 
 func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
@@ -39,28 +59,128 @@ func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
 	case LogLineMsg:
 		if msg.RunID == l.runID && l.buffer != nil {
 			atBottom := l.viewport.AtBottom()
-			l.viewport.SetContent(formatLogContent(strings.Join(l.buffer.Lines(), "\n"), l.active))
+			l.viewport.SetContent(l.renderContent())
 			if atBottom || l.follow {
 				l.viewport.GotoBottom()
 			}
+			if l.searchQuery != "" {
+				l.recomputeMatches()
+			}
 			return l, nil
 		}
+	case GTimerExpiredMsg:
+		l.gPending = false
+		return l, nil
 	case tea.KeyMsg:
+		// Route keys to search input when in search input mode
+		if l.searching {
+			return l.updateSearch(msg)
+		}
+
+		// Search query active (not typing) — handle n/N navigation
+		if l.searchQuery != "" {
+			switch msg.String() {
+			case "n":
+				l.nextMatch()
+				return l, nil
+			case "N":
+				l.prevMatch()
+				return l, nil
+			case "/":
+				l.searching = true
+				l.searchInput.SetValue(l.searchQuery)
+				l.searchInput.Focus()
+				l.resizeViewport()
+				return l, textinput.Blink
+			}
+		}
+
 		switch msg.String() {
 		case "G":
 			l.follow = true
 			l.viewport.GotoBottom()
 			return l, nil
 		case "g":
+			if l.gPending {
+				// Second g — jump to top
+				l.gPending = false
+				l.follow = false
+				l.viewport.GotoTop()
+				return l, nil
+			}
+			// First g — start timer
+			l.gPending = true
 			l.follow = false
-		case "j", "k", "up", "down":
+			return l, tea.Tick(gTimeout, func(time.Time) tea.Msg {
+				return GTimerExpiredMsg{}
+			})
+		case "/":
+			l.searching = true
 			l.follow = false
+			l.searchInput.SetValue("")
+			l.searchInput.Focus()
+			l.resizeViewport()
+			return l, textinput.Blink
+		case "j", "down":
+			l.follow = false
+			step := l.scrollSpeed
+			if step <= 0 {
+				step = 1
+			}
+			l.viewport.SetYOffset(l.viewport.YOffset + step)
+			return l, nil
+		case "k", "up":
+			l.follow = false
+			step := l.scrollSpeed
+			if step <= 0 {
+				step = 1
+			}
+			offset := l.viewport.YOffset - step
+			if offset < 0 {
+				offset = 0
+			}
+			l.viewport.SetYOffset(offset)
+			return l, nil
 		}
 	}
 
 	var cmd tea.Cmd
 	l.viewport, cmd = l.viewport.Update(msg)
 	return l, cmd
+}
+
+func (l *LogView) updateSearch(msg tea.KeyMsg) (LogView, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		l.searching = false
+		l.searchQuery = ""
+		l.matchIndices = nil
+		l.currentMatch = 0
+		l.searchInput.Blur()
+		l.resizeViewport()
+		l.refreshContent()
+		return *l, nil
+	case "enter":
+		l.searching = false
+		l.searchQuery = l.searchInput.Value()
+		l.searchInput.Blur()
+		l.resizeViewport()
+		l.recomputeMatches()
+		if len(l.matchIndices) > 0 {
+			l.currentMatch = 0
+			l.jumpToMatch()
+		}
+		l.refreshContent()
+		return *l, nil
+	}
+
+	var cmd tea.Cmd
+	l.searchInput, cmd = l.searchInput.Update(msg)
+	// Live-update matches as user types
+	l.searchQuery = l.searchInput.Value()
+	l.recomputeMatches()
+	l.refreshContent()
+	return *l, cmd
 }
 
 func (l LogView) View() string {
@@ -81,37 +201,55 @@ func (l LogView) View() string {
 		keybinds = []border.Keybind{
 			{Key: "G", Label: "bottom"},
 			{Key: "g", Label: "g top"},
+			{Key: "/", Label: "search"},
 		}
-		// Show new output indicator when scrolled up
 		if !l.viewport.AtBottom() && !l.follow {
 			keybinds = append(keybinds, border.Keybind{Key: "↓", Label: " new output"})
 		}
 	}
 
 	content := l.viewport.View()
+
+	// Append search bar or match status below the viewport
+	if l.searching {
+		content += "\n" + l.searchInput.View()
+	} else if l.searchQuery != "" {
+		total := len(l.matchIndices)
+		var status string
+		if total == 0 {
+			status = styles.TextDimStyle.Render("  No matches")
+		} else {
+			status = styles.TextSecondaryStyle.Render(
+				fmt.Sprintf("  Match %d/%d", l.currentMatch+1, total),
+			) + styles.TextDimStyle.Render(" (n/N navigate, / edit, Esc clear)")
+		}
+		content += "\n" + status
+	}
+
 	return border.RenderPanel(title, content, keybinds, l.width, l.height, l.focused)
 }
 
 func (l *LogView) SetSize(w, h int) {
 	l.width = w
 	l.height = h
-	innerW := w - 2
-	innerH := h - 2
-	if innerW < 0 {
-		innerW = 0
-	}
-	if innerH < 0 {
-		innerH = 0
-	}
-	l.viewport.Width = innerW
-	l.viewport.Height = innerH
-	// Re-set content so the viewport wraps at the correct width.
-	// Without this, content set before SetSize is wrapped at width 0.
+	l.resizeViewport()
 	l.refreshContent()
 }
 
 func (l *LogView) SetFocused(focused bool) {
 	l.focused = focused
+}
+
+func (l *LogView) SetScrollSpeed(speed int) {
+	if speed > 0 {
+		l.scrollSpeed = speed
+	}
+}
+
+// ConsumesKeys reports whether the log view is in a mode that should
+// consume all key events (search input or active search query navigation).
+func (l LogView) ConsumesKeys() bool {
+	return l.searching || l.searchQuery != ""
 }
 
 func (l *LogView) SetRun(runID, skill, branch string, buf *process.RingBuffer, active bool) {
@@ -121,12 +259,41 @@ func (l *LogView) SetRun(runID, skill, branch string, buf *process.RingBuffer, a
 	l.buffer = buf
 	l.active = active
 	l.follow = true
+	l.searchQuery = ""
+	l.matchIndices = nil
+	l.searching = false
 	l.refreshContent()
+}
+
+// resizeViewport recalculates the viewport inner dimensions, accounting for
+// the search bar when it's visible.
+func (l *LogView) resizeViewport() {
+	innerW := l.width - 2
+	innerH := l.height - 2
+	if l.searching || l.searchQuery != "" {
+		innerH-- // Reserve 1 row for search bar / status
+	}
+	if innerW < 0 {
+		innerW = 0
+	}
+	if innerH < 0 {
+		innerH = 0
+	}
+	l.viewport.Width = innerW
+	l.viewport.Height = innerH
 }
 
 // refreshContent re-sets the viewport content from the current buffer or mock data,
 // ensuring it's wrapped at the current viewport width.
 func (l *LogView) refreshContent() {
+	l.viewport.SetContent(l.renderContent())
+	if l.follow {
+		l.viewport.GotoBottom()
+	}
+}
+
+// renderContent builds the styled log content, including search highlights.
+func (l *LogView) renderContent() string {
 	var raw string
 	if l.buffer != nil {
 		lines := l.buffer.Lines()
@@ -138,50 +305,150 @@ func (l *LogView) refreshContent() {
 	} else {
 		raw = mockLogContent()
 	}
-	l.viewport.SetContent(formatLogContent(raw, l.active))
-	if l.follow {
-		l.viewport.GotoBottom()
+	return formatLogContent(raw, l.active, l.searchQuery, l.matchIndices, l.currentMatch)
+}
+
+func (l *LogView) recomputeMatches() {
+	l.matchIndices = nil
+	l.currentMatch = 0
+	if l.searchQuery == "" {
+		return
+	}
+	query := strings.ToLower(l.searchQuery)
+	var lines []string
+	if l.buffer != nil {
+		lines = l.buffer.Lines()
+	}
+	for i, line := range lines {
+		if strings.Contains(strings.ToLower(line), query) {
+			l.matchIndices = append(l.matchIndices, i)
+		}
 	}
 }
 
+func (l *LogView) nextMatch() {
+	if len(l.matchIndices) == 0 {
+		return
+	}
+	l.currentMatch = (l.currentMatch + 1) % len(l.matchIndices)
+	l.jumpToMatch()
+}
+
+func (l *LogView) prevMatch() {
+	if len(l.matchIndices) == 0 {
+		return
+	}
+	l.currentMatch = (l.currentMatch - 1 + len(l.matchIndices)) % len(l.matchIndices)
+	l.jumpToMatch()
+}
+
+func (l *LogView) jumpToMatch() {
+	if len(l.matchIndices) == 0 {
+		return
+	}
+	lineIdx := l.matchIndices[l.currentMatch]
+	l.follow = false
+	l.viewport.SetYOffset(lineIdx)
+	l.refreshContent()
+}
+
 // formatLogContent styles log lines: timestamps in TextDim, tool names in TextSecondary,
-// tool use lines indented, and appends a streaming cursor if active.
-func formatLogContent(content string, active bool) string {
+// and appends a streaming cursor if active. Supports search highlighting.
+func formatLogContent(content string, active bool, searchQuery string, matchIndices []int, currentMatch int) string {
 	if content == "" {
 		return content
 	}
 
 	tsStyle := styles.TextDimStyle
 	skillStyle := styles.TextSecondaryStyle
+	msgStyle := lipgloss.NewStyle().Foreground(styles.TextPrimary)
+
+	// Build a set of matching line indices for quick lookup
+	matchSet := make(map[int]bool, len(matchIndices))
+	for _, idx := range matchIndices {
+		matchSet[idx] = true
+	}
+	var currentMatchLine int
+	if len(matchIndices) > 0 && currentMatch >= 0 && currentMatch < len(matchIndices) {
+		currentMatchLine = matchIndices[currentMatch]
+	} else {
+		currentMatchLine = -1
+	}
 
 	lines := strings.Split(content, "\n")
 	styled := make([]string, 0, len(lines))
 
-	for _, line := range lines {
+	for i, line := range lines {
 		m := logLineRe.FindStringSubmatch(line)
 		if m != nil {
 			timestamp := m[1]
 			skillName := m[2]
 			message := m[3]
 
-			styledLine := tsStyle.Render(timestamp) + " " +
-				skillStyle.Render(skillName) + " " +
-				lipgloss.NewStyle().Foreground(styles.TextPrimary).Render(message)
-
-			styled = append(styled, styledLine)
+			// Apply search highlighting to the message portion
+			if searchQuery != "" && matchSet[i] {
+				isCurrent := i == currentMatchLine
+				message = highlightMatches(message, searchQuery, isCurrent)
+				styledLine := tsStyle.Render(timestamp) + " " +
+					skillStyle.Render(skillName) + " " + message
+				styled = append(styled, styledLine)
+			} else {
+				styledLine := tsStyle.Render(timestamp) + " " +
+					skillStyle.Render(skillName) + " " +
+					msgStyle.Render(message)
+				styled = append(styled, styledLine)
+			}
 		} else {
-			styled = append(styled, line)
+			// Raw lines — pass through without wrapping in extra styles
+			// to preserve ANSI sequences from the subprocess
+			if searchQuery != "" && matchSet[i] {
+				isCurrent := i == currentMatchLine
+				styled = append(styled, highlightMatches(line, searchQuery, isCurrent))
+			} else {
+				styled = append(styled, line)
+			}
 		}
 	}
 
 	result := strings.Join(styled, "\n")
 
-	// Append streaming cursor for active runs
 	if active {
 		result += " ▍"
 	}
 
 	return result
+}
+
+// highlightMatches wraps occurrences of query in line with highlight styling.
+// Uses case-insensitive matching with literal string comparison.
+func highlightMatches(line, query string, isCurrent bool) string {
+	if query == "" {
+		return line
+	}
+	lower := strings.ToLower(line)
+	lowerQ := strings.ToLower(query)
+
+	style := styles.SearchHighlightStyle
+	if isCurrent {
+		style = styles.CurrentMatchStyle
+	}
+
+	var b strings.Builder
+	start := 0
+	qLen := len(lowerQ)
+	for {
+		idx := strings.Index(lower[start:], lowerQ)
+		if idx < 0 {
+			b.WriteString(line[start:])
+			break
+		}
+		// Write text before match
+		b.WriteString(line[start : start+idx])
+		// Write highlighted match (using original case)
+		b.WriteString(style.Render(line[start+idx : start+idx+qLen]))
+		start += idx + qLen
+	}
+	return b.String()
 }
 
 func mockLogContent() string {

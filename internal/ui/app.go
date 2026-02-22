@@ -105,6 +105,9 @@ func NewApp(cfg *config.Config) App {
 	rl := panels.NewRunList(store)
 	rl.SetFocused(true)
 	lv := panels.NewLogView()
+	if cfg.UI.LogScrollSpeed > 0 {
+		lv.SetScrollSpeed(cfg.UI.LogScrollSpeed)
+	}
 	d := panels.NewDetail()
 
 	selected := rl.SelectedRun()
@@ -204,10 +207,28 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.logView, cmd = a.logView.Update(msg)
 		return a, cmd
 
+	case panels.GTimerExpiredMsg:
+		var cmd tea.Cmd
+		a.logView, cmd = a.logView.Update(msg)
+		return a, cmd
+
 	case tea.KeyMsg:
 		if a.helpOverlay != nil {
 			var cmd tea.Cmd
 			*a.helpOverlay, cmd = a.helpOverlay.Update(msg)
+			return a, cmd
+		}
+
+		// When the log view is in search mode, route keys directly to it
+		// so that typing and n/N navigation aren't intercepted by global handlers.
+		if a.focusedPanel == panelLogView && a.logView.ConsumesKeys() {
+			switch msg.String() {
+			case "ctrl+c":
+				a.devServers.StopAll()
+				return a, tea.Quit
+			}
+			var cmd tea.Cmd
+			a.logView, cmd = a.logView.Update(msg)
 			return a, cmd
 		}
 
