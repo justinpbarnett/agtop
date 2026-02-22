@@ -15,11 +15,40 @@ const (
 )
 
 type Run struct {
-	ID       string
-	Branch   string
-	Worktree string
-	Workflow string
-	State    State
-	Tokens   int
-	Cost     float64
+	ID         string
+	Branch     string
+	Worktree   string
+	Workflow   string
+	State      State
+	SkillIndex int
+	SkillTotal int
+	Tokens     int
+	Cost       float64
+}
+
+func (r *Run) StatusIcon() string {
+	switch r.State {
+	case StateRunning, StateRouting:
+		return "●"
+	case StatePaused:
+		return "◐"
+	case StateCompleted, StateAccepted:
+		return "✓"
+	case StateFailed, StateRejected:
+		return "✗"
+	case StateReviewing:
+		return "◉"
+	case StateQueued:
+		return "○"
+	default:
+		return "·"
+	}
+}
+
+func (r *Run) IsTerminal() bool {
+	switch r.State {
+	case StateCompleted, StateAccepted, StateRejected, StateFailed:
+		return true
+	}
+	return false
 }
