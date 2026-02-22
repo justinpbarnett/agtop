@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/justinpbarnett/agtop/internal/config"
+	"github.com/justinpbarnett/agtop/internal/cost"
 	"github.com/justinpbarnett/agtop/internal/run"
 	"github.com/justinpbarnett/agtop/internal/runtime"
 )
@@ -115,7 +116,12 @@ func testManager(rt runtime.Runtime) (*Manager, *run.Store) {
 		MaxTokensPerRun:   500000,
 		MaxCostPerRun:     5.00,
 	}
-	mgr := NewManager(store, rt, cfg)
+	tracker := cost.NewTracker()
+	limiter := &cost.LimitChecker{
+		MaxTokensPerRun: cfg.MaxTokensPerRun,
+		MaxCostPerRun:   cfg.MaxCostPerRun,
+	}
+	mgr := NewManager(store, rt, cfg, tracker, limiter)
 	return mgr, store
 }
 
@@ -176,7 +182,7 @@ func TestManagerConcurrencyLimit(t *testing.T) {
 		},
 	}
 
-	mgr := NewManager(store, rt, cfg)
+	mgr := NewManager(store, rt, cfg, cost.NewTracker(), &cost.LimitChecker{})
 
 	store.Add(&run.Run{State: run.StateQueued})
 	store.Add(&run.Run{State: run.StateQueued})

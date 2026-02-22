@@ -10,12 +10,19 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/justinpbarnett/agtop/internal/config"
+	"github.com/justinpbarnett/agtop/internal/cost"
 	"github.com/justinpbarnett/agtop/internal/run"
 	"github.com/justinpbarnett/agtop/internal/runtime"
 )
 
 type LogLineMsg struct {
 	RunID string
+}
+
+// CostThresholdMsg is sent when a run breaches a cost or token threshold.
+type CostThresholdMsg struct {
+	RunID  string
+	Reason string
 }
 
 // SkillResult captures the outcome of a single skill subprocess execution.
@@ -34,17 +41,21 @@ type Manager struct {
 	store     *run.Store
 	rt        runtime.Runtime
 	cfg       *config.LimitsConfig
+	tracker   *cost.Tracker
+	limiter   *cost.LimitChecker
 	mu        sync.Mutex
 	processes map[string]*ManagedProcess
 	buffers   map[string]*RingBuffer
 	program   *tea.Program
 }
 
-func NewManager(store *run.Store, rt runtime.Runtime, cfg *config.LimitsConfig) *Manager {
+func NewManager(store *run.Store, rt runtime.Runtime, cfg *config.LimitsConfig, tracker *cost.Tracker, limiter *cost.LimitChecker) *Manager {
 	return &Manager{
 		store:     store,
 		rt:        rt,
 		cfg:       cfg,
+		tracker:   tracker,
+		limiter:   limiter,
 		processes: make(map[string]*ManagedProcess),
 		buffers:   make(map[string]*RingBuffer),
 	}
@@ -176,6 +187,11 @@ func (m *Manager) ActiveCount() int {
 	return len(m.processes)
 }
 
+// Tracker returns the cost tracker for external queries (e.g., UI).
+func (m *Manager) Tracker() *cost.Tracker {
+	return m.tracker
+}
+
 // StartSkill launches a skill subprocess and returns a channel that receives
 // the result when the process exits. Unlike Start(), it does NOT set the run's
 // terminal state (Completed/Failed) on exit — the caller (executor) manages state.
@@ -283,26 +299,7 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 			resultText = event.Text
 
 			if event.Usage != nil {
-				m.store.Update(runID, func(r *run.Run) {
-					r.Tokens += event.Usage.TotalTokens
-					r.Cost += event.Usage.CostUSD
-				})
-
-				if m.cfg.MaxCostPerRun > 0 || m.cfg.MaxTokensPerRun > 0 {
-					r, ok := m.store.Get(runID)
-					if ok {
-						if m.cfg.MaxCostPerRun > 0 && r.Cost >= m.cfg.MaxCostPerRun {
-							warning := fmt.Sprintf("[%s] WARNING: Cost threshold exceeded ($%.2f >= $%.2f), pausing run", ts, r.Cost, m.cfg.MaxCostPerRun)
-							buf.Append(warning)
-							_ = m.Pause(runID)
-						}
-						if m.cfg.MaxTokensPerRun > 0 && r.Tokens >= m.cfg.MaxTokensPerRun {
-							warning := fmt.Sprintf("[%s] WARNING: Token threshold exceeded (%d >= %d), pausing run", ts, r.Tokens, m.cfg.MaxTokensPerRun)
-							buf.Append(warning)
-							_ = m.Pause(runID)
-						}
-					}
-				}
+				m.recordUsage(runID, skill, event.Usage, ts, buf)
 
 				if skill != "" {
 					logLine = fmt.Sprintf("[%s %s] Completed — %d tokens, $%.4f", ts, skill, event.Usage.TotalTokens, event.Usage.CostUSD)
@@ -311,10 +308,18 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 				}
 			}
 		case EventError:
-			if skill != "" {
-				logLine = fmt.Sprintf("[%s %s] ERROR: %s", ts, skill, event.Text)
+			if m.limiter != nil && m.limiter.IsRateLimit(event.Text) {
+				if skill != "" {
+					logLine = fmt.Sprintf("[%s %s] RATE LIMITED: %s", ts, skill, event.Text)
+				} else {
+					logLine = fmt.Sprintf("[%s] RATE LIMITED: %s", ts, event.Text)
+				}
 			} else {
-				logLine = fmt.Sprintf("[%s] ERROR: %s", ts, event.Text)
+				if skill != "" {
+					logLine = fmt.Sprintf("[%s %s] ERROR: %s", ts, skill, event.Text)
+				} else {
+					logLine = fmt.Sprintf("[%s] ERROR: %s", ts, event.Text)
+				}
 			}
 		case EventRaw:
 			if skill != "" {
@@ -349,8 +354,6 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 }
 
 func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffer) {
-	var resultText string
-
 	// Get current skill name for log prefix
 	skillName := func() string {
 		r, ok := m.store.Get(runID)
@@ -407,30 +410,8 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 				logLine = fmt.Sprintf("[%s] Result: %s", ts, event.Text)
 			}
 		case EventResult:
-			resultText = event.Text
-
 			if event.Usage != nil {
-				m.store.Update(runID, func(r *run.Run) {
-					r.Tokens += event.Usage.TotalTokens
-					r.Cost += event.Usage.CostUSD
-				})
-
-				// Check cost/token thresholds
-				if m.cfg.MaxCostPerRun > 0 || m.cfg.MaxTokensPerRun > 0 {
-					r, ok := m.store.Get(runID)
-					if ok {
-						if m.cfg.MaxCostPerRun > 0 && r.Cost >= m.cfg.MaxCostPerRun {
-							warning := fmt.Sprintf("[%s] WARNING: Cost threshold exceeded ($%.2f >= $%.2f), pausing run", ts, r.Cost, m.cfg.MaxCostPerRun)
-							buf.Append(warning)
-							_ = m.Pause(runID)
-						}
-						if m.cfg.MaxTokensPerRun > 0 && r.Tokens >= m.cfg.MaxTokensPerRun {
-							warning := fmt.Sprintf("[%s] WARNING: Token threshold exceeded (%d >= %d), pausing run", ts, r.Tokens, m.cfg.MaxTokensPerRun)
-							buf.Append(warning)
-							_ = m.Pause(runID)
-						}
-					}
-				}
+				m.recordUsage(runID, skill, event.Usage, ts, buf)
 
 				if skill != "" {
 					logLine = fmt.Sprintf("[%s %s] Completed — %d tokens, $%.4f", ts, skill, event.Usage.TotalTokens, event.Usage.CostUSD)
@@ -439,10 +420,18 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 				}
 			}
 		case EventError:
-			if skill != "" {
-				logLine = fmt.Sprintf("[%s %s] ERROR: %s", ts, skill, event.Text)
+			if m.limiter != nil && m.limiter.IsRateLimit(event.Text) {
+				if skill != "" {
+					logLine = fmt.Sprintf("[%s %s] RATE LIMITED: %s", ts, skill, event.Text)
+				} else {
+					logLine = fmt.Sprintf("[%s] RATE LIMITED: %s", ts, event.Text)
+				}
 			} else {
-				logLine = fmt.Sprintf("[%s] ERROR: %s", ts, event.Text)
+				if skill != "" {
+					logLine = fmt.Sprintf("[%s %s] ERROR: %s", ts, skill, event.Text)
+				} else {
+					logLine = fmt.Sprintf("[%s] ERROR: %s", ts, event.Text)
+				}
 			}
 		case EventRaw:
 			if skill != "" {
@@ -457,8 +446,6 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 			m.sendLogLine(runID)
 		}
 	}
-
-	_ = resultText // captured for future use (e.g., executor chaining)
 
 	// Wait for process to exit
 	var exitErr error
@@ -486,11 +473,62 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 	m.mu.Unlock()
 }
 
+// recordUsage updates run token/cost fields, records to the tracker, and checks thresholds.
+func (m *Manager) recordUsage(runID string, skill string, usage *UsageData, ts string, buf *RingBuffer) {
+	m.store.Update(runID, func(r *run.Run) {
+		r.TokensIn += usage.InputTokens
+		r.TokensOut += usage.OutputTokens
+		r.Tokens += usage.TotalTokens
+		r.Cost += usage.CostUSD
+		r.SkillCosts = append(r.SkillCosts, cost.SkillCost{
+			SkillName:    skill,
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+			TotalTokens:  usage.TotalTokens,
+			CostUSD:      usage.CostUSD,
+			CompletedAt:  time.Now(),
+		})
+	})
+
+	if m.tracker != nil {
+		m.tracker.Record(runID, cost.SkillCost{
+			SkillName:    skill,
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+			TotalTokens:  usage.TotalTokens,
+			CostUSD:      usage.CostUSD,
+			CompletedAt:  time.Now(),
+		})
+	}
+
+	if m.limiter != nil {
+		r, ok := m.store.Get(runID)
+		if ok {
+			if exceeded, reason := m.limiter.CheckRun(r.Tokens, r.Cost); exceeded {
+				warning := fmt.Sprintf("[%s] WARNING: %s, pausing run", ts, reason)
+				buf.Append(warning)
+				m.sendLogLine(runID)
+				_ = m.Pause(runID)
+				m.sendCostThreshold(runID, reason)
+			}
+		}
+	}
+}
+
 func (m *Manager) sendLogLine(runID string) {
 	m.mu.Lock()
 	p := m.program
 	m.mu.Unlock()
 	if p != nil {
 		p.Send(LogLineMsg{RunID: runID})
+	}
+}
+
+func (m *Manager) sendCostThreshold(runID string, reason string) {
+	m.mu.Lock()
+	p := m.program
+	m.mu.Unlock()
+	if p != nil {
+		p.Send(CostThresholdMsg{RunID: runID, Reason: reason})
 	}
 }
