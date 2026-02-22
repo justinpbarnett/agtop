@@ -27,13 +27,13 @@ Running AI coding agents in the background means losing visibility into what the
 ### Install
 
 ```bash
-go install github.com/jpb/agtop/cmd/agtop@latest
+go install github.com/justinpbarnett/agtop/cmd/agtop@latest
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/jpb/agtop.git
+git clone https://github.com/justinpbarnett/agtop.git
 cd agtop
 make build       # outputs to bin/agtop
 make install     # installs to $GOPATH/bin
@@ -57,14 +57,14 @@ See [`agtop.example.yaml`](agtop.example.yaml) for all available options.
 
 ### Key Bindings
 
-| Key | Action |
-|-----|--------|
-| `j` / `k` | Navigate run list |
-| `l` / `h` | Next / previous detail tab |
-| `G` / `gg` | Jump to bottom / top |
-| `Tab` | Cycle panel focus |
-| `?` | Toggle help |
-| `q` / `Ctrl+C` | Quit |
+| Key            | Action                     |
+| -------------- | -------------------------- |
+| `j` / `k`      | Navigate run list          |
+| `l` / `h`      | Next / previous detail tab |
+| `G` / `gg`     | Jump to bottom / top       |
+| `Tab`          | Cycle panel focus          |
+| `?`            | Toggle help                |
+| `q` / `Ctrl+C` | Quit                       |
 
 ## Configuration
 
@@ -80,10 +80,10 @@ runtime:
     max_turns: 50
 
 workflows:
-  build:      { skills: [route, build, test] }
+  build: { skills: [route, build, test] }
   plan-build: { skills: [route, spec, build, test] }
-  sdlc:       { skills: [route, spec, decompose, build, test, review, document] }
-  quick-fix:  { skills: [build, test, commit] }
+  sdlc: { skills: [route, spec, decompose, build, test, review, document] }
+  quick-fix: { skills: [build, test, commit] }
 
 limits:
   max_cost_per_run: 5.00
