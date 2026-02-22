@@ -3,6 +3,7 @@ package process
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"syscall"
@@ -13,6 +14,7 @@ import (
 	"github.com/justinpbarnett/agtop/internal/cost"
 	"github.com/justinpbarnett/agtop/internal/run"
 	"github.com/justinpbarnett/agtop/internal/runtime"
+	"github.com/justinpbarnett/agtop/internal/safety"
 )
 
 type LogLineMsg struct {
@@ -43,19 +45,21 @@ type Manager struct {
 	cfg       *config.LimitsConfig
 	tracker   *cost.Tracker
 	limiter   *cost.LimitChecker
+	safety    *safety.PatternMatcher
 	mu        sync.Mutex
 	processes map[string]*ManagedProcess
 	buffers   map[string]*RingBuffer
 	program   *tea.Program
 }
 
-func NewManager(store *run.Store, rt runtime.Runtime, cfg *config.LimitsConfig, tracker *cost.Tracker, limiter *cost.LimitChecker) *Manager {
+func NewManager(store *run.Store, rt runtime.Runtime, cfg *config.LimitsConfig, tracker *cost.Tracker, limiter *cost.LimitChecker, safetyMatcher *safety.PatternMatcher) *Manager {
 	return &Manager{
 		store:     store,
 		rt:        rt,
 		cfg:       cfg,
 		tracker:   tracker,
 		limiter:   limiter,
+		safety:    safetyMatcher,
 		processes: make(map[string]*ManagedProcess),
 		buffers:   make(map[string]*RingBuffer),
 	}
@@ -289,6 +293,7 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 			} else {
 				logLine = fmt.Sprintf("[%s] Tool: %s", ts, event.ToolName)
 			}
+			m.checkToolSafety(event.ToolName, event.ToolInput, ts, skill, buf, runID)
 		case EventToolResult:
 			if skill != "" {
 				logLine = fmt.Sprintf("[%s %s] Result: %s", ts, skill, event.Text)
@@ -403,6 +408,7 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 			} else {
 				logLine = fmt.Sprintf("[%s] Tool: %s", ts, event.ToolName)
 			}
+			m.checkToolSafety(event.ToolName, event.ToolInput, ts, skill, buf, runID)
 		case EventToolResult:
 			if skill != "" {
 				logLine = fmt.Sprintf("[%s %s] Result: %s", ts, skill, event.Text)
@@ -530,5 +536,30 @@ func (m *Manager) sendCostThreshold(runID string, reason string) {
 	m.mu.Unlock()
 	if p != nil {
 		p.Send(CostThresholdMsg{RunID: runID, Reason: reason})
+	}
+}
+
+// checkToolSafety checks a Bash tool invocation against safety patterns
+// and returns a warning log line if blocked. The actual blocking is handled
+// by the Claude Code PreToolUse hook — this is informational only.
+func (m *Manager) checkToolSafety(toolName string, toolInput string, ts string, skill string, buf *RingBuffer, runID string) {
+	if m.safety == nil || toolName != "Bash" || toolInput == "" {
+		return
+	}
+	var input struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal([]byte(toolInput), &input); err != nil || input.Command == "" {
+		return
+	}
+	if blocked, pattern := m.safety.Check(input.Command); blocked {
+		var warning string
+		if skill != "" {
+			warning = fmt.Sprintf("[%s %s] WARNING: safety pattern matched: %s", ts, skill, pattern)
+		} else {
+			warning = fmt.Sprintf("[%s] WARNING: safety pattern matched: %s", ts, pattern)
+		}
+		buf.Append(warning)
+		m.sendLogLine(runID)
 	}
 }

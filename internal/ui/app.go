@@ -14,6 +14,7 @@ import (
 	"github.com/justinpbarnett/agtop/internal/process"
 	"github.com/justinpbarnett/agtop/internal/run"
 	"github.com/justinpbarnett/agtop/internal/runtime"
+	"github.com/justinpbarnett/agtop/internal/safety"
 	"github.com/justinpbarnett/agtop/internal/ui/layout"
 	"github.com/justinpbarnett/agtop/internal/ui/panels"
 	"github.com/justinpbarnett/agtop/internal/ui/styles"
@@ -60,12 +61,21 @@ func NewApp(cfg *config.Config) App {
 		MaxCostPerRun:   cfg.Limits.MaxCostPerRun,
 	}
 
+	var safetyMatcher *safety.PatternMatcher
+	safetyEngine, safetyErr := safety.NewHookEngine(cfg.Safety)
+	if safetyErr != nil {
+		log.Printf("warning: %v", safetyErr)
+	}
+	if safetyEngine != nil {
+		safetyMatcher = safetyEngine.Matcher()
+	}
+
 	var mgr *process.Manager
 	rt, err := runtime.NewClaudeRuntime()
 	if err != nil {
 		log.Printf("warning: %v (running with mock data)", err)
 	} else {
-		mgr = process.NewManager(store, rt, &cfg.Limits, tracker, limiter)
+		mgr = process.NewManager(store, rt, &cfg.Limits, tracker, limiter, safetyMatcher)
 	}
 
 	reg := engine.NewRegistry(cfg)

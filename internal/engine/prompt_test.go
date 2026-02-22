@@ -88,6 +88,62 @@ func TestBuildPromptMinimal(t *testing.T) {
 	}
 }
 
+func TestBuildPromptSafetyPreamblePresent(t *testing.T) {
+	skill := &Skill{
+		Name:    "build",
+		Content: "Build things.",
+	}
+	pctx := PromptContext{
+		WorkDir:    "/tmp/worktree",
+		Branch:     "main",
+		UserPrompt: "Fix the bug",
+		SafetyPatterns: []string{
+			`rm\s+-[rf]+\s+/`,
+			`git\s+push.*--force`,
+			`DROP\s+TABLE`,
+		},
+	}
+
+	result := BuildPrompt(skill, pctx)
+
+	if !strings.Contains(result, "## Safety Constraints") {
+		t.Error("prompt missing Safety Constraints section")
+	}
+	if !strings.Contains(result, "MUST NOT execute") {
+		t.Error("prompt missing safety instruction")
+	}
+	if !strings.Contains(result, `rm\s+-[rf]+\s+/`) {
+		t.Error("prompt missing rm pattern")
+	}
+	if !strings.Contains(result, `git\s+push.*--force`) {
+		t.Error("prompt missing git push pattern")
+	}
+	if !strings.Contains(result, `DROP\s+TABLE`) {
+		t.Error("prompt missing DROP TABLE pattern")
+	}
+	if !strings.Contains(result, "blocked by safety policy") {
+		t.Error("prompt missing safety policy instruction")
+	}
+}
+
+func TestBuildPromptSafetyPreambleAbsent(t *testing.T) {
+	skill := &Skill{
+		Name:    "build",
+		Content: "Build things.",
+	}
+	pctx := PromptContext{
+		WorkDir:    "/tmp/worktree",
+		Branch:     "main",
+		UserPrompt: "Fix the bug",
+	}
+
+	result := BuildPrompt(skill, pctx)
+
+	if strings.Contains(result, "## Safety Constraints") {
+		t.Error("prompt should not contain Safety Constraints when no patterns provided")
+	}
+}
+
 func TestBuildPromptPreservesSkillContent(t *testing.T) {
 	content := "# Big Skill\n\n## Section 1\n\nParagraph with **bold** text.\n\n```go\nfunc main() {}\n```\n\n- item a\n- item b"
 	skill := &Skill{

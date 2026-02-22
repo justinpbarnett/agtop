@@ -179,6 +179,7 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 			Branch:         r.Branch,
 			PreviousOutput: previousOutput,
 			UserPrompt:     userPrompt,
+			SafetyPatterns: e.cfg.Safety.BlockedPatterns,
 		})
 
 		// Execute skill
@@ -355,6 +356,7 @@ func (e *Executor) executeParallelGroup(ctx context.Context, runID string, tasks
 				Branch:         r.Branch,
 				PreviousOutput: previousOutput,
 				UserPrompt:     fmt.Sprintf("%s\n\nSub-task: %s", userPrompt, t.Name),
+				SafetyPatterns: e.cfg.Safety.BlockedPatterns,
 			})
 
 			// For parallel tasks, use composite key so processes don't collide
@@ -397,6 +399,7 @@ func (e *Executor) executeSingleTask(ctx context.Context, runID string, task Dec
 		Branch:         r.Branch,
 		PreviousOutput: previousOutput,
 		UserPrompt:     fmt.Sprintf("%s\n\nSub-task: %s", userPrompt, task.Name),
+		SafetyPatterns: e.cfg.Safety.BlockedPatterns,
 	})
 
 	result, err := e.runSkill(ctx, runID, taskPrompt, opts, skill.Timeout)
