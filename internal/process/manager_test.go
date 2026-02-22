@@ -121,7 +121,7 @@ func testManager(rt runtime.Runtime) (*Manager, *run.Store) {
 		MaxTokensPerRun: cfg.MaxTokensPerRun,
 		MaxCostPerRun:   cfg.MaxCostPerRun,
 	}
-	mgr := NewManager(store, rt, cfg, tracker, limiter, nil)
+	mgr := NewManager(store, rt, "claude", cfg, tracker, limiter, nil)
 	return mgr, store
 }
 
@@ -182,7 +182,7 @@ func TestManagerConcurrencyLimit(t *testing.T) {
 		},
 	}
 
-	mgr := NewManager(store, rt, cfg, cost.NewTracker(), &cost.LimitChecker{}, nil)
+	mgr := NewManager(store, rt, "claude", cfg, cost.NewTracker(), &cost.LimitChecker{}, nil)
 
 	store.Add(&run.Run{State: run.StateQueued})
 	store.Add(&run.Run{State: run.StateQueued})

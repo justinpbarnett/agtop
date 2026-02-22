@@ -79,11 +79,11 @@ func NewApp(cfg *config.Config) App {
 	}
 
 	var mgr *process.Manager
-	rt, err := runtime.NewClaudeRuntime()
+	rt, rtName, err := runtime.NewRuntime(&cfg.Runtime)
 	if err != nil {
 		log.Printf("warning: %v (running with mock data)", err)
 	} else {
-		mgr = process.NewManager(store, rt, &cfg.Limits, tracker, limiter, safetyMatcher)
+		mgr = process.NewManager(store, rt, rtName, &cfg.Limits, tracker, limiter, safetyMatcher)
 	}
 
 	reg := engine.NewRegistry(cfg)

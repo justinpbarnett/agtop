@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sync"
 	"syscall"
 	"time"
@@ -40,29 +41,38 @@ type ManagedProcess struct {
 }
 
 type Manager struct {
-	store     *run.Store
-	rt        runtime.Runtime
-	cfg       *config.LimitsConfig
-	tracker   *cost.Tracker
-	limiter   *cost.LimitChecker
-	safety    *safety.PatternMatcher
-	mu        sync.Mutex
-	processes map[string]*ManagedProcess
-	buffers   map[string]*RingBuffer
-	program   *tea.Program
+	store       *run.Store
+	rt          runtime.Runtime
+	runtimeName string
+	cfg         *config.LimitsConfig
+	tracker     *cost.Tracker
+	limiter     *cost.LimitChecker
+	safety      *safety.PatternMatcher
+	mu          sync.Mutex
+	processes   map[string]*ManagedProcess
+	buffers     map[string]*RingBuffer
+	program     *tea.Program
 }
 
-func NewManager(store *run.Store, rt runtime.Runtime, cfg *config.LimitsConfig, tracker *cost.Tracker, limiter *cost.LimitChecker, safetyMatcher *safety.PatternMatcher) *Manager {
+func NewManager(store *run.Store, rt runtime.Runtime, runtimeName string, cfg *config.LimitsConfig, tracker *cost.Tracker, limiter *cost.LimitChecker, safetyMatcher *safety.PatternMatcher) *Manager {
 	return &Manager{
-		store:     store,
-		rt:        rt,
-		cfg:       cfg,
-		tracker:   tracker,
-		limiter:   limiter,
-		safety:    safetyMatcher,
-		processes: make(map[string]*ManagedProcess),
-		buffers:   make(map[string]*RingBuffer),
+		store:       store,
+		rt:          rt,
+		runtimeName: runtimeName,
+		cfg:         cfg,
+		tracker:     tracker,
+		limiter:     limiter,
+		safety:      safetyMatcher,
+		processes:   make(map[string]*ManagedProcess),
+		buffers:     make(map[string]*RingBuffer),
 	}
+}
+
+func (m *Manager) newParser(r io.Reader, bufSize int) EventStream {
+	if m.runtimeName == "opencode" {
+		return NewOpenCodeStreamParser(r, bufSize)
+	}
+	return NewStreamParser(r, bufSize)
 }
 
 func (m *Manager) SetProgram(p *tea.Program) {
@@ -255,7 +265,7 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 		return r.CurrentSkill
 	}
 
-	parser := NewStreamParser(mp.proc.Stdout, 256)
+	parser := m.newParser(mp.proc.Stdout, 256)
 	go parser.Parse(context.Background())
 
 	go func() {
@@ -369,7 +379,7 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 	}
 
 	// Create stream parser on stdout
-	parser := NewStreamParser(mp.proc.Stdout, 256)
+	parser := m.newParser(mp.proc.Stdout, 256)
 	go parser.Parse(context.Background())
 
 	// Stream stderr as raw events
