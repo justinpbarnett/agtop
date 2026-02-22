@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/justinpbarnett/agtop/internal/process"
 	"github.com/justinpbarnett/agtop/internal/run"
 )
 
@@ -17,6 +18,7 @@ type Detail struct {
 	width       int
 	height      int
 	selectedRun *run.Run
+	manager     *process.Manager
 }
 
 func NewDetail() Detail {
@@ -29,6 +31,13 @@ func NewDetail() Detail {
 
 func (d Detail) Update(msg tea.Msg) (Detail, tea.Cmd) {
 	switch msg := msg.(type) {
+	case LogLineMsg:
+		if d.activeTab == 1 {
+			var cmd tea.Cmd
+			d.logViewer, cmd = d.logViewer.Update(msg)
+			return d, cmd
+		}
+		return d, nil
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "l", "right":
@@ -78,6 +87,13 @@ func (d Detail) View() string {
 
 func (d *Detail) SetRun(r *run.Run) {
 	d.selectedRun = r
+	if r != nil && d.manager != nil {
+		d.logViewer.SetRun(r.ID, d.manager.Buffer(r.ID))
+	}
+}
+
+func (d *Detail) SetManager(m *process.Manager) {
+	d.manager = m
 }
 
 func (d *Detail) SetSize(w, h int) {

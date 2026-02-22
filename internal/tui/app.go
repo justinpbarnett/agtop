@@ -1,12 +1,15 @@
 package tui
 
 import (
+	"log"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/justinpbarnett/agtop/internal/config"
+	"github.com/justinpbarnett/agtop/internal/process"
 	"github.com/justinpbarnett/agtop/internal/run"
+	"github.com/justinpbarnett/agtop/internal/runtime"
 )
 
 const minWidth = 40
@@ -15,6 +18,7 @@ const minHeight = 10
 type App struct {
 	config       *config.Config
 	store        *run.Store
+	manager      *process.Manager
 	width        int
 	height       int
 	focusedPanel int
@@ -28,14 +32,27 @@ type App struct {
 
 func NewApp(cfg *config.Config) App {
 	store := run.NewStore()
+
+	var mgr *process.Manager
+	rt, err := runtime.NewClaudeRuntime()
+	if err != nil {
+		log.Printf("warning: %v (running with mock data)", err)
+	} else {
+		mgr = process.NewManager(store, rt, &cfg.Limits)
+	}
+
 	seedMockData(store)
 
 	rl := NewRunList(store)
 	d := NewDetail()
+	if mgr != nil {
+		d.SetManager(mgr)
+	}
 	d.SetRun(rl.SelectedRun())
 	return App{
 		config:    cfg,
 		store:     store,
+		manager:   mgr,
 		runList:   rl,
 		detail:    d,
 		statusBar: NewStatusBar(store),
@@ -66,6 +83,22 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.detail.SetRun(a.runList.SelectedRun())
 		cmds := []tea.Cmd{cmd, listenForChanges(a.store.Changes())}
 		return a, tea.Batch(cmds...)
+
+	case process.LogLineMsg:
+		// Convert to tui.LogLineMsg and route to detail
+		selected := a.runList.SelectedRun()
+		if selected != nil && selected.ID == msg.RunID {
+			tuiMsg := LogLineMsg{RunID: msg.RunID}
+			var cmd tea.Cmd
+			a.detail, cmd = a.detail.Update(tuiMsg)
+			return a, cmd
+		}
+		return a, nil
+
+	case LogLineMsg:
+		var cmd tea.Cmd
+		a.detail, cmd = a.detail.Update(msg)
+		return a, cmd
 
 	case tea.KeyMsg:
 		if a.modal != nil {
@@ -134,6 +167,10 @@ func (a App) View() string {
 	}
 
 	return layout
+}
+
+func (a App) Manager() *process.Manager {
+	return a.manager
 }
 
 func (a App) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

@@ -5,21 +5,48 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/justinpbarnett/agtop/internal/process"
 )
 
 type LogViewer struct {
 	viewport viewport.Model
 	width    int
 	height   int
+	buffer   *process.RingBuffer
+	runID    string
+	follow   bool
 }
 
 func NewLogViewer() LogViewer {
 	vp := viewport.New(0, 0)
 	vp.SetContent(mockLogContent())
-	return LogViewer{viewport: vp}
+	return LogViewer{viewport: vp, follow: true}
 }
 
 func (l LogViewer) Update(msg tea.Msg) (LogViewer, tea.Cmd) {
+	switch msg := msg.(type) {
+	case LogLineMsg:
+		if msg.RunID == l.runID && l.buffer != nil {
+			atBottom := l.viewport.AtBottom()
+			l.viewport.SetContent(strings.Join(l.buffer.Lines(), "\n"))
+			if atBottom || l.follow {
+				l.viewport.GotoBottom()
+			}
+			return l, nil
+		}
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "G":
+			l.follow = true
+			l.viewport.GotoBottom()
+			return l, nil
+		case "g":
+			l.follow = false
+		case "j", "k", "up", "down":
+			l.follow = false
+		}
+	}
+
 	var cmd tea.Cmd
 	l.viewport, cmd = l.viewport.Update(msg)
 	return l, cmd
@@ -34,6 +61,23 @@ func (l *LogViewer) SetSize(w, h int) {
 	l.height = h
 	l.viewport.Width = w
 	l.viewport.Height = h
+}
+
+func (l *LogViewer) SetRun(runID string, buf *process.RingBuffer) {
+	l.runID = runID
+	l.buffer = buf
+	l.follow = true
+	if buf != nil {
+		lines := buf.Lines()
+		if len(lines) > 0 {
+			l.viewport.SetContent(strings.Join(lines, "\n"))
+		} else {
+			l.viewport.SetContent("Waiting for output...")
+		}
+		l.viewport.GotoBottom()
+	} else {
+		l.viewport.SetContent(mockLogContent())
+	}
 }
 
 func mockLogContent() string {

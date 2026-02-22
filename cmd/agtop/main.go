@@ -18,6 +18,11 @@ func main() {
 
 	model := tui.NewApp(cfg)
 	p := tea.NewProgram(model, tea.WithAltScreen())
+
+	if mgr := model.Manager(); mgr != nil {
+		mgr.SetProgram(p)
+	}
+
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
