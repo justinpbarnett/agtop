@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/justinpbarnett/agtop/internal/run"
 )
 
 const sampleDiff = `diff --git a/src/auth.ts b/src/auth.ts
@@ -314,108 +313,137 @@ func TestDiffViewWaiting(t *testing.T) {
 	}
 }
 
-// --- Detail tab system tests ---
+// --- LogView tab system tests ---
 
-func TestDetailTabSwitching(t *testing.T) {
-	d := NewDetail()
-	d.SetSize(80, 20)
-	d.SetFocused(true)
+func TestLogViewTabSwitching(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 20)
+	lv.SetFocused(true)
 
-	// Default tab should be Details
-	if d.activeTab != tabDetails {
-		t.Fatalf("expected initial tab to be tabDetails, got %d", d.activeTab)
+	// Default tab should be Log
+	if lv.ActiveTab() != tabLog {
+		t.Fatalf("expected initial tab to be tabLog, got %d", lv.ActiveTab())
 	}
 
 	// Press l to switch to Diff tab
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
-	if d.activeTab != tabDiff {
-		t.Errorf("expected tabDiff after l, got %d", d.activeTab)
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if lv.ActiveTab() != tabDiff {
+		t.Errorf("expected tabDiff after l, got %d", lv.ActiveTab())
 	}
 
-	// Press h to switch back to Details tab
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-	if d.activeTab != tabDetails {
-		t.Errorf("expected tabDetails after h, got %d", d.activeTab)
-	}
-
-	// Press h again should stay at Details (can't go below 0)
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-	if d.activeTab != tabDetails {
-		t.Errorf("expected tabDetails after extra h, got %d", d.activeTab)
+	// Press h to switch back to Log tab
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	if lv.ActiveTab() != tabLog {
+		t.Errorf("expected tabLog after h, got %d", lv.ActiveTab())
 	}
 }
 
-func TestDetailTabSwitchingRequiresFocus(t *testing.T) {
-	d := NewDetail()
-	d.SetSize(80, 20)
-	d.SetFocused(false) // Not focused
+func TestLogViewActiveTab(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 20)
+	lv.SetFocused(true)
 
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
-	if d.activeTab != tabDetails {
-		t.Error("expected tab not to change when unfocused")
+	if lv.ActiveTab() != 0 {
+		t.Errorf("expected ActiveTab()=0, got %d", lv.ActiveTab())
+	}
+
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if lv.ActiveTab() != 1 {
+		t.Errorf("expected ActiveTab()=1, got %d", lv.ActiveTab())
 	}
 }
 
-func TestDetailDiffIntegration(t *testing.T) {
-	d := NewDetail()
-	d.SetSize(80, 20)
-	d.SetFocused(true)
-	d.SetRun(&run.Run{ID: "001", Branch: "feat/auth", Workflow: "build", State: run.StateRunning})
-	d.SetDiff(sampleDiff, sampleStat)
+func TestLogViewDiffIntegration(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 20)
+	lv.SetFocused(true)
+	lv.SetDiff(sampleDiff, sampleStat)
 
 	// Switch to Diff tab
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
-	if d.activeTab != tabDiff {
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if lv.ActiveTab() != tabDiff {
 		t.Fatal("expected to be on Diff tab")
 	}
 
-	view := d.View()
+	view := lv.View()
 	// Should show diff content
 	if !strings.Contains(view, "import jwt") {
 		t.Error("expected diff content visible in Diff tab view")
 	}
 }
 
-func TestDetailViewShowsTabIndicator(t *testing.T) {
-	d := NewDetail()
-	d.SetSize(80, 20)
-	d.SetFocused(true)
+func TestLogViewShowsTabIndicator(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 20)
+	lv.SetFocused(true)
 
-	view := d.View()
-	if !strings.Contains(view, "Details") {
-		t.Error("expected 'Details' tab label in view")
+	view := lv.View()
+	if !strings.Contains(view, "Log") {
+		t.Error("expected 'Log' tab label in view")
 	}
 	if !strings.Contains(view, "Diff") {
 		t.Error("expected 'Diff' tab label in view")
 	}
 }
 
-func TestDetailDiffLoading(t *testing.T) {
-	d := NewDetail()
-	d.SetSize(80, 20)
-	d.SetFocused(true)
-	d.SetRun(&run.Run{ID: "001", Branch: "feat/auth", Workflow: "build", State: run.StateRunning})
-	d.SetDiffLoading()
+func TestLogViewDiffLoading(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 20)
+	lv.SetFocused(true)
+	lv.SetDiffLoading()
 
 	// Switch to Diff tab
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
-	view := d.View()
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	view := lv.View()
 	if !strings.Contains(view, "Loading") {
 		t.Error("expected loading state visible in Diff tab")
 	}
 }
 
-func TestDetailDiffError(t *testing.T) {
-	d := NewDetail()
-	d.SetSize(80, 20)
-	d.SetFocused(true)
-	d.SetRun(&run.Run{ID: "001", Branch: "feat/auth", Workflow: "build", State: run.StateRunning})
-	d.SetDiffError("branch deleted")
+func TestLogViewDiffError(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 20)
+	lv.SetFocused(true)
+	lv.SetDiffError("branch deleted")
 
 	// Switch to Diff tab
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
-	view := d.View()
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	view := lv.View()
 	if !strings.Contains(view, "branch deleted") {
 		t.Error("expected error message visible in Diff tab")
+	}
+}
+
+func TestLogViewConsumesKeysFalseOnDiffTab(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 20)
+	lv.SetFocused(true)
+
+	// Switch to diff tab
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if lv.ActiveTab() != tabDiff {
+		t.Fatal("expected to be on diff tab")
+	}
+
+	if lv.ConsumesKeys() {
+		t.Error("expected ConsumesKeys()=false on diff tab")
+	}
+}
+
+func TestLogViewSetRunResetsTab(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 20)
+	lv.SetFocused(true)
+
+	// Switch to diff tab
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if lv.ActiveTab() != tabDiff {
+		t.Fatal("expected to be on diff tab")
+	}
+
+	// SetRun should reset to log tab
+	lv.SetRun("run-1", "build", "feat/x", nil, true)
+	if lv.ActiveTab() != tabLog {
+		t.Errorf("expected tab reset to tabLog after SetRun, got %d", lv.ActiveTab())
 	}
 }

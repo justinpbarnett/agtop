@@ -17,6 +17,12 @@ import (
 
 const gTimeout = 300 * time.Millisecond
 
+// Log view tab indices.
+const (
+	tabLog  = 0
+	tabDiff = 1
+)
+
 // logLineRe matches log lines like "[14:32:01 route] message"
 var logLineRe = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\s+(\S+)\]\s*(.*)$`)
 
@@ -37,6 +43,10 @@ type LogView struct {
 	gPending    bool
 	scrollSpeed int
 
+	// Tab state
+	activeTab int
+	diffView  DiffView
+
 	// Search state
 	searching    bool
 	searchInput  textinput.Model
@@ -51,7 +61,12 @@ func NewLogView() LogView {
 	ti.Prompt = "/"
 	ti.Placeholder = "Search..."
 	ti.CharLimit = 256
-	return LogView{viewport: vp, follow: true, searchInput: ti, scrollSpeed: 3}
+	return LogView{viewport: vp, follow: true, searchInput: ti, scrollSpeed: 3, diffView: NewDiffView()}
+}
+
+// ActiveTab returns the currently selected tab index.
+func (l LogView) ActiveTab() int {
+	return l.activeTab
 }
 
 func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
@@ -68,11 +83,31 @@ func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
 			}
 			return l, nil
 		}
+	case DiffGTimerExpiredMsg:
+		if l.activeTab == tabDiff {
+			var cmd tea.Cmd
+			l.diffView, cmd = l.diffView.Update(msg)
+			return l, cmd
+		}
+		return l, nil
 	case GTimerExpiredMsg:
 		l.gPending = false
 		return l, nil
 	case tea.KeyMsg:
-		// Route keys to search input when in search input mode
+		// On diff tab, delegate keys to diffView
+		if l.activeTab == tabDiff {
+			switch msg.String() {
+			case "h", "left":
+				l.activeTab = tabLog
+				l.updateDiffFocus()
+				return l, nil
+			}
+			var cmd tea.Cmd
+			l.diffView, cmd = l.diffView.Update(msg)
+			return l, cmd
+		}
+
+		// Log tab: route keys to search input when in search input mode
 		if l.searching {
 			return l.updateSearch(msg)
 		}
@@ -96,6 +131,10 @@ func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
 		}
 
 		switch msg.String() {
+		case "l", "right":
+			l.activeTab = tabDiff
+			l.updateDiffFocus()
+			return l, nil
 		case "G":
 			l.follow = true
 			l.viewport.GotoBottom()
@@ -184,7 +223,8 @@ func (l *LogView) updateSearch(msg tea.KeyMsg) (LogView, tea.Cmd) {
 }
 
 func (l LogView) View() string {
-	title := "Log"
+	// Build tab-aware title
+	logLabel := "Log"
 	if l.skill != "" || l.branch != "" {
 		parts := []string{}
 		if l.skill != "" {
@@ -193,37 +233,58 @@ func (l LogView) View() string {
 		if l.branch != "" {
 			parts = append(parts, l.branch)
 		}
-		title = fmt.Sprintf("Log: %s", strings.Join(parts, " — "))
+		logLabel = fmt.Sprintf("Log: %s", strings.Join(parts, " — "))
+	}
+	diffLabel := "Diff"
+
+	var title string
+	if l.activeTab == tabLog {
+		title = "3 " + styles.TitleStyle.Render(logLabel) +
+			styles.TextDimStyle.Render(" │ ") +
+			styles.TextDimStyle.Render(diffLabel)
+	} else {
+		title = "3 " + styles.TextDimStyle.Render(logLabel) +
+			styles.TextDimStyle.Render(" │ ") +
+			styles.TitleStyle.Render(diffLabel)
 	}
 
 	var keybinds []border.Keybind
-	if l.focused {
-		keybinds = []border.Keybind{
-			{Key: "G", Label: "bottom"},
-			{Key: "g", Label: "g top"},
-			{Key: "/", Label: "search"},
-		}
-		if !l.viewport.AtBottom() && !l.follow {
-			keybinds = append(keybinds, border.Keybind{Key: "↓", Label: " new output"})
-		}
-	}
+	var content string
 
-	content := l.viewport.View()
-
-	// Append search bar or match status below the viewport
-	if l.searching {
-		content += "\n" + l.searchInput.View()
-	} else if l.searchQuery != "" {
-		total := len(l.matchIndices)
-		var status string
-		if total == 0 {
-			status = styles.TextDimStyle.Render("  No matches")
-		} else {
-			status = styles.TextSecondaryStyle.Render(
-				fmt.Sprintf("  Match %d/%d", l.currentMatch+1, total),
-			) + styles.TextDimStyle.Render(" (n/N navigate, / edit, Esc clear)")
+	if l.activeTab == tabLog {
+		if l.focused {
+			keybinds = []border.Keybind{
+				{Key: "G", Label: "bottom"},
+				{Key: "g", Label: "g top"},
+				{Key: "/", Label: "search"},
+			}
+			if !l.viewport.AtBottom() && !l.follow {
+				keybinds = append(keybinds, border.Keybind{Key: "↓", Label: " new output"})
+			}
 		}
-		content += "\n" + status
+
+		content = l.viewport.View()
+
+		// Append search bar or match status below the viewport
+		if l.searching {
+			content += "\n" + l.searchInput.View()
+		} else if l.searchQuery != "" {
+			total := len(l.matchIndices)
+			var status string
+			if total == 0 {
+				status = styles.TextDimStyle.Render("  No matches")
+			} else {
+				status = styles.TextSecondaryStyle.Render(
+					fmt.Sprintf("  Match %d/%d", l.currentMatch+1, total),
+				) + styles.TextDimStyle.Render(" (n/N navigate, / edit, Esc clear)")
+			}
+			content += "\n" + status
+		}
+	} else {
+		content = l.diffView.Content()
+		if l.focused {
+			keybinds = l.diffView.Keybinds()
+		}
 	}
 
 	return border.RenderPanel(title, content, keybinds, l.width, l.height, l.focused)
@@ -234,10 +295,21 @@ func (l *LogView) SetSize(w, h int) {
 	l.height = h
 	l.resizeViewport()
 	l.refreshContent()
+	// Propagate inner dimensions to diffView
+	innerW := w - 2
+	innerH := h - 2
+	if innerW < 0 {
+		innerW = 0
+	}
+	if innerH < 0 {
+		innerH = 0
+	}
+	l.diffView.SetSize(innerW, innerH)
 }
 
 func (l *LogView) SetFocused(focused bool) {
 	l.focused = focused
+	l.updateDiffFocus()
 }
 
 func (l *LogView) SetScrollSpeed(speed int) {
@@ -248,7 +320,11 @@ func (l *LogView) SetScrollSpeed(speed int) {
 
 // ConsumesKeys reports whether the log view is in a mode that should
 // consume all key events (search input or active search query navigation).
+// Returns false on the diff tab since search doesn't apply there.
 func (l LogView) ConsumesKeys() bool {
+	if l.activeTab != tabLog {
+		return false
+	}
 	return l.searching || l.searchQuery != ""
 }
 
@@ -262,7 +338,22 @@ func (l *LogView) SetRun(runID, skill, branch string, buf *process.RingBuffer, a
 	l.searchQuery = ""
 	l.matchIndices = nil
 	l.searching = false
+	l.activeTab = tabLog
+	l.updateDiffFocus()
 	l.refreshContent()
+}
+
+// Diff proxy methods — called by the app to pass diff data into the embedded DiffView.
+
+func (l *LogView) SetDiff(diff, stat string)  { l.diffView.SetDiff(diff, stat) }
+func (l *LogView) SetDiffLoading()             { l.diffView.SetLoading() }
+func (l *LogView) SetDiffError(err string)     { l.diffView.SetError(err) }
+func (l *LogView) SetDiffEmpty()               { l.diffView.SetEmpty() }
+func (l *LogView) SetDiffNoBranch()            { l.diffView.SetNoBranch() }
+func (l *LogView) SetDiffWaiting()             { l.diffView.SetWaiting() }
+
+func (l *LogView) updateDiffFocus() {
+	l.diffView.SetFocused(l.focused && l.activeTab == tabDiff)
 }
 
 // resizeViewport recalculates the viewport inner dimensions, accounting for

@@ -159,15 +159,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if msg.Err != nil {
-			a.detail.SetDiffError(msg.Err.Error())
+			a.logView.SetDiffError(msg.Err.Error())
 		} else {
-			a.detail.SetDiff(msg.Diff, msg.DiffStat)
+			a.logView.SetDiff(msg.Diff, msg.DiffStat)
 		}
 		return a, nil
 
 	case panels.DiffGTimerExpiredMsg:
 		var cmd tea.Cmd
-		a.detail, cmd = a.detail.Update(msg)
+		a.logView, cmd = a.logView.Update(msg)
 		return a, cmd
 
 	case RunStoreUpdatedMsg:
@@ -263,20 +263,32 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.focusedPanel = (a.focusedPanel + 1) % numPanels
 			a.updateFocusState()
 			return a, nil
+		case "1":
+			a.focusedPanel = panelRunList
+			a.updateFocusState()
+			return a, nil
+		case "2":
+			a.focusedPanel = panelDetail
+			a.updateFocusState()
+			return a, nil
+		case "3":
+			a.focusedPanel = panelLogView
+			a.updateFocusState()
+			return a, nil
 		case "h", "left":
-			// Spatial: in top row, move between run list and log view.
-			// When the detail panel is focused, delegate to routeKey so
-			// the detail panel can use h/l for tab switching.
-			if a.focusedPanel == panelDetail {
-				return a.routeKey(msg)
-			}
 			if a.focusedPanel == panelLogView {
+				if a.logView.ActiveTab() > 0 {
+					// Switch tab within logview
+					return a.routeKey(msg)
+				}
+				// On log tab — spatial nav to run list
 				a.focusedPanel = panelRunList
 				a.updateFocusState()
 			}
 			return a, nil
 		case "l", "right":
-			if a.focusedPanel == panelDetail {
+			if a.focusedPanel == panelLogView {
+				// Delegate to logview for tab switching (no-ops on last tab)
 				return a.routeKey(msg)
 			}
 			if a.focusedPanel == panelRunList {
@@ -330,9 +342,10 @@ func (a App) View() string {
 	detailView := a.detail.View()
 	statusBarView := a.statusBar.View()
 
-	// Assemble layout: top row (runlist | logview), bottom row (detail), status bar
-	topRow := lipgloss.JoinHorizontal(lipgloss.Top, runListView, logViewView)
-	fullLayout := lipgloss.JoinVertical(lipgloss.Left, topRow, detailView, statusBarView)
+	// Assemble layout: left column (runlist + detail) | right column (logview), status bar
+	leftCol := lipgloss.JoinVertical(lipgloss.Left, runListView, detailView)
+	mainArea := lipgloss.JoinHorizontal(lipgloss.Top, leftCol, logViewView)
+	fullLayout := lipgloss.JoinVertical(lipgloss.Left, mainArea, statusBarView)
 
 	if a.helpOverlay != nil {
 		modalView := a.helpOverlay.View()
@@ -369,10 +382,6 @@ func (a App) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.logView, cmd = a.logView.Update(msg)
 		return a, cmd
-	case panelDetail:
-		var cmd tea.Cmd
-		a.detail, cmd = a.detail.Update(msg)
-		return a, cmd
 	}
 	return a, nil
 }
@@ -388,13 +397,13 @@ func (a *App) syncSelection() tea.Cmd {
 		a.logView.SetRun(selected.ID, selected.CurrentSkill, selected.Branch, buf, !selected.IsTerminal())
 
 		if selected.Branch != "" {
-			a.detail.SetDiffLoading()
+			a.logView.SetDiffLoading()
 			return a.fetchDiff(selected.ID, selected.Branch)
 		}
 		if selected.State == run.StateQueued || selected.State == run.StateRouting {
-			a.detail.SetDiffWaiting()
+			a.logView.SetDiffWaiting()
 		} else {
-			a.detail.SetDiffNoBranch()
+			a.logView.SetDiffNoBranch()
 		}
 	}
 	return nil

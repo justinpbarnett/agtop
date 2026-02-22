@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/justinpbarnett/agtop/internal/run"
 	"github.com/justinpbarnett/agtop/internal/ui/border"
@@ -12,95 +11,27 @@ import (
 	"github.com/justinpbarnett/agtop/internal/ui/text"
 )
 
-const (
-	tabDetails = 0
-	tabDiff    = 1
-	numTabs    = 2
-)
-
 type Detail struct {
 	width       int
 	height      int
 	selectedRun *run.Run
 	focused     bool
-	activeTab   int
-	diffView    DiffView
 }
 
 func NewDetail() Detail {
-	return Detail{
-		diffView: NewDiffView(),
-	}
-}
-
-func (d Detail) Update(msg tea.Msg) (Detail, tea.Cmd) {
-	switch msg := msg.(type) {
-	case DiffGTimerExpiredMsg:
-		if d.activeTab == tabDiff {
-			var cmd tea.Cmd
-			d.diffView, cmd = d.diffView.Update(msg)
-			return d, cmd
-		}
-		return d, nil
-	case tea.KeyMsg:
-		if !d.focused {
-			return d, nil
-		}
-		switch msg.String() {
-		case "h", "left":
-			if d.activeTab > 0 {
-				d.activeTab--
-				d.updateDiffFocus()
-			}
-			return d, nil
-		case "l", "right":
-			if d.activeTab < numTabs-1 {
-				d.activeTab++
-				d.updateDiffFocus()
-			}
-			return d, nil
-		}
-		if d.activeTab == tabDiff {
-			var cmd tea.Cmd
-			d.diffView, cmd = d.diffView.Update(msg)
-			return d, cmd
-		}
-	}
-	return d, nil
+	return Detail{}
 }
 
 func (d Detail) View() string {
-	tabNames := []string{"Details", "Diff"}
-	var titleParts []string
-	for i, name := range tabNames {
-		if i == d.activeTab {
-			titleParts = append(titleParts, styles.TitleStyle.Render(name))
-		} else {
-			titleParts = append(titleParts, styles.TextDimStyle.Render(name))
-		}
-	}
-	title := strings.Join(titleParts, styles.TextDimStyle.Render(" │ "))
+	title := "2 Details"
 
 	var keybinds []border.Keybind
-	if d.focused {
-		keybinds = []border.Keybind{
-			{Key: "h", Label: "/l tab"},
-		}
-		if d.activeTab == tabDiff {
-			keybinds = append(keybinds, d.diffView.Keybinds()...)
-		}
-	}
 
 	var content string
 	if d.selectedRun == nil {
 		content = "No run selected"
 	} else {
-		switch d.activeTab {
-		case tabDetails:
-			content = d.renderDetails()
-		case tabDiff:
-			content = d.diffView.Content()
-		}
+		content = d.renderDetails()
 	}
 
 	return border.RenderPanel(title, content, keybinds, d.width, d.height, d.focused)
@@ -110,52 +41,13 @@ func (d *Detail) SetRun(r *run.Run) {
 	d.selectedRun = r
 }
 
-func (d *Detail) SetDiff(diff, stat string) {
-	d.diffView.SetDiff(diff, stat)
-}
-
-func (d *Detail) SetDiffLoading() {
-	d.diffView.SetLoading()
-}
-
-func (d *Detail) SetDiffError(err string) {
-	d.diffView.SetError(err)
-}
-
-func (d *Detail) SetDiffEmpty() {
-	d.diffView.SetEmpty()
-}
-
-func (d *Detail) SetDiffNoBranch() {
-	d.diffView.SetNoBranch()
-}
-
-func (d *Detail) SetDiffWaiting() {
-	d.diffView.SetWaiting()
-}
-
 func (d *Detail) SetSize(w, h int) {
 	d.width = w
 	d.height = h
-	// Inner dimensions for the diff viewport (accounting for panel borders)
-	innerW := w - 2
-	innerH := h - 2
-	if innerW < 0 {
-		innerW = 0
-	}
-	if innerH < 0 {
-		innerH = 0
-	}
-	d.diffView.SetSize(innerW, innerH)
 }
 
 func (d *Detail) SetFocused(focused bool) {
 	d.focused = focused
-	d.updateDiffFocus()
-}
-
-func (d *Detail) updateDiffFocus() {
-	d.diffView.SetFocused(d.focused && d.activeTab == tabDiff)
 }
 
 func (d Detail) renderDetails() string {
