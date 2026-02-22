@@ -34,6 +34,7 @@ const (
 type StartRunMsg struct {
 	Prompt   string
 	Workflow string
+	Model    string
 }
 
 type App struct {
@@ -54,6 +55,7 @@ type App struct {
 	detail       panels.Detail
 	statusBar    panels.StatusBar
 	helpOverlay  *panels.HelpOverlay
+	newRunModal  *panels.NewRunModal
 	keys         KeyMap
 	ready        bool
 }
@@ -151,6 +153,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case CloseModalMsg:
 		a.helpOverlay = nil
+		a.newRunModal = nil
 		return a, nil
 
 	case DiffResultMsg:
@@ -178,12 +181,25 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds := []tea.Cmd{cmd, diffCmd, listenForChanges(a.store.Changes())}
 		return a, tea.Batch(cmds...)
 
+	case SubmitNewRunMsg:
+		return a, func() tea.Msg {
+			return StartRunMsg{
+				Prompt:   msg.Prompt,
+				Workflow: msg.Workflow,
+				Model:    msg.Model,
+			}
+		}
+
 	case StartRunMsg:
 		if a.executor != nil {
 			newRun := &run.Run{
 				Workflow:  msg.Workflow,
+				Prompt:    msg.Prompt,
 				State:     run.StateQueued,
 				CreatedAt: time.Now(),
+			}
+			if msg.Model != "" {
+				newRun.Model = msg.Model
 			}
 			runID := a.store.Add(newRun)
 
@@ -236,6 +252,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.helpOverlay != nil {
 			var cmd tea.Cmd
 			*a.helpOverlay, cmd = a.helpOverlay.Update(msg)
+			return a, cmd
+		}
+
+		if a.newRunModal != nil {
+			var cmd tea.Cmd
+			a.newRunModal, cmd = a.newRunModal.Update(msg)
 			return a, cmd
 		}
 
@@ -304,12 +326,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 		case "n":
-			return a, func() tea.Msg {
-				return StartRunMsg{
-					Prompt:   "placeholder task",
-					Workflow: "build",
-				}
-			}
+			a.newRunModal = panels.NewNewRunModal()
+			return a, a.newRunModal.Init()
 		case "a":
 			return a.handleAccept()
 		case "x":
@@ -349,6 +367,15 @@ func (a App) View() string {
 
 	if a.helpOverlay != nil {
 		modalView := a.helpOverlay.View()
+		fullLayout = lipgloss.Place(a.width, a.height,
+			lipgloss.Center, lipgloss.Center, modalView,
+			lipgloss.WithWhitespaceChars(" "),
+			lipgloss.WithWhitespaceForeground(styles.TextDim),
+		)
+	}
+
+	if a.newRunModal != nil {
+		modalView := a.newRunModal.View()
 		fullLayout = lipgloss.Place(a.width, a.height,
 			lipgloss.Center, lipgloss.Center, modalView,
 			lipgloss.WithWhitespaceChars(" "),

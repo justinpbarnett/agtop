@@ -22,6 +22,7 @@ const (
 
 type Run struct {
 	ID           string
+	Prompt       string
 	Branch       string
 	Worktree     string
 	Workflow     string

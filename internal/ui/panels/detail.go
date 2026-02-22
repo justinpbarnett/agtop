@@ -83,7 +83,16 @@ func (d Detail) renderDetails() string {
 		return keyStyle.Render(key+": ") + style.Render(val)
 	}
 
-	// Row 1: Skill + Branch
+	// Row 1: Prompt (if present)
+	if r.Prompt != "" {
+		prompt := r.Prompt
+		if len(prompt) > 60 {
+			prompt = prompt[:57] + "..."
+		}
+		fmt.Fprintf(&b, "  %s\n", leftCol("Prompt", prompt))
+	}
+
+	// Row 2: Skill + Branch
 	fmt.Fprintf(&b, "  %s    %s\n",
 		leftCol("Skill", skillName),
 		rightCol("Branch", r.Branch))

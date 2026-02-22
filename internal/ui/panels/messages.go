@@ -21,3 +21,10 @@ type DiffResultMsg struct {
 	DiffStat string
 	Err      error
 }
+
+// SubmitNewRunMsg is sent when the user confirms the new run modal.
+type SubmitNewRunMsg struct {
+	Prompt   string
+	Workflow string
+	Model    string
+}

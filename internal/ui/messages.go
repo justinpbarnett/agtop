@@ -18,3 +18,6 @@ type ClearFlashMsg = panels.ClearFlashMsg
 
 // DiffResultMsg delivers async diff results for a run.
 type DiffResultMsg = panels.DiffResultMsg
+
+// SubmitNewRunMsg is sent when the user confirms the new run modal.
+type SubmitNewRunMsg = panels.SubmitNewRunMsg

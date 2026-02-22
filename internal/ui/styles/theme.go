@@ -23,4 +23,6 @@ var (
 	DiffRemovedStyle = lipgloss.NewStyle().Foreground(DiffRemoved)
 	DiffHeaderStyle  = lipgloss.NewStyle().Foreground(DiffHeader).Bold(true)
 	DiffHunkStyle    = lipgloss.NewStyle().Foreground(DiffHunk)
+
+	SelectedOptionStyle = lipgloss.NewStyle().Foreground(SelectedOption).Bold(true)
 )

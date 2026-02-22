@@ -28,6 +28,8 @@ var (
 	DiffRemoved = lipgloss.AdaptiveColor{Light: "#cf222e", Dark: "#f7768e"}
 	DiffHeader  = lipgloss.AdaptiveColor{Light: "#0969da", Dark: "#7dcfff"}
 	DiffHunk    = lipgloss.AdaptiveColor{Light: "#8250df", Dark: "#bb9af7"}
+
+	SelectedOption = lipgloss.AdaptiveColor{Light: "#1a7f37", Dark: "#9ece6a"}
 )
 
 // CostColor returns the appropriate color for a cost value per §2.3 thresholds.
