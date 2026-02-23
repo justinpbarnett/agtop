@@ -480,6 +480,47 @@ func gitCommit(t *testing.T, dir, msg string) {
 	}
 }
 
+func TestWorktreeMergeRebasesBeforeMerge(t *testing.T) {
+	repo := initTestRepo(t)
+	wm := NewWorktreeManager(repo)
+
+	// Create a file on main before creating the worktree
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base"), 0o644); err != nil {
+		t.Fatalf("write base: %v", err)
+	}
+	gitCommit(t, repo, "add base file")
+
+	// Create worktree (branches from current main)
+	wtPath, _, err := wm.Create("040")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Make a change on the worktree branch
+	if err := os.WriteFile(filepath.Join(wtPath, "feature.txt"), []byte("feature work"), 0o644); err != nil {
+		t.Fatalf("write feature: %v", err)
+	}
+	gitCommit(t, wtPath, "add feature file")
+
+	// Move main forward with a non-conflicting change
+	if err := os.WriteFile(filepath.Join(repo, "other.txt"), []byte("other work"), 0o644); err != nil {
+		t.Fatalf("write other: %v", err)
+	}
+	gitCommit(t, repo, "add other file on main")
+
+	// MergeWithOptions should succeed — rebase makes it a fast-forward
+	if _, err := wm.MergeWithOptions("040", MergeOptions{}); err != nil {
+		t.Fatalf("MergeWithOptions should succeed after rebase: %v", err)
+	}
+
+	// Verify both files exist in main repo
+	for _, name := range []string{"feature.txt", "other.txt"} {
+		if _, err := os.Stat(filepath.Join(repo, name)); os.IsNotExist(err) {
+			t.Errorf("%s not found in main repo after merge", name)
+		}
+	}
+}
+
 func TestWorktreeExists(t *testing.T) {
 	repo := initTestRepo(t)
 	wm := NewWorktreeManager(repo)

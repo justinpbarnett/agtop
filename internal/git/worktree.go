@@ -86,10 +86,26 @@ func (w *WorktreeManager) MergeWithOptions(runID string, opts MergeOptions) (Mer
 
 	var result MergeResult
 	branch := "agtop/" + runID
+
+	// Rebase worktree branch onto current main before merging
+	wtPath := filepath.Join(w.worktreeDir, runID)
+	if _, err := os.Stat(wtPath); err == nil {
+		goldenResolved, err := w.rebaseOntoMain(wtPath)
+		if err != nil {
+			return result, fmt.Errorf("pre-merge rebase: %w", err)
+		}
+		result.GoldenFilesResolved = goldenResolved
+	}
+
+	// Now merge (should be fast-forward after rebase)
 	cmd := exec.Command("git", "merge", branch)
 	cmd.Dir = w.repoRoot
 	out, err := cmd.CombinedOutput()
 	if err == nil {
+		// Run golden update command if golden files were resolved during rebase
+		if opts.GoldenUpdateCommand != "" && len(result.GoldenFilesResolved) > 0 {
+			_ = w.runGoldenUpdateLocked(opts.GoldenUpdateCommand)
+		}
 		return result, nil
 	}
 
@@ -131,11 +147,47 @@ func (w *WorktreeManager) MergeWithOptions(runID string, opts MergeOptions) (Mer
 	return result, nil
 }
 
+// rebaseOntoMain rebases the worktree branch onto current main HEAD.
+// Returns the list of golden files that were auto-resolved during rebase.
+// Must be called with w.mu held.
+func (w *WorktreeManager) rebaseOntoMain(wtPath string) ([]string, error) {
+	rebase := exec.Command("git", "rebase", "main")
+	rebase.Dir = wtPath
+	out, err := rebase.CombinedOutput()
+	if err == nil {
+		return nil, nil
+	}
+
+	// Rebase conflicted — try to resolve golden files
+	resolved, remaining, _ := resolveGoldenConflictsInDir(wtPath)
+	if len(resolved) > 0 && len(remaining) == 0 {
+		// All conflicts were golden — continue rebase
+		cont := exec.Command("git", "rebase", "--continue")
+		cont.Dir = wtPath
+		cont.Env = append(cont.Environ(), "GIT_EDITOR=true")
+		if contErr := cont.Run(); contErr == nil {
+			return resolved, nil
+		}
+	}
+
+	// Non-golden conflicts or resolution failed — abort
+	abort := exec.Command("git", "rebase", "--abort")
+	abort.Dir = wtPath
+	_ = abort.Run()
+	return nil, fmt.Errorf("rebase onto main: %s: %w", strings.TrimSpace(string(out)), err)
+}
+
 // resolveGoldenConflicts detects conflicted files in the working tree and
 // auto-resolves any .golden test snapshot files by taking the incoming version.
 // Returns the list of resolved golden files and the list of remaining unresolved files.
 func (w *WorktreeManager) resolveGoldenConflicts() (resolved, remaining []string, err error) {
-	conflicted, err := w.conflictedFiles()
+	return resolveGoldenConflictsInDir(w.repoRoot)
+}
+
+// resolveGoldenConflictsInDir detects conflicted files in the given directory and
+// auto-resolves any .golden test snapshot files by taking the incoming version.
+func resolveGoldenConflictsInDir(dir string) (resolved, remaining []string, err error) {
+	conflicted, err := conflictedFilesInDir(dir)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -156,12 +208,12 @@ func (w *WorktreeManager) resolveGoldenConflicts() (resolved, remaining []string
 	// Auto-resolve golden files by taking the incoming branch version
 	for _, f := range golden {
 		checkout := exec.Command("git", "checkout", "--theirs", f)
-		checkout.Dir = w.repoRoot
+		checkout.Dir = dir
 		if out, err := checkout.CombinedOutput(); err != nil {
 			return nil, conflicted, fmt.Errorf("checkout --theirs %s: %s: %w", f, strings.TrimSpace(string(out)), err)
 		}
 		add := exec.Command("git", "add", f)
-		add.Dir = w.repoRoot
+		add.Dir = dir
 		if out, err := add.CombinedOutput(); err != nil {
 			return nil, conflicted, fmt.Errorf("git add %s: %s: %w", f, strings.TrimSpace(string(out)), err)
 		}
@@ -170,10 +222,10 @@ func (w *WorktreeManager) resolveGoldenConflicts() (resolved, remaining []string
 	return golden, other, nil
 }
 
-// conflictedFiles returns the list of files with unresolved merge conflicts.
-func (w *WorktreeManager) conflictedFiles() ([]string, error) {
+// conflictedFilesInDir returns the list of files with unresolved conflicts in the given directory.
+func conflictedFilesInDir(dir string) ([]string, error) {
 	cmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
-	cmd.Dir = w.repoRoot
+	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git diff --diff-filter=U: %w", err)
