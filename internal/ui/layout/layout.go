@@ -37,8 +37,8 @@ const (
 	MinWidth  = 80
 	MinHeight = 24
 
-	LeftColWeight    = 0.40
-	RunListRowWeight = 0.55
+	LeftColWeight    = 0.30
+	RunListRowWeight = 0.75
 )
 
 // Calculate computes panel dimensions from terminal size.
