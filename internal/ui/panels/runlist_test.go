@@ -3,17 +3,19 @@ package panels
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/justinpbarnett/agtop/internal/run"
 )
 
 func testStore() *run.Store {
+	now := time.Now()
 	s := run.NewStore()
-	s.Add(&run.Run{Branch: "feat/add-auth", Workflow: "sdlc", State: run.StateRunning, SkillIndex: 3, SkillTotal: 7, Tokens: 12400, Cost: 0.42, CurrentSkill: "build"})
-	s.Add(&run.Run{Branch: "fix/nav-bug", Workflow: "quick-fix", State: run.StatePaused, SkillIndex: 1, SkillTotal: 3, Tokens: 3100, Cost: 0.08, CurrentSkill: "build"})
-	s.Add(&run.Run{Branch: "feat/dashboard", Workflow: "plan-build", State: run.StateReviewing, SkillIndex: 3, SkillTotal: 3, Tokens: 45200, Cost: 1.23})
-	s.Add(&run.Run{Branch: "fix/css-overflow", Workflow: "build", State: run.StateFailed, SkillIndex: 2, SkillTotal: 3, Tokens: 8700, Cost: 0.31, Error: "build skill timed out"})
+	s.Add(&run.Run{Branch: "feat/add-auth", Workflow: "sdlc", State: run.StateRunning, SkillIndex: 3, SkillTotal: 7, Tokens: 12400, Cost: 0.42, CurrentSkill: "build", StartedAt: now.Add(-3 * time.Minute)})
+	s.Add(&run.Run{Branch: "fix/nav-bug", Workflow: "quick-fix", State: run.StatePaused, SkillIndex: 1, SkillTotal: 3, Tokens: 3100, Cost: 0.08, CurrentSkill: "build", StartedAt: now.Add(-7 * time.Minute)})
+	s.Add(&run.Run{Branch: "feat/dashboard", Workflow: "plan-build", State: run.StateReviewing, SkillIndex: 3, SkillTotal: 3, Tokens: 45200, Cost: 1.23, StartedAt: now.Add(-12 * time.Minute), CompletedAt: now.Add(-2 * time.Minute)})
+	s.Add(&run.Run{Branch: "fix/css-overflow", Workflow: "build", State: run.StateFailed, SkillIndex: 2, SkillTotal: 3, Tokens: 8700, Cost: 0.31, Error: "build skill timed out", StartedAt: now.Add(-5 * time.Minute), CompletedAt: now.Add(-1 * time.Minute)})
 	return s
 }
 
@@ -87,8 +89,11 @@ func TestRunListView(t *testing.T) {
 	if !strings.Contains(view, "Runs") {
 		t.Error("expected view to contain 'Runs' title")
 	}
-	if !strings.Contains(view, "feat/add-auth") || !strings.Contains(view, "fix/nav-bug") {
-		t.Error("expected view to contain branch names")
+	if !strings.Contains(view, "ID") || !strings.Contains(view, "STATE") {
+		t.Error("expected view to contain column headers")
+	}
+	if !strings.Contains(view, "running") || !strings.Contains(view, "paused") {
+		t.Error("expected view to contain state labels")
 	}
 }
 
@@ -132,10 +137,6 @@ func TestRunListStoreUpdate(t *testing.T) {
 	s.Add(&run.Run{Branch: "feat/new-run", Workflow: "build", State: run.StateRunning})
 	rl, _ = rl.Update(RunStoreUpdatedMsg{})
 
-	view := rl.View()
-	if !strings.Contains(view, "feat/new-run") {
-		t.Error("expected new run to appear after store update")
-	}
 	if len(rl.filtered) != 5 {
 		t.Errorf("expected 5 filtered runs, got %d", len(rl.filtered))
 	}

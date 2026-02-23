@@ -14,6 +14,16 @@ import (
 	"github.com/justinpbarnett/agtop/internal/ui/text"
 )
 
+// Column widths for run list layout.
+const (
+	colIconW   = 2
+	colIDW     = 5
+	colStateW  = 11
+	colTimeW   = 7
+	colTokensW = 8
+	colCostW   = 7
+)
+
 type RunList struct {
 	store        *run.Store
 	filtered     []run.Run
@@ -169,6 +179,19 @@ func (r RunList) renderContent(width, height int) string {
 		availableRows--
 	}
 
+	// Column header
+	header := fmt.Sprintf("%*s %*s  %-*s %*s %*s %*s",
+		colIconW, "",
+		colIDW, "ID",
+		colStateW, "STATE",
+		colTimeW, "TIME",
+		colTokensW, "TOKENS",
+		colCostW, "COST",
+	)
+	b.WriteString(styles.TextSecondaryStyle.Render(text.Truncate(header, width)))
+	b.WriteString("\n")
+	availableRows--
+
 	if r.offset > 0 {
 		b.WriteString(styles.TextDimStyle.Render("  ▲"))
 		b.WriteString("\n")
@@ -191,39 +214,34 @@ func (r RunList) renderContent(width, height int) string {
 		rn := r.filtered[i]
 
 		elapsed := text.FormatElapsed(rn.ElapsedTime())
+		tokens := text.FormatTokens(rn.Tokens)
 		cost := text.FormatCost(rn.Cost)
-
-		skillName := rn.CurrentSkill
-		if skillName == "" {
-			skillName = rn.Workflow
-		}
-
-		identifier := rn.Branch
-		if rn.TaskID != "" {
-			identifier = rn.TaskID
-		}
 
 		var line string
 		if i == r.selected {
 			// Plain text for selected row so background covers the entire line
-			plainLine := fmt.Sprintf("%s %-10s %-14s %6s %s",
-				rn.StatusIcon(),
-				text.Truncate(skillName, 10),
-				text.Truncate(identifier, 14),
-				elapsed,
-				cost,
+			plainLine := fmt.Sprintf("%s %*s  %-*s %*s %*s %*s",
+				text.PadRight(rn.StatusIcon(), colIconW),
+				colIDW, rn.ID,
+				colStateW, text.Truncate(string(rn.State), colStateW),
+				colTimeW, elapsed,
+				colTokensW, tokens,
+				colCostW, cost,
 			)
 			plainLine = text.Truncate(plainLine, width)
 			line = styles.SelectedRowStyle.Width(width).Render(plainLine)
 		} else {
-			icon := lipgloss.NewStyle().Foreground(styles.RunStateColor(rn.State)).Render(rn.StatusIcon())
+			icon := lipgloss.NewStyle().Foreground(styles.RunStateColor(rn.State)).Render(
+				text.PadRight(rn.StatusIcon(), colIconW),
+			)
 			costStyle := lipgloss.NewStyle().Foreground(styles.CostColor(rn.Cost))
-			line = fmt.Sprintf("%s %-10s %-14s %6s %s",
+			line = fmt.Sprintf("%s %*s  %-*s %*s %*s %*s",
 				icon,
-				text.Truncate(skillName, 10),
-				text.Truncate(identifier, 14),
-				elapsed,
-				costStyle.Render(cost),
+				colIDW, rn.ID,
+				colStateW, text.Truncate(string(rn.State), colStateW),
+				colTimeW, elapsed,
+				colTokensW, tokens,
+				colCostW, costStyle.Render(cost),
 			)
 			line = text.Truncate(line, width)
 			if rn.IsTerminal() {
@@ -325,6 +343,7 @@ func (r *RunList) scrollToSelection() {
 
 func (r RunList) visibleRows() int {
 	rows := r.height - 2 // border top/bottom
+	rows--               // column header
 	if r.filterActive {
 		rows--
 	}
