@@ -120,8 +120,8 @@ max_concurrent_runs = 5
 | `Tab`          | Cycle panel focus          |
 | `/`            | Filter runs                |
 | `n`            | New run                    |
-| `p`            | Pause run                  |
-| `r`            | Resume / retry run         |
+| `Space`        | Pause / resume run         |
+| `r`            | Restart run                |
 | `c`            | Cancel run                 |
 | `d`            | Delete run                 |
 | `a`            | Accept run outcome         |

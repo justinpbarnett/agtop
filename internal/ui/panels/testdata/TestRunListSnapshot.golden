@@ -1,4 +1,4 @@
-╭─ [1] Runs (3 active) ────────────────────────────────────╮
+╭─ [1] Runs (2 active) ────────────────────────────────────╮
 │✗ build      fix/css-overf…     0s $0.31                  │
 │◉ plan-build feat/dashboard     0s $1.23                  │
 │◐ build      fix/nav-bug        0s $0.08                  │

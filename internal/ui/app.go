@@ -75,8 +75,9 @@ type App struct {
 	newRunModal    *panels.NewRunModal
 	followUpModal  *panels.FollowUpModal
 	initPrompt     *panels.InitPrompt
-	keys           KeyMap
-	ready          bool
+	keys            KeyMap
+	ready           bool
+	lastSyncedRunID string
 }
 
 func NewApp(cfg *config.Config) App {
@@ -101,19 +102,31 @@ func NewApp(cfg *config.Config) App {
 		safetyMatcher = safetyEngine.Matcher()
 	}
 
-	var mgr *process.Manager
-	rt, rtName, err := runtime.NewRuntime(&cfg.Runtime)
-	if err != nil {
-		log.Printf("warning: %v (starting without process management)", err)
-	} else {
-		mgr = process.NewManager(store, rt, rtName, &cfg.Limits, tracker, limiter, safetyMatcher)
-	}
-
-	reg := engine.NewRegistry(cfg)
 	projectRoot := cfg.Project.Root
 	if projectRoot == "" || projectRoot == "." {
 		projectRoot, _ = os.Getwd()
 	}
+
+	// Session persistence: create early so we have sessionsDir for the manager
+	var persist *run.Persistence
+	var sessionsDir string
+	persist, err := run.NewPersistence(projectRoot)
+	if err != nil {
+		log.Printf("warning: session persistence: %v", err)
+	}
+	if persist != nil {
+		sessionsDir = persist.SessionsDir()
+	}
+
+	var mgr *process.Manager
+	rt, rtName, rtErr := runtime.NewRuntime(&cfg.Runtime)
+	if rtErr != nil {
+		log.Printf("warning: %v (starting without process management)", rtErr)
+	} else {
+		mgr = process.NewManager(store, rt, rtName, sessionsDir, &cfg.Limits, tracker, limiter, safetyMatcher)
+	}
+
+	reg := engine.NewRegistry(cfg)
 	if err := reg.Load(projectRoot, skills.FS); err != nil {
 		log.Printf("warning: skill registry load: %v", err)
 	}
@@ -133,12 +146,7 @@ func NewApp(cfg *config.Config) App {
 	ds := server.NewDevServerManager(cfg.Project.DevServer)
 
 	// Session persistence: rehydrate previous runs
-	var persist *run.Persistence
 	var pidWatchCancel func()
-	persist, err = run.NewPersistence(projectRoot)
-	if err != nil {
-		log.Printf("warning: session persistence: %v", err)
-	}
 	if persist != nil {
 		cb := run.RehydrateCallbacks{}
 		if mgr != nil {
@@ -146,6 +154,8 @@ func NewApp(cfg *config.Config) App {
 			cb.RecordCost = func(runID string, sc cost.SkillCost) {
 				tracker.Record(runID, sc)
 			}
+			cb.Reconnect = mgr.Reconnect
+			cb.ReplayLogFile = mgr.ReplayLogFile
 		}
 		count, cancel, rehydrateErr := persist.RehydrateWithWatcher(store, cb)
 		if rehydrateErr != nil {
@@ -156,7 +166,7 @@ func NewApp(cfg *config.Config) App {
 			log.Printf("rehydrated %d runs from session", count)
 		}
 
-		// Bind auto-save
+		// Bind auto-save with log file path getter
 		persist.BindStore(store, func(runID string) []string {
 			if mgr == nil {
 				return nil
@@ -166,6 +176,11 @@ func NewApp(cfg *config.Config) App {
 				return nil
 			}
 			return buf.Tail(1000)
+		}, func(runID string) (string, string) {
+			if mgr == nil {
+				return "", ""
+			}
+			return mgr.LogFilePaths(runID)
 		})
 	}
 
@@ -428,10 +443,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.focusedPanel == panelLogView && a.logView.ConsumesKeys() {
 			switch msg.String() {
 			case "ctrl+c":
-				a.devServers.StopAll()
-				if a.pidWatchCancel != nil {
-					a.pidWatchCancel()
-				}
+				a.cleanup()
 				return a, tea.Quit
 			}
 			var cmd tea.Cmd
@@ -441,16 +453,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "ctrl+c":
-			a.devServers.StopAll()
-			if a.pidWatchCancel != nil {
-				a.pidWatchCancel()
-			}
+			a.cleanup()
 			return a, tea.Quit
 		case "q":
-			a.devServers.StopAll()
-			if a.pidWatchCancel != nil {
-				a.pidWatchCancel()
-			}
+			a.cleanup()
 			return a, tea.Quit
 		case "tab":
 			a.focusedPanel = (a.focusedPanel + 1) % numPanels
@@ -503,10 +509,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleAccept()
 		case "x":
 			return a.handleReject()
-		case "p":
-			return a.handlePause()
+		case " ":
+			return a.handleTogglePause()
 		case "r":
-			return a.handleResume()
+			return a.handleRestart()
 		case "c":
 			return a.handleCancel()
 		case "d":
@@ -595,6 +601,18 @@ func (a App) Registry() *engine.Registry {
 
 func (a App) Executor() *engine.Executor {
 	return a.executor
+}
+
+// cleanup disconnects from running processes (without killing them),
+// stops dev servers, and cancels PID watchers. Called on TUI exit.
+func (a App) cleanup() {
+	if a.manager != nil {
+		a.manager.DisconnectAll()
+	}
+	a.devServers.StopAll()
+	if a.pidWatchCancel != nil {
+		a.pidWatchCancel()
+	}
 }
 
 func (a App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
@@ -689,7 +707,15 @@ func (a *App) syncSelection() tea.Cmd {
 			buf = a.manager.Buffer(selected.ID)
 			eb = a.manager.EntryBuffer(selected.ID)
 		}
-		a.logView.SetRun(selected.ID, selected.CurrentSkill, selected.Branch, buf, eb, !selected.IsTerminal())
+
+		if selected.ID == a.lastSyncedRunID {
+			// Same run — update metadata without resetting tab/search/cursor state
+			a.logView.UpdateRunMeta(selected.CurrentSkill, selected.Branch, buf, eb, !selected.IsTerminal())
+		} else {
+			// Different run — full reset
+			a.logView.SetRun(selected.ID, selected.CurrentSkill, selected.Branch, buf, eb, !selected.IsTerminal())
+			a.lastSyncedRunID = selected.ID
+		}
 
 		if selected.Worktree != "" {
 			a.logView.SetDiffLoading()
@@ -702,6 +728,7 @@ func (a *App) syncSelection() tea.Cmd {
 		}
 	} else {
 		a.logView.SetRun("", "", "", nil, nil, false)
+		a.lastSyncedRunID = ""
 		a.logView.SetDiffEmpty()
 	}
 	return nil
@@ -736,13 +763,15 @@ func (a *App) updateFocusState() {
 func (a App) handleAccept() (tea.Model, tea.Cmd) {
 	selected := a.runList.SelectedRun()
 	if selected == nil {
-		return a, nil
+		a.statusBar.SetFlash("No run selected")
+		return a, flashClearCmd()
 	}
 
 	// Allow re-accept of failed merge pipelines
 	if selected.State != run.StateCompleted && selected.State != run.StateReviewing &&
 		!(selected.State == run.StateFailed && selected.MergeStatus != "") {
-		return a, nil
+		a.statusBar.SetFlash(fmt.Sprintf("Cannot accept: run is %s", selected.State))
+		return a, flashClearCmd()
 	}
 
 	runID := selected.ID
@@ -796,10 +825,12 @@ func (a App) handleAccept() (tea.Model, tea.Cmd) {
 func (a App) handleReject() (tea.Model, tea.Cmd) {
 	selected := a.runList.SelectedRun()
 	if selected == nil {
-		return a, nil
+		a.statusBar.SetFlash("No run selected")
+		return a, flashClearCmd()
 	}
 	if selected.State != run.StateCompleted && selected.State != run.StateReviewing {
-		return a, nil
+		a.statusBar.SetFlash(fmt.Sprintf("Cannot reject: run is %s", selected.State))
+		return a, flashClearCmd()
 	}
 
 	runID := selected.ID
@@ -822,10 +853,12 @@ func (a App) handleReject() (tea.Model, tea.Cmd) {
 func (a App) handleDevServerToggle() (tea.Model, tea.Cmd) {
 	selected := a.runList.SelectedRun()
 	if selected == nil {
-		return a, nil
+		a.statusBar.SetFlash("No run selected")
+		return a, flashClearCmd()
 	}
 	if selected.State != run.StateCompleted && selected.State != run.StateReviewing {
-		return a, nil
+		a.statusBar.SetFlash(fmt.Sprintf("Dev server: run is %s", selected.State))
+		return a, flashClearCmd()
 	}
 
 	runID := selected.ID
@@ -855,53 +888,88 @@ func (a App) handleDevServerToggle() (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-func (a App) handlePause() (tea.Model, tea.Cmd) {
-	selected := a.runList.SelectedRun()
-	if selected == nil || a.manager == nil {
-		return a, nil
-	}
-	if selected.State != run.StateRunning {
-		return a, nil
-	}
-	if err := a.manager.Pause(selected.ID); err != nil {
-		a.statusBar.SetFlash(fmt.Sprintf("pause: %v", err))
-		return a, flashClearCmd()
-	}
-	return a, nil
-}
-
-func (a App) handleResume() (tea.Model, tea.Cmd) {
+func (a App) handleTogglePause() (tea.Model, tea.Cmd) {
 	selected := a.runList.SelectedRun()
 	if selected == nil {
-		return a, nil
+		a.statusBar.SetFlash("No run selected")
+		return a, flashClearCmd()
 	}
 
-	if selected.State == run.StatePaused && a.manager != nil {
-		if err := a.manager.Resume(selected.ID); err != nil {
-			a.statusBar.SetFlash(fmt.Sprintf("resume: %v", err))
+	switch selected.State {
+	case run.StateRunning:
+		if a.manager == nil {
+			return a, nil
+		}
+		if err := a.manager.Pause(selected.ID); err != nil {
+			a.statusBar.SetFlash(fmt.Sprintf("Pause: %v", err))
 			return a, flashClearCmd()
 		}
 		return a, nil
-	}
 
-	if (selected.State == run.StateFailed || selected.State == run.StatePaused) && a.executor != nil {
-		if err := a.executor.Resume(selected.ID, selected.Prompt); err != nil {
-			a.statusBar.SetFlash(fmt.Sprintf("resume: %v", err))
-			return a, flashClearCmd()
+	case run.StatePaused:
+		if a.manager != nil {
+			if err := a.manager.Resume(selected.ID); err != nil {
+				a.statusBar.SetFlash(fmt.Sprintf("Resume: %v", err))
+				return a, flashClearCmd()
+			}
+			return a, nil
 		}
+		return a, nil
+
+	case run.StateFailed:
+		if a.executor != nil {
+			if err := a.executor.Resume(selected.ID, selected.Prompt); err != nil {
+				a.statusBar.SetFlash(fmt.Sprintf("Resume: %v", err))
+				return a, flashClearCmd()
+			}
+			return a, nil
+		}
+		return a, nil
+
+	default:
+		a.statusBar.SetFlash(fmt.Sprintf("Cannot pause/resume: run is %s", selected.State))
+		return a, flashClearCmd()
+	}
+}
+
+func (a App) handleRestart() (tea.Model, tea.Cmd) {
+	selected := a.runList.SelectedRun()
+	if selected == nil {
+		a.statusBar.SetFlash("No run selected")
+		return a, flashClearCmd()
+	}
+	if !selected.IsTerminal() && selected.State != run.StateReviewing {
+		a.statusBar.SetFlash(fmt.Sprintf("Cannot restart: run is %s", selected.State))
+		return a, flashClearCmd()
+	}
+	if a.executor == nil {
 		return a, nil
 	}
 
-	return a, nil
+	prompt := selected.Prompt
+	workflow := selected.Workflow
+	model := selected.Model
+	return a, func() tea.Msg {
+		return StartRunMsg{
+			Prompt:   prompt,
+			Workflow: workflow,
+			Model:    model,
+		}
+	}
 }
 
 func (a App) handleCancel() (tea.Model, tea.Cmd) {
 	selected := a.runList.SelectedRun()
-	if selected == nil || a.manager == nil {
+	if selected == nil {
+		a.statusBar.SetFlash("No run selected")
+		return a, flashClearCmd()
+	}
+	if a.manager == nil {
 		return a, nil
 	}
 	if selected.State != run.StateRunning && selected.State != run.StatePaused && selected.State != run.StateQueued {
-		return a, nil
+		a.statusBar.SetFlash(fmt.Sprintf("Cannot cancel: run is %s", selected.State))
+		return a, flashClearCmd()
 	}
 
 	if a.executor != nil {
@@ -921,25 +989,32 @@ func (a App) handleCancel() (tea.Model, tea.Cmd) {
 func (a App) handleDelete() (tea.Model, tea.Cmd) {
 	selected := a.runList.SelectedRun()
 	if selected == nil {
-		return a, nil
+		a.statusBar.SetFlash("No run selected")
+		return a, flashClearCmd()
 	}
 	if !selected.IsTerminal() {
-		return a, nil
+		a.statusBar.SetFlash("Cannot delete: run is still active")
+		return a, flashClearCmd()
 	}
 
 	runID := selected.ID
 
-	_ = a.devServers.Stop(runID)
-	a.store.Remove(runID)
+	// Get log file paths before removing buffers (which closes handles)
+	var stdoutLog, stderrLog string
 	if a.manager != nil {
+		stdoutLog, stderrLog = a.manager.LogFilePaths(runID)
 		a.manager.RemoveBuffer(runID)
 	}
+
+	_ = a.devServers.Stop(runID)
+	a.store.Remove(runID)
 
 	go func() {
 		_ = a.worktrees.Remove(runID)
 		if a.persistence != nil {
 			_ = a.persistence.Remove(runID)
 		}
+		process.RemoveLogFiles(stdoutLog, stderrLog)
 	}()
 
 	a.statusBar.SetFlash(fmt.Sprintf("Deleted run %s", runID))
@@ -949,10 +1024,12 @@ func (a App) handleDelete() (tea.Model, tea.Cmd) {
 func (a App) handleFollowUp() (tea.Model, tea.Cmd) {
 	selected := a.runList.SelectedRun()
 	if selected == nil {
-		return a, nil
+		a.statusBar.SetFlash("No run selected")
+		return a, flashClearCmd()
 	}
 	if selected.State != run.StateCompleted && selected.State != run.StateReviewing {
-		return a, nil
+		a.statusBar.SetFlash(fmt.Sprintf("Cannot follow up: run is %s", selected.State))
+		return a, flashClearCmd()
 	}
 
 	a.followUpModal = panels.NewFollowUpModal(selected.ID, selected.Prompt, a.width, a.height)

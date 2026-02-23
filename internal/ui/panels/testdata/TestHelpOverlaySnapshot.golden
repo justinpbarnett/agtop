@@ -8,8 +8,8 @@
 │Actions                                   │
 │  n  New run                              │
 │  y  Yank / copy                          │
-│  p  Pause                                │
-│  r  Resume / Retry                       │
+│  Space  Pause / Resume                   │
+│  r  Restart                              │
 │  c  Cancel                               │
 │  d  Delete run                           │
 │  a  Accept                               │
