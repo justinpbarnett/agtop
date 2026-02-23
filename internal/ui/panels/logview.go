@@ -135,6 +135,8 @@ func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
 				l.activeTab = tabLog
 				l.updateDiffFocus()
 				return l, nil
+			case "enter":
+				return l, func() tea.Msg { return FullscreenMsg{Panel: 1} }
 			}
 			var cmd tea.Cmd
 			l.diffView, cmd = l.diffView.Update(msg)
@@ -209,7 +211,11 @@ func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
 		case "y":
 			l.enterCopyMode()
 			return l, nil
-		case "enter", " ":
+		case "enter":
+			if l.focused {
+				return l, func() tea.Msg { return FullscreenMsg{Panel: 1} }
+			}
+		case " ":
 			if l.entryBuffer != nil {
 				l.toggleExpand(l.cursorEntry)
 				l.refreshContent()
@@ -371,7 +377,8 @@ func (l LogView) View() string {
 				}
 			} else {
 				keybinds = []border.Keybind{
-					{Key: "⏎", Label: " expand"},
+					{Key: "⏎", Label: " fullscreen"},
+					{Key: "␣", Label: " expand"},
 					{Key: "y", Label: "ank/copy"},
 					{Key: "G", Label: "bottom"},
 					{Key: "g", Label: "g top"},
@@ -413,7 +420,7 @@ func (l LogView) View() string {
 	} else {
 		content = l.diffView.Content()
 		if l.focused {
-			keybinds = l.diffView.Keybinds()
+			keybinds = append([]border.Keybind{{Key: "⏎", Label: " fullscreen"}}, l.diffView.Keybinds()...)
 		}
 	}
 

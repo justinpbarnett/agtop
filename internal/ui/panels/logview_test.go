@@ -408,8 +408,8 @@ func TestLogViewEntryExpandCollapse(t *testing.T) {
 		t.Error("expected detail hidden when collapsed")
 	}
 
-	// Expand via Enter
-	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Expand via Space
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeySpace})
 	view = lv.View()
 	if !strings.Contains(view, "Detailed line 1") {
 		t.Error("expected detail visible after expand")
@@ -418,8 +418,8 @@ func TestLogViewEntryExpandCollapse(t *testing.T) {
 		t.Error("expected expanded indicator ▾")
 	}
 
-	// Collapse via Enter again
-	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Collapse via Space again
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeySpace})
 	view = lv.View()
 	if strings.Contains(view, "Detailed line 1") {
 		t.Error("expected detail hidden after collapse")

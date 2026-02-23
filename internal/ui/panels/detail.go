@@ -39,6 +39,10 @@ func (d Detail) Update(msg tea.Msg) (Detail, tea.Cmd) {
 		return d, nil
 	case tea.KeyMsg:
 		switch msg.String() {
+		case "enter":
+			if d.focused && d.selectedRun != nil {
+				return d, func() tea.Msg { return FullscreenMsg{Panel: 2} }
+			}
 		case "y":
 			if d.selectedRun != nil {
 				return d, func() tea.Msg { return YankMsg{Text: d.plainText()} }
@@ -85,6 +89,7 @@ func (d Detail) View() string {
 	var keybinds []border.Keybind
 	if d.focused && d.selectedRun != nil {
 		keybinds = []border.Keybind{
+			{Key: "⏎", Label: " fullscreen"},
 			{Key: "j/k", Label: " scroll"},
 			{Key: "G", Label: " bottom"},
 			{Key: "g", Label: "g top"},

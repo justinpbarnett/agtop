@@ -4,6 +4,8 @@
 │  G/gg  Jump to bottom/top                │
 │  h/l  Switch panels (top row)            │
 │  Tab  Cycle panel focus                  │
+│  Enter  Fullscreen panel                 │
+│  Esc  Exit fullscreen                    │
 │                                          │
 │Actions                                   │
 │  n  New run                              │
