@@ -124,7 +124,15 @@ func TestParseRouteResultPlainText(t *testing.T) {
 		{"sdlc\n", "sdlc"},
 		{"  quick-fix  ", "quick-fix"},
 		{"quick_fix", "quick_fix"},
+		// Workflow name on first line with trailing text
 		{"sdlc\nsome extra text", "sdlc"},
+		// Workflow name on last line (common case: model adds explanation)
+		{"Based on my analysis, this is a complex task.\nplan-build", "plan-build"},
+		{"This task requires multi-file changes.\n\nbuild", "build"},
+		// Multi-line triage assessment with workflow name at the end
+		{"The task involves fixing auto-resume.\nRecommended approach: plan with spec first.\n\nplan-build\n", "plan-build"},
+		// Workflow name buried in the middle
+		{"Some preamble text.\nsdlc\nSome trailing explanation.", "sdlc"},
 	}
 
 	for _, tt := range tests {
@@ -153,6 +161,30 @@ func TestParseRouteResultInvalidChars(t *testing.T) {
 	got := parseRouteResult("I think you should use the build workflow")
 	if got != "" {
 		t.Errorf("expected empty for sentence input, got %q", got)
+	}
+}
+
+func TestParseRouteResultAllSentences(t *testing.T) {
+	// No valid workflow name on any line
+	got := parseRouteResult("I recommend the build workflow.\nIt seems like a good fit.")
+	if got != "" {
+		t.Errorf("expected empty when all lines are sentences, got %q", got)
+	}
+}
+
+func TestIsWorkflowName(t *testing.T) {
+	valid := []string{"build", "plan-build", "sdlc", "quick_fix", "my-workflow-v2"}
+	for _, name := range valid {
+		if !isWorkflowName(name) {
+			t.Errorf("isWorkflowName(%q) = false, want true", name)
+		}
+	}
+
+	invalid := []string{"", "has spaces", "has.dots", "has:colons", "has,commas"}
+	for _, name := range invalid {
+		if isWorkflowName(name) {
+			t.Errorf("isWorkflowName(%q) = true, want false", name)
+		}
 	}
 }
 

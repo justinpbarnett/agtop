@@ -302,18 +302,35 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 		// Handle route skill: override workflow
 		if skillName == "route" {
 			resolvedWorkflow := parseRouteResult(previousOutput)
-			if resolvedWorkflow != "" {
-				newSkills, err := ResolveWorkflow(e.cfg, resolvedWorkflow)
-				if err == nil {
-					skills = newSkills
-					i = -1 // will be incremented to 0 by the for loop
+			if resolvedWorkflow == "" {
+				log.Printf("route skill for run %s returned no parseable workflow name", runID)
+				e.logToBuffer(runID, "route", "WARNING: could not parse workflow name from route output, falling back to build")
+				resolvedWorkflow = "build"
+			}
+
+			newSkills, err := ResolveWorkflow(e.cfg, resolvedWorkflow)
+			if err != nil {
+				log.Printf("route skill for run %s resolved to unknown workflow %q: %v", runID, resolvedWorkflow, err)
+				e.logToBuffer(runID, "route", fmt.Sprintf("WARNING: workflow %q not found, falling back to build", resolvedWorkflow))
+				resolvedWorkflow = "build"
+				newSkills, err = ResolveWorkflow(e.cfg, resolvedWorkflow)
+				if err != nil {
 					e.store.Update(runID, func(r *run.Run) {
-						r.Workflow = resolvedWorkflow
-						r.SkillTotal = len(newSkills)
+						r.State = run.StateFailed
+						r.Error = fmt.Sprintf("fallback workflow %q not found: %v", resolvedWorkflow, err)
+						r.CompletedAt = time.Now()
 					})
-					continue
+					return
 				}
 			}
+
+			skills = newSkills
+			i = -1 // will be incremented to 0 by the for loop
+			e.store.Update(runID, func(r *run.Run) {
+				r.Workflow = resolvedWorkflow
+				r.SkillTotal = len(newSkills)
+			})
+			continue
 		}
 
 		// Handle decompose skill: parallel execution
@@ -577,7 +594,8 @@ func (e *Executor) runParallelSkill(ctx context.Context, taskRunID string, paren
 }
 
 // parseRouteResult extracts a workflow name from the route skill's output.
-// Tries JSON format first ({"workflow": "name"}), falls back to plain text.
+// Tries JSON format first ({"workflow": "name"}), then scans all lines
+// (last to first) for a valid workflow identifier.
 func parseRouteResult(resultText string) string {
 	text := strings.TrimSpace(resultText)
 	if text == "" {
@@ -592,17 +610,48 @@ func parseRouteResult(resultText string) string {
 		return obj.Workflow
 	}
 
-	// Plain text: take first line, trim whitespace
-	lines := strings.SplitN(text, "\n", 2)
-	candidate := strings.TrimSpace(lines[0])
-
-	// Basic validation: workflow names are simple identifiers
-	for _, c := range candidate {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
-			return ""
+	// Scan all lines last-to-first for a valid workflow name.
+	// The route skill is instructed to output just the name, but models
+	// often prepend explanation text. The actual name is typically last.
+	lines := strings.Split(text, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		candidate := strings.TrimSpace(lines[i])
+		if candidate == "" {
+			continue
+		}
+		if isWorkflowName(candidate) {
+			return candidate
 		}
 	}
-	return candidate
+	return ""
+}
+
+// isWorkflowName returns true if s looks like a valid workflow identifier
+// (alphanumeric, dashes, underscores only, non-empty).
+func isWorkflowName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// logToBuffer writes a timestamped message to the run's log buffer.
+func (e *Executor) logToBuffer(runID string, skill string, msg string) {
+	buf := e.manager.Buffer(runID)
+	if buf == nil {
+		return
+	}
+	ts := time.Now().Format("15:04:05")
+	if skill != "" {
+		buf.Append(fmt.Sprintf("[%s %s] %s", ts, skill, msg))
+	} else {
+		buf.Append(fmt.Sprintf("[%s] %s", ts, msg))
+	}
 }
 
 // isNonModifyingSkill returns true for skills that don't modify files in the worktree.
