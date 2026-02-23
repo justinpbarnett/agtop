@@ -443,6 +443,18 @@ func (l *LogView) SetRun(runID, skill, branch string, buf *process.RingBuffer, e
 	l.refreshContent()
 }
 
+// UpdateRunMeta updates run metadata (skill, branch, buffers, active state)
+// without resetting UI state like activeTab, search, cursor, or expanded entries.
+// Use this when the same run is re-synced (e.g., on store updates).
+func (l *LogView) UpdateRunMeta(skill, branch string, buf *process.RingBuffer, eb *process.EntryBuffer, active bool) {
+	l.skill = skill
+	l.branch = branch
+	l.buffer = buf
+	l.entryBuffer = eb
+	l.active = active
+	l.refreshContent()
+}
+
 // Diff proxy methods — called by the app to pass diff data into the embedded DiffView.
 
 func (l *LogView) SetDiff(diff, stat string)  { l.diffView.SetDiff(diff, stat) }

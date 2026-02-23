@@ -448,7 +448,7 @@ func TestLogViewEntryCursorNavigation(t *testing.T) {
 	}
 }
 
-func TestLogViewStreamingEntryAutoExpand(t *testing.T) {
+func TestLogViewStreamingEntryIndicator(t *testing.T) {
 	lv := NewLogView()
 	lv.SetSize(80, 30)
 	eb := process.NewEntryBuffer(100)
@@ -458,12 +458,12 @@ func TestLogViewStreamingEntryAutoExpand(t *testing.T) {
 	lv.SetRun("001", "build", "main", buf, eb, true) // active=true
 
 	view := lv.View()
-	// Last entry in active run should be auto-expanded (streaming)
-	if !strings.Contains(view, "More detail here") {
-		t.Error("expected streaming entry to be auto-expanded")
-	}
+	// Streaming entry should show cursor indicator on summary line but NOT auto-expand
 	if !strings.Contains(view, "▍") {
-		t.Error("expected streaming cursor ▍")
+		t.Error("expected streaming cursor ▍ on summary line")
+	}
+	if strings.Contains(view, "More detail here") {
+		t.Error("streaming entry should not auto-expand detail")
 	}
 }
 
@@ -537,6 +537,73 @@ func TestLogViewEvictionAdjustsCursorAndExpanded(t *testing.T) {
 	}
 	if lv.expandedEntries[2] {
 		t.Error("expected old expanded index 2 to be removed")
+	}
+}
+
+func TestUpdateRunMetaPreservesActiveTab(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 30)
+	eb := process.NewEntryBuffer(100)
+	eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, "Entry A"))
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, true)
+
+	// Switch to diff tab
+	lv.activeTab = tabDiff
+
+	// UpdateRunMeta should NOT reset the tab
+	lv.UpdateRunMeta("test", "feat/new", buf, eb, true)
+
+	if lv.activeTab != tabDiff {
+		t.Errorf("expected activeTab=%d (tabDiff), got %d", tabDiff, lv.activeTab)
+	}
+	// Verify metadata was updated
+	if lv.skill != "test" {
+		t.Errorf("expected skill='test', got %q", lv.skill)
+	}
+	if lv.branch != "feat/new" {
+		t.Errorf("expected branch='feat/new', got %q", lv.branch)
+	}
+}
+
+func TestUpdateRunMetaPreservesSearchState(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 30)
+	buf := process.NewRingBuffer(100)
+	buf.Append("error line one")
+	buf.Append("ok line two")
+	lv.SetRun("001", "build", "main", buf, nil, true)
+
+	// Set up search state
+	lv.searchQuery = "error"
+	lv.recomputeMatches()
+	origMatches := len(lv.matchIndices)
+
+	// UpdateRunMeta should preserve search
+	lv.UpdateRunMeta("test", "main", buf, nil, false)
+
+	if lv.searchQuery != "error" {
+		t.Errorf("expected searchQuery='error', got %q", lv.searchQuery)
+	}
+	if len(lv.matchIndices) != origMatches {
+		t.Errorf("expected %d matches preserved, got %d", origMatches, len(lv.matchIndices))
+	}
+}
+
+func TestSetRunResetsActiveTab(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 30)
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, nil, true)
+
+	// Switch to diff tab
+	lv.activeTab = tabDiff
+
+	// SetRun with a new run ID should reset the tab
+	lv.SetRun("002", "test", "feat/new", buf, nil, true)
+
+	if lv.activeTab != tabLog {
+		t.Errorf("expected activeTab=%d (tabLog), got %d", tabLog, lv.activeTab)
 	}
 }
 
