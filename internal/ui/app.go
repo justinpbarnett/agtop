@@ -188,6 +188,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.ready = true
 		a.layout = layout.Calculate(msg.Width, msg.Height)
 		a.propagateSizes()
+		if a.newRunModal != nil {
+			a.newRunModal.SetSize(msg.Width, msg.Height)
+		}
 		return a, nil
 
 	case CloseModalMsg:
@@ -374,7 +377,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 		case "n":
-			a.newRunModal = panels.NewNewRunModal()
+			a.newRunModal = panels.NewNewRunModal(a.width, a.height)
 			return a, a.newRunModal.Init()
 		case "a":
 			return a.handleAccept()

@@ -43,7 +43,7 @@ func main() {
 	}
 
 	model := ui.NewApp(cfg)
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	if mgr := model.Manager(); mgr != nil {
 		mgr.SetProgram(p)

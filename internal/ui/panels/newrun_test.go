@@ -7,7 +7,7 @@ import (
 )
 
 func TestNewRunModalDefaults(t *testing.T) {
-	m := NewNewRunModal()
+	m := NewNewRunModal(120, 40)
 	if m.Workflow() != "build" {
 		t.Errorf("default workflow = %q, want %q", m.Workflow(), "build")
 	}
@@ -26,13 +26,13 @@ func TestNewRunModalWorkflowSelection(t *testing.T) {
 	}{
 		{"ctrl+b", "build"},
 		{"ctrl+p", "plan-build"},
-		{"ctrl+s", "sdlc"},
+		{"ctrl+l", "sdlc"},
 		{"ctrl+q", "quick-fix"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {
-			m := NewNewRunModal()
+			m := NewNewRunModal(120, 40)
 			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: nil}) // dummy to init
 			m, _ = m.Update(newRunKeyMsg(tt.key))
 			if m == nil {
@@ -58,7 +58,7 @@ func TestNewRunModalModelOverride(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {
-			m := NewNewRunModal()
+			m := NewNewRunModal(120, 40)
 			m, _ = m.Update(newRunKeyMsg(tt.key))
 			if m == nil {
 				t.Fatal("modal was unexpectedly dismissed")
@@ -71,7 +71,7 @@ func TestNewRunModalModelOverride(t *testing.T) {
 }
 
 func TestNewRunModalSubmit(t *testing.T) {
-	m := NewNewRunModal()
+	m := NewNewRunModal(120, 40)
 
 	// Type a prompt
 	for _, ch := range "fix the bug" {
@@ -82,7 +82,7 @@ func TestNewRunModalSubmit(t *testing.T) {
 	}
 
 	// Select workflow
-	m, _ = m.Update(newRunKeyMsg("ctrl+s"))
+	m, _ = m.Update(newRunKeyMsg("ctrl+l"))
 	if m == nil {
 		t.Fatal("modal dismissed on workflow select")
 	}
@@ -94,7 +94,7 @@ func TestNewRunModalSubmit(t *testing.T) {
 	}
 
 	// Submit
-	result, cmd := m.Update(newRunKeyMsg("enter"))
+	result, cmd := m.Update(newRunKeyMsg("ctrl+s"))
 	if result != nil {
 		t.Error("modal should be nil after submit")
 	}
@@ -119,10 +119,10 @@ func TestNewRunModalSubmit(t *testing.T) {
 }
 
 func TestNewRunModalEmptyPromptNoSubmit(t *testing.T) {
-	m := NewNewRunModal()
+	m := NewNewRunModal(120, 40)
 
 	// Try to submit with empty prompt
-	result, cmd := m.Update(newRunKeyMsg("enter"))
+	result, cmd := m.Update(newRunKeyMsg("ctrl+s"))
 	if result == nil {
 		t.Error("modal should stay open on empty prompt submit")
 	}
@@ -132,7 +132,7 @@ func TestNewRunModalEmptyPromptNoSubmit(t *testing.T) {
 }
 
 func TestNewRunModalCancel(t *testing.T) {
-	m := NewNewRunModal()
+	m := NewNewRunModal(120, 40)
 
 	result, cmd := m.Update(newRunKeyMsg("esc"))
 	if result != nil {
@@ -149,7 +149,7 @@ func TestNewRunModalCancel(t *testing.T) {
 }
 
 func TestNewRunModalTextInput(t *testing.T) {
-	m := NewNewRunModal()
+	m := NewNewRunModal(120, 40)
 
 	for _, ch := range "hello" {
 		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
@@ -164,10 +164,10 @@ func TestNewRunModalTextInput(t *testing.T) {
 }
 
 func TestNewRunModalView(t *testing.T) {
-	m := NewNewRunModal()
+	m := NewNewRunModal(120, 40)
 	view := m.View()
 
-	checks := []string{"New Run", "Workflow", "Model", "Enter", "Esc"}
+	checks := []string{"New Run", "Workflow", "Model", "^S", "Esc"}
 	for _, s := range checks {
 		if !containsPlain(view, s) {
 			t.Errorf("view missing %q", s)
@@ -230,6 +230,8 @@ func newRunKeyMsg(key string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyCtrlP}
 	case "ctrl+s":
 		return tea.KeyMsg{Type: tea.KeyCtrlS}
+	case "ctrl+l":
+		return tea.KeyMsg{Type: tea.KeyCtrlL}
 	case "ctrl+q":
 		return tea.KeyMsg{Type: tea.KeyCtrlQ}
 	case "ctrl+h":
