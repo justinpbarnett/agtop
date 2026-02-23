@@ -145,6 +145,88 @@ func (e *Executor) Resume(runID string, userPrompt string) error {
 	return nil
 }
 
+// FollowUp sends a follow-up prompt to a completed run, reusing its worktree.
+func (e *Executor) FollowUp(runID, followUpPrompt string) error {
+	r, ok := e.store.Get(runID)
+	if !ok {
+		return fmt.Errorf("run not found: %s", runID)
+	}
+	if r.State != run.StateCompleted && r.State != run.StateReviewing {
+		return fmt.Errorf("run %s is %s, not eligible for follow-up", runID, r.State)
+	}
+
+	e.store.Update(runID, func(r *run.Run) {
+		r.FollowUpPrompts = append(r.FollowUpPrompts, followUpPrompt)
+		r.State = run.StateRunning
+		r.CompletedAt = time.Time{}
+		r.Error = ""
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	e.mu.Lock()
+	e.active[runID] = cancel
+	e.mu.Unlock()
+
+	go func() {
+		defer func() {
+			e.mu.Lock()
+			delete(e.active, runID)
+			e.mu.Unlock()
+		}()
+
+		e.executeFollowUp(ctx, runID, followUpPrompt)
+	}()
+
+	return nil
+}
+
+func (e *Executor) executeFollowUp(ctx context.Context, runID string, followUpPrompt string) {
+	skill, opts, ok := e.registry.SkillForRun("build")
+	if !ok {
+		e.store.Update(runID, func(r *run.Run) {
+			r.State = run.StateFailed
+			r.Error = "build skill not found"
+			r.CompletedAt = time.Now()
+		})
+		return
+	}
+
+	r, _ := e.store.Get(runID)
+	opts.WorkDir = r.Worktree
+
+	e.store.Update(runID, func(r *run.Run) {
+		r.SkillIndex = 1
+		r.SkillTotal = 1
+		r.CurrentSkill = "build"
+	})
+
+	prompt := BuildPrompt(skill, PromptContext{
+		WorkDir:        r.Worktree,
+		Branch:         r.Branch,
+		UserPrompt:     followUpPrompt,
+		SafetyPatterns: e.cfg.Safety.BlockedPatterns,
+	})
+
+	_, err := e.runSkill(ctx, runID, prompt, opts, skill.Timeout)
+	if err != nil {
+		e.store.Update(runID, func(r *run.Run) {
+			r.State = run.StateFailed
+			r.Error = fmt.Sprintf("follow-up failed: %v", err)
+			r.CompletedAt = time.Now()
+		})
+		return
+	}
+
+	e.commitAfterStep(ctx, runID)
+
+	e.store.Update(runID, func(r *run.Run) {
+		r.State = run.StateCompleted
+		r.CurrentSkill = ""
+		r.CompletedAt = time.Now()
+	})
+}
+
 func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []string, userPrompt string) {
 	var previousOutput string
 

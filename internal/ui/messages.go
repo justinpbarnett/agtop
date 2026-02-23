@@ -27,3 +27,6 @@ type YankMsg = panels.YankMsg
 
 // InitAcceptedMsg signals the user accepted the init prompt.
 type InitAcceptedMsg = panels.InitAcceptedMsg
+
+// SubmitFollowUpMsg is sent when the user confirms the follow-up modal.
+type SubmitFollowUpMsg = panels.SubmitFollowUpMsg

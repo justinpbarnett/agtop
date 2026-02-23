@@ -73,6 +73,7 @@ type App struct {
 	statusBar      panels.StatusBar
 	helpOverlay    *panels.HelpOverlay
 	newRunModal    *panels.NewRunModal
+	followUpModal  *panels.FollowUpModal
 	initPrompt     *panels.InitPrompt
 	keys           KeyMap
 	ready          bool
@@ -231,11 +232,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.newRunModal != nil {
 			a.newRunModal.SetSize(msg.Width, msg.Height)
 		}
+		if a.followUpModal != nil {
+			a.followUpModal.SetSize(msg.Width, msg.Height)
+		}
 		return a, nil
 
 	case CloseModalMsg:
 		a.helpOverlay = nil
 		a.newRunModal = nil
+		a.followUpModal = nil
 		a.initPrompt = nil
 		return a, nil
 
@@ -334,6 +339,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case SubmitFollowUpMsg:
+		if a.executor != nil {
+			if err := a.executor.FollowUp(msg.RunID, msg.Prompt); err != nil {
+				a.statusBar.SetFlash(fmt.Sprintf("follow-up: %v", err))
+				return a, flashClearCmd()
+			}
+		}
+		return a, nil
+
 	case process.CostThresholdMsg:
 		a.statusBar.SetFlash(msg.Reason)
 		return a, flashClearCmd()
@@ -373,6 +387,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 
 	case tea.MouseMsg:
+		if a.newRunModal != nil {
+			var cmd tea.Cmd
+			a.newRunModal, cmd = a.newRunModal.Update(msg)
+			return a, cmd
+		}
 		return a.handleMouse(msg)
 
 	case tea.KeyMsg:
@@ -385,6 +404,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.helpOverlay != nil {
 			var cmd tea.Cmd
 			*a.helpOverlay, cmd = a.helpOverlay.Update(msg)
+			return a, cmd
+		}
+
+		if a.followUpModal != nil {
+			var cmd tea.Cmd
+			a.followUpModal, cmd = a.followUpModal.Update(msg)
 			return a, cmd
 		}
 
@@ -484,6 +509,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleDelete()
 		case "D":
 			return a.handleDevServerToggle()
+		case "u":
+			return a.handleFollowUp()
 		}
 
 		return a.routeKey(msg)
@@ -542,6 +569,15 @@ func (a App) View() string {
 		)
 	}
 
+	if a.followUpModal != nil {
+		modalView := a.followUpModal.View()
+		fullLayout = lipgloss.Place(a.width, a.height,
+			lipgloss.Center, lipgloss.Center, modalView,
+			lipgloss.WithWhitespaceChars(" "),
+			lipgloss.WithWhitespaceForeground(styles.TextDim),
+		)
+	}
+
 	return fullLayout
 }
 
@@ -558,34 +594,36 @@ func (a App) Executor() *engine.Executor {
 }
 
 func (a App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.MouseWheelUp, tea.MouseWheelDown:
-		relX, relY, ok := a.mouseInLogView(msg.X, msg.Y)
-		if ok {
-			_, _ = relX, relY
-			var cmd tea.Cmd
-			a.logView, cmd = a.logView.Update(msg)
-			return a, cmd
+	switch msg.Action {
+	case tea.MouseActionPress:
+		if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+			relX, relY, ok := a.mouseInLogView(msg.X, msg.Y)
+			if ok {
+				_, _ = relX, relY
+				var cmd tea.Cmd
+				a.logView, cmd = a.logView.Update(msg)
+				return a, cmd
+			}
+			return a, nil
 		}
-		return a, nil
-
-	case tea.MouseLeft:
-		relX, relY, ok := a.mouseInLogView(msg.X, msg.Y)
-		if ok {
-			a.logView.StartMouseSelection(relX, relY)
-		} else {
-			a.logView.CancelMouseSelection()
+		if msg.Button == tea.MouseButtonLeft {
+			relX, relY, ok := a.mouseInLogView(msg.X, msg.Y)
+			if ok {
+				a.logView.StartMouseSelection(relX, relY)
+			} else {
+				a.logView.CancelMouseSelection()
+			}
+			return a, nil
 		}
-		return a, nil
 
-	case tea.MouseMotion:
+	case tea.MouseActionMotion:
 		relX, relY, ok := a.mouseInLogView(msg.X, msg.Y)
 		if ok {
 			a.logView.ExtendMouseSelection(relX, relY)
 		}
 		return a, nil
 
-	case tea.MouseRelease:
+	case tea.MouseActionRelease:
 		relX, relY, ok := a.mouseInLogView(msg.X, msg.Y)
 		if ok {
 			text := a.logView.FinalizeMouseSelection(relX, relY)
@@ -704,7 +742,6 @@ func (a App) handleAccept() (tea.Model, tea.Cmd) {
 	}
 
 	runID := selected.ID
-	branch := selected.Branch
 
 	_ = a.devServers.Stop(runID)
 
@@ -715,41 +752,41 @@ func (a App) handleAccept() (tea.Model, tea.Cmd) {
 			r.MergeStatus = "starting"
 			r.Error = ""
 		})
+		worktrees := a.worktrees
+		store := a.store
 		go func() {
 			ctx := context.Background()
 			a.pipeline.Run(ctx, runID)
 			// Cleanup worktree after pipeline completes (success or failure)
-			r, ok := a.store.Get(runID)
+			r, ok := store.Get(runID)
 			if ok && r.State == run.StateAccepted {
-				_ = a.worktrees.Remove(runID)
+				_ = worktrees.Remove(runID)
+				store.Update(runID, func(r *run.Run) { r.Worktree = "" })
 			}
 		}()
 		a.statusBar.SetFlash("Merge pipeline started")
 		return a, flashClearCmd()
 	}
 
-	// Legacy flow: push and remove worktree
-	a.store.Update(runID, func(r *run.Run) {
-		r.State = run.StateAccepted
-	})
+	// Legacy flow: merge locally then clean up
+	a.store.Update(runID, func(r *run.Run) { r.State = run.StateAccepted })
 
+	worktrees := a.worktrees
+	store := a.store
 	go func() {
-		cmd := exec.Command("git", "push", "origin", branch)
-		if a.worktrees != nil {
-			r, ok := a.store.Get(runID)
-			if ok && r.Worktree != "" {
-				cmd.Dir = r.Worktree
-			}
-		}
-		if err := cmd.Run(); err != nil {
-			a.store.Update(runID, func(r *run.Run) {
-				r.Error = fmt.Sprintf("git push failed: %v", err)
+		if err := worktrees.Merge(runID); err != nil {
+			store.Update(runID, func(r *run.Run) {
+				r.State = run.StateFailed
+				r.Error = fmt.Sprintf("merge failed: %v", err)
 			})
+			return
 		}
-		_ = a.worktrees.Remove(runID)
+		_ = worktrees.Remove(runID)
+		store.Update(runID, func(r *run.Run) { r.Worktree = "" })
 	}()
 
-	return a, nil
+	a.statusBar.SetFlash("Merging into current branch...")
+	return a, flashClearCmd()
 }
 
 func (a App) handleReject() (tea.Model, tea.Cmd) {
@@ -768,8 +805,11 @@ func (a App) handleReject() (tea.Model, tea.Cmd) {
 	})
 
 	_ = a.devServers.Stop(runID)
+	worktrees := a.worktrees
+	store := a.store
 	go func() {
-		_ = a.worktrees.Remove(runID)
+		_ = worktrees.Remove(runID)
+		store.Update(runID, func(r *run.Run) { r.Worktree = "" })
 	}()
 
 	return a, nil
@@ -900,6 +940,19 @@ func (a App) handleDelete() (tea.Model, tea.Cmd) {
 
 	a.statusBar.SetFlash(fmt.Sprintf("Deleted run %s", runID))
 	return a, flashClearCmd()
+}
+
+func (a App) handleFollowUp() (tea.Model, tea.Cmd) {
+	selected := a.runList.SelectedRun()
+	if selected == nil {
+		return a, nil
+	}
+	if selected.State != run.StateCompleted && selected.State != run.StateReviewing {
+		return a, nil
+	}
+
+	a.followUpModal = panels.NewFollowUpModal(selected.ID, selected.Prompt, a.width, a.height)
+	return a, a.followUpModal.Init()
 }
 
 func (a *App) autoStartDevServers() {
