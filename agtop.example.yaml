@@ -23,7 +23,7 @@ runtime:
       - Grep
       - Glob
   opencode:
-    model: anthropic/claude-sonnet-4-5
+    model: anthropic/claude-sonnet-4-6
     agent: build
 
 workflows:
@@ -83,7 +83,6 @@ ui:
   show_token_count: true
   show_cost: true
   log_scroll_speed: 5
-
 # integrations:
 #   jira:
 #     base_url: "https://yourcompany.atlassian.net"
