@@ -10,7 +10,7 @@ import (
 func TestHelpOverlaySnapshot(t *testing.T) {
 	h := NewHelpOverlay()
 
-	tm := teatest.NewTestModel(t, wrapHelpOverlay(h), teatest.WithInitialTermSize(50, 25))
+	tm := teatest.NewTestModel(t, wrapHelpOverlay(h), teatest.WithInitialTermSize(50, 30))
 	waitForContains(t, tm, "Keybinds")
 	tm.Send(tea.QuitMsg{})
 	tm.FinalModel(t, teatest.WithFinalTimeout(waitDuration))

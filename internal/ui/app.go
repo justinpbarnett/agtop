@@ -81,6 +81,7 @@ type App struct {
 	ready           bool
 	lastSyncedRunID string
 	updateRepo      string
+	fullscreenPanel int // -1 = normal layout, panelDetail/panelLogView = fullscreen
 }
 
 func NewApp(cfg *config.Config) App {
@@ -224,23 +225,24 @@ func NewApp(cfg *config.Config) App {
 	}
 
 	app := App{
-		config:         cfg,
-		store:          store,
-		manager:        mgr,
-		registry:       reg,
-		executor:       exec,
-		pipeline:       pl,
-		worktrees:      wt,
-		diffGen:        dg,
-		devServers:     ds,
-		persistence:    persist,
-		jiraExpander:   jiraExp,
-		pidWatchCancel: pidWatchCancel,
-		runList:        rl,
-		logView:        lv,
-		detail:         d,
-		statusBar:      panels.NewStatusBar(store),
-		keys:           DefaultKeyMap(),
+		config:          cfg,
+		store:           store,
+		manager:         mgr,
+		registry:        reg,
+		executor:        exec,
+		pipeline:        pl,
+		worktrees:       wt,
+		diffGen:         dg,
+		devServers:      ds,
+		persistence:     persist,
+		jiraExpander:    jiraExp,
+		pidWatchCancel:  pidWatchCancel,
+		runList:         rl,
+		logView:         lv,
+		detail:          d,
+		statusBar:       panels.NewStatusBar(store),
+		keys:            DefaultKeyMap(),
+		fullscreenPanel: -1,
 	}
 
 	if !config.LocalConfigExists() {
@@ -424,6 +426,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.statusBar.ClearFlash()
 		return a, nil
 
+	case panels.FullscreenMsg:
+		a.fullscreenPanel = msg.Panel
+		a.propagateSizes()
+		return a, nil
+
+	case panels.ExitFullscreenMsg:
+		a.fullscreenPanel = -1
+		a.propagateSizes()
+		return a, nil
+
 	case YankMsg:
 		if msg.Text != "" {
 			if err := clipboard.Write(msg.Text); err != nil {
@@ -501,6 +513,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
+		case "esc":
+			if a.fullscreenPanel >= 0 {
+				a.fullscreenPanel = -1
+				a.propagateSizes()
+				return a, nil
+			}
 		case "ctrl+c":
 			a.cleanup()
 			return a, tea.Quit
@@ -596,10 +614,18 @@ func (a App) View() string {
 	detailView := a.detail.View()
 	statusBarView := a.statusBar.View()
 
-	// Assemble layout: left column (runlist + detail) | right column (logview), status bar
-	leftCol := lipgloss.JoinVertical(lipgloss.Left, runListView, detailView)
-	mainArea := lipgloss.JoinHorizontal(lipgloss.Top, leftCol, logViewView)
-	fullLayout := lipgloss.JoinVertical(lipgloss.Left, mainArea, statusBarView)
+	// Assemble layout
+	var fullLayout string
+	switch a.fullscreenPanel {
+	case panelDetail:
+		fullLayout = lipgloss.JoinVertical(lipgloss.Left, detailView, statusBarView)
+	case panelLogView:
+		fullLayout = lipgloss.JoinVertical(lipgloss.Left, logViewView, statusBarView)
+	default:
+		leftCol := lipgloss.JoinVertical(lipgloss.Left, runListView, detailView)
+		mainArea := lipgloss.JoinHorizontal(lipgloss.Top, leftCol, logViewView)
+		fullLayout = lipgloss.JoinVertical(lipgloss.Left, mainArea, statusBarView)
+	}
 
 	if a.initPrompt != nil {
 		modalView := a.initPrompt.View()
@@ -815,9 +841,19 @@ func (a *App) fetchDiff(runID, worktreeDir string) tea.Cmd {
 
 func (a *App) propagateSizes() {
 	l := a.layout
-	a.runList.SetSize(l.RunListWidth, l.RunListHeight)
-	a.logView.SetSize(l.LogViewWidth, l.LogViewHeight)
-	a.detail.SetSize(l.DetailWidth, l.DetailHeight)
+	if a.fullscreenPanel == panelDetail {
+		a.detail.SetSize(a.width, a.height-1)
+		a.runList.SetSize(l.RunListWidth, l.RunListHeight)
+		a.logView.SetSize(l.LogViewWidth, l.LogViewHeight)
+	} else if a.fullscreenPanel == panelLogView {
+		a.logView.SetSize(a.width, a.height-1)
+		a.runList.SetSize(l.RunListWidth, l.RunListHeight)
+		a.detail.SetSize(l.DetailWidth, l.DetailHeight)
+	} else {
+		a.runList.SetSize(l.RunListWidth, l.RunListHeight)
+		a.logView.SetSize(l.LogViewWidth, l.LogViewHeight)
+		a.detail.SetSize(l.DetailWidth, l.DetailHeight)
+	}
 	a.statusBar.SetSize(l.StatusBarWidth)
 }
 

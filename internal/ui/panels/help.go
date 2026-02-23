@@ -17,7 +17,7 @@ type HelpOverlay struct {
 func NewHelpOverlay() *HelpOverlay {
 	return &HelpOverlay{
 		width:  44,
-		height: 24,
+		height: 26,
 	}
 }
 
@@ -47,6 +47,8 @@ func (h HelpOverlay) View() string {
 	b.WriteString(kv("G/gg", "Jump to bottom/top") + "\n")
 	b.WriteString(kv("h/l", "Switch panels (top row)") + "\n")
 	b.WriteString(kv("Tab", "Cycle panel focus") + "\n")
+	b.WriteString(kv("Enter", "Fullscreen panel") + "\n")
+	b.WriteString(kv("Esc", "Exit fullscreen") + "\n")
 	b.WriteString("\n")
 	b.WriteString(sectionStyle.Render("Actions") + "\n")
 	b.WriteString(kv("n", "New run") + "\n")

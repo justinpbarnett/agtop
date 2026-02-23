@@ -45,3 +45,9 @@ type AnimTickMsg struct{}
 type UpdateAvailableMsg struct {
 	Version string
 }
+
+// FullscreenMsg requests that a panel be expanded to fill the terminal.
+type FullscreenMsg struct{ Panel int }
+
+// ExitFullscreenMsg requests returning to the normal 3-panel layout.
+type ExitFullscreenMsg struct{}
