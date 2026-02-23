@@ -27,12 +27,14 @@ runtime:
     agent: build
 
 workflows:
+  auto:
+    skills: [route]
   build:
-    skills: [route, build, test]
+    skills: [build, test]
   plan-build:
-    skills: [route, spec, build, test]
+    skills: [spec, build, test]
   sdlc:
-    skills: [route, spec, decompose, build, test, review, document]
+    skills: [spec, decompose, build, test, review, document]
   quick-fix:
     skills: [build, test, commit]
 
@@ -61,6 +63,14 @@ skills:
   pr:
     model: haiku
     timeout: 30
+
+merge:
+  target_branch: main          # branch to merge into (default: repo default branch)
+  auto_merge: false            # enable accept-to-merge pipeline (default: false)
+  merge_strategy: squash       # squash | merge | rebase (default: squash)
+  fix_attempts: 3              # max CI fix attempts before giving up (default: 3)
+  poll_interval: 30            # seconds between check status polls (default: 30)
+  poll_timeout: 600            # max seconds to wait for checks (default: 600)
 
 safety:
   blocked_patterns:

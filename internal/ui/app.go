@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -55,6 +56,7 @@ type App struct {
 	manager        *process.Manager
 	registry       *engine.Registry
 	executor       *engine.Executor
+	pipeline       *engine.Pipeline
 	worktrees      *gitpkg.WorktreeManager
 	devServers     *server.DevServerManager
 	diffGen        *gitpkg.DiffGenerator
@@ -114,6 +116,11 @@ func NewApp(cfg *config.Config) App {
 	var exec *engine.Executor
 	if mgr != nil {
 		exec = engine.NewExecutor(store, mgr, reg, cfg)
+	}
+
+	var pl *engine.Pipeline
+	if exec != nil {
+		pl = engine.NewPipeline(exec, store, &cfg.Merge, projectRoot)
 	}
 
 	wt := gitpkg.NewWorktreeManager(projectRoot)
@@ -188,6 +195,7 @@ func NewApp(cfg *config.Config) App {
 		manager:        mgr,
 		registry:       reg,
 		executor:       exec,
+		pipeline:       pl,
 		worktrees:      wt,
 		diffGen:        dg,
 		devServers:     ds,
@@ -688,18 +696,42 @@ func (a App) handleAccept() (tea.Model, tea.Cmd) {
 	if selected == nil {
 		return a, nil
 	}
-	if selected.State != run.StateCompleted && selected.State != run.StateReviewing {
+
+	// Allow re-accept of failed merge pipelines
+	if selected.State != run.StateCompleted && selected.State != run.StateReviewing &&
+		!(selected.State == run.StateFailed && selected.MergeStatus != "") {
 		return a, nil
 	}
 
 	runID := selected.ID
 	branch := selected.Branch
 
+	_ = a.devServers.Stop(runID)
+
+	// Auto-merge pipeline
+	if a.config.Merge.AutoMerge && a.pipeline != nil {
+		a.store.Update(runID, func(r *run.Run) {
+			r.State = run.StateMerging
+			r.MergeStatus = "starting"
+			r.Error = ""
+		})
+		go func() {
+			ctx := context.Background()
+			a.pipeline.Run(ctx, runID)
+			// Cleanup worktree after pipeline completes (success or failure)
+			r, ok := a.store.Get(runID)
+			if ok && r.State == run.StateAccepted {
+				_ = a.worktrees.Remove(runID)
+			}
+		}()
+		a.statusBar.SetFlash("Merge pipeline started")
+		return a, flashClearCmd()
+	}
+
+	// Legacy flow: push and remove worktree
 	a.store.Update(runID, func(r *run.Run) {
 		r.State = run.StateAccepted
 	})
-
-	_ = a.devServers.Stop(runID)
 
 	go func() {
 		cmd := exec.Command("git", "push", "origin", branch)

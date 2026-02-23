@@ -184,6 +184,26 @@ func merge(base *Config, override *Config) {
 		base.Limits.RateLimitBackoff = override.Limits.RateLimitBackoff
 	}
 
+	// Merge
+	if override.Merge.TargetBranch != "" {
+		base.Merge.TargetBranch = override.Merge.TargetBranch
+	}
+	if override.Merge.AutoMerge {
+		base.Merge.AutoMerge = override.Merge.AutoMerge
+	}
+	if override.Merge.MergeStrategy != "" {
+		base.Merge.MergeStrategy = override.Merge.MergeStrategy
+	}
+	if override.Merge.FixAttempts != 0 {
+		base.Merge.FixAttempts = override.Merge.FixAttempts
+	}
+	if override.Merge.PollInterval != 0 {
+		base.Merge.PollInterval = override.Merge.PollInterval
+	}
+	if override.Merge.PollTimeout != 0 {
+		base.Merge.PollTimeout = override.Merge.PollTimeout
+	}
+
 	// Integrations — pointer overrides when non-nil
 	if override.Integrations.Jira != nil {
 		base.Integrations.Jira = override.Integrations.Jira

@@ -49,7 +49,7 @@ func CostColor(cost float64) lipgloss.AdaptiveColor {
 // RunStateColor returns the appropriate status color for a run state.
 func RunStateColor(state run.State) lipgloss.AdaptiveColor {
 	switch state {
-	case run.StateRunning, run.StateRouting:
+	case run.StateRunning, run.StateRouting, run.StateMerging:
 		return StatusRunning
 	case run.StateCompleted, run.StateAccepted:
 		return StatusSuccess

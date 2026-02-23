@@ -131,6 +131,20 @@ func (d Detail) renderDetails() string {
 		fmt.Fprintf(&b, "  %s\n", row("Command", r.Command))
 	}
 
+	if r.MergeStatus != "" {
+		mergeStyle := lipgloss.NewStyle().Foreground(styles.StatusRunning)
+		if r.MergeStatus == "merged" {
+			mergeStyle = lipgloss.NewStyle().Foreground(styles.StatusSuccess)
+		} else if r.MergeStatus == "failed" {
+			mergeStyle = lipgloss.NewStyle().Foreground(styles.StatusError)
+		}
+		fmt.Fprintf(&b, "  %s\n", styledRow("Merge", r.MergeStatus, mergeStyle))
+	}
+
+	if r.PRURL != "" {
+		fmt.Fprintf(&b, "  %s\n", row("PR", r.PRURL))
+	}
+
 	if r.Error != "" {
 		errorStyle := lipgloss.NewStyle().Foreground(styles.StatusError)
 		fmt.Fprintf(&b, "  %s\n", styledRow("Error", r.Error, errorStyle))

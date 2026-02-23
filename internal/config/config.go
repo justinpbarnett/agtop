@@ -7,6 +7,7 @@ type Config struct {
 	Skills       map[string]SkillConfig     `yaml:"skills"`
 	Safety       SafetyConfig               `yaml:"safety"`
 	Limits       LimitsConfig               `yaml:"limits"`
+	Merge        MergeConfig                `yaml:"merge"`
 	UI           UIConfig                   `yaml:"ui"`
 	Integrations IntegrationsConfig         `yaml:"integrations"`
 }
@@ -75,6 +76,15 @@ type LimitsConfig struct {
 	MaxConcurrentRuns   int     `yaml:"max_concurrent_runs"`
 	RateLimitBackoff    int     `yaml:"rate_limit_backoff"`
 	RateLimitMaxRetries int     `yaml:"rate_limit_max_retries"`
+}
+
+type MergeConfig struct {
+	TargetBranch  string `yaml:"target_branch"`
+	AutoMerge     bool   `yaml:"auto_merge"`
+	MergeStrategy string `yaml:"merge_strategy"`
+	FixAttempts   int    `yaml:"fix_attempts"`
+	PollInterval  int    `yaml:"poll_interval"`
+	PollTimeout   int    `yaml:"poll_timeout"`
 }
 
 type UIConfig struct {

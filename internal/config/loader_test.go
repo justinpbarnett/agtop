@@ -460,3 +460,72 @@ func TestLoadDefaultsJiraNil(t *testing.T) {
 		t.Error("expected Jira config to be nil by default")
 	}
 }
+
+func TestLoadMergeConfig(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+
+	yaml := `
+merge:
+  target_branch: develop
+  auto_merge: true
+  merge_strategy: rebase
+  fix_attempts: 5
+  poll_interval: 15
+  poll_timeout: 300
+`
+	os.WriteFile(filepath.Join(tmp, "agtop.yaml"), []byte(yaml), 0644)
+
+	cfg, err := LoadFrom(tmp)
+	if err != nil {
+		t.Fatalf("LoadFrom() error: %v", err)
+	}
+
+	if cfg.Merge.TargetBranch != "develop" {
+		t.Errorf("expected target_branch %q, got %q", "develop", cfg.Merge.TargetBranch)
+	}
+	if cfg.Merge.AutoMerge != true {
+		t.Error("expected auto_merge to be true")
+	}
+	if cfg.Merge.MergeStrategy != "rebase" {
+		t.Errorf("expected merge_strategy %q, got %q", "rebase", cfg.Merge.MergeStrategy)
+	}
+	if cfg.Merge.FixAttempts != 5 {
+		t.Errorf("expected fix_attempts 5, got %d", cfg.Merge.FixAttempts)
+	}
+	if cfg.Merge.PollInterval != 15 {
+		t.Errorf("expected poll_interval 15, got %d", cfg.Merge.PollInterval)
+	}
+	if cfg.Merge.PollTimeout != 300 {
+		t.Errorf("expected poll_timeout 300, got %d", cfg.Merge.PollTimeout)
+	}
+}
+
+func TestLoadMergeConfigDefaults(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+
+	cfg, err := LoadFrom(tmp)
+	if err != nil {
+		t.Fatalf("LoadFrom() error: %v", err)
+	}
+
+	if cfg.Merge.TargetBranch != "" {
+		t.Errorf("expected default target_branch %q, got %q", "", cfg.Merge.TargetBranch)
+	}
+	if cfg.Merge.AutoMerge != false {
+		t.Error("expected default auto_merge to be false")
+	}
+	if cfg.Merge.MergeStrategy != "" {
+		t.Errorf("expected default merge_strategy %q, got %q", "", cfg.Merge.MergeStrategy)
+	}
+	if cfg.Merge.FixAttempts != 0 {
+		t.Errorf("expected default fix_attempts 0, got %d", cfg.Merge.FixAttempts)
+	}
+	if cfg.Merge.PollInterval != 0 {
+		t.Errorf("expected default poll_interval 0, got %d", cfg.Merge.PollInterval)
+	}
+	if cfg.Merge.PollTimeout != 0 {
+		t.Errorf("expected default poll_timeout 0, got %d", cfg.Merge.PollTimeout)
+	}
+}

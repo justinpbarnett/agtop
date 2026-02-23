@@ -18,6 +18,7 @@ const (
 	StateAccepted  State = "accepted"
 	StateRejected  State = "rejected"
 	StateFailed    State = "failed"
+	StateMerging   State = "merging"
 )
 
 type Run struct {
@@ -45,6 +46,8 @@ type Run struct {
 	SkillCosts   []cost.SkillCost `json:"skill_costs"`
 	DevServerPort int          `json:"dev_server_port"`
 	DevServerURL  string       `json:"dev_server_url"`
+	MergeStatus   string       `json:"merge_status,omitempty"`
+	PRURL         string       `json:"pr_url,omitempty"`
 }
 
 func (r *Run) StatusIcon() string {
@@ -59,6 +62,8 @@ func (r *Run) StatusIcon() string {
 		return "✗"
 	case StateReviewing:
 		return "◉"
+	case StateMerging:
+		return "⟳"
 	case StateQueued:
 		return "◌"
 	default:

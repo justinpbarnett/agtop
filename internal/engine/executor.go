@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -198,6 +199,11 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 
 		previousOutput = result.ResultText
 
+		// Auto-commit after modifying skills
+		if !isNonModifyingSkill(skillName) && skillName != "commit" {
+			e.commitAfterStep(ctx, runID)
+		}
+
 		// Handle route skill: override workflow
 		if skillName == "route" {
 			resolvedWorkflow := parseRouteResult(previousOutput)
@@ -330,6 +336,9 @@ func (e *Executor) executeParallelGroups(ctx context.Context, runID string, grou
 			return "", err
 		}
 		allResults = append(allResults, groupOutput)
+
+		// Auto-commit after each parallel group completes
+		e.commitAfterStep(ctx, runID)
 	}
 
 	return strings.Join(allResults, "\n"), nil
@@ -499,6 +508,45 @@ func parseRouteResult(resultText string) string {
 		}
 	}
 	return candidate
+}
+
+// isNonModifyingSkill returns true for skills that don't modify files in the worktree.
+func isNonModifyingSkill(name string) bool {
+	switch name {
+	case "route", "decompose", "review", "document":
+		return true
+	}
+	return false
+}
+
+// commitAfterStep runs the commit skill to save progress after a workflow step.
+// Errors are logged but do not fail the workflow — this is best-effort.
+func (e *Executor) commitAfterStep(ctx context.Context, runID string) {
+	skill, opts, ok := e.registry.SkillForRun("commit")
+	if !ok {
+		return
+	}
+
+	r, ok := e.store.Get(runID)
+	if !ok {
+		return
+	}
+	opts.WorkDir = r.Worktree
+
+	prompt := BuildPrompt(skill, PromptContext{
+		WorkDir:    r.Worktree,
+		Branch:     r.Branch,
+		UserPrompt: "Review all uncommitted changes in this worktree and create atomic commits using conventional commit format. If there are no changes to commit, do nothing.",
+	})
+
+	result, err := e.runSkill(ctx, runID, prompt, opts, skill.Timeout)
+	if err != nil {
+		log.Printf("auto-commit after step failed for run %s: %v", runID, err)
+		return
+	}
+
+	// Accumulate tokens/cost from the commit skill (already tracked by process manager)
+	_ = result
 }
 
 // terminalState determines the final run state after all skills complete.

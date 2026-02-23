@@ -118,3 +118,75 @@ func TestDetailNilRunHandling(t *testing.T) {
 		t.Error("expected nil run handling")
 	}
 }
+
+func TestDetailMergeStatus(t *testing.T) {
+	d := NewDetail()
+	d.SetSize(80, 15)
+
+	r := &run.Run{
+		ID:          "010",
+		Branch:      "feat/merge",
+		State:       run.StateMerging,
+		MergeStatus: "rebasing",
+	}
+	d.SetRun(r)
+	view := d.View()
+
+	if !strings.Contains(view, "rebasing") {
+		t.Error("expected merge status 'rebasing' to be displayed")
+	}
+}
+
+func TestDetailMergeStatusMerged(t *testing.T) {
+	d := NewDetail()
+	d.SetSize(80, 15)
+
+	r := &run.Run{
+		ID:          "011",
+		Branch:      "feat/merged",
+		State:       run.StateAccepted,
+		MergeStatus: "merged",
+	}
+	d.SetRun(r)
+	view := d.View()
+
+	if !strings.Contains(view, "merged") {
+		t.Error("expected merge status 'merged' to be displayed")
+	}
+}
+
+func TestDetailPRURL(t *testing.T) {
+	d := NewDetail()
+	d.SetSize(80, 15)
+
+	r := &run.Run{
+		ID:     "012",
+		Branch: "feat/pr",
+		State:  run.StateRunning,
+		PRURL:  "https://github.com/org/repo/pull/42",
+	}
+	d.SetRun(r)
+	view := d.View()
+
+	if !strings.Contains(view, "https://github.com/org/repo/pull/42") {
+		t.Error("expected PR URL to be displayed")
+	}
+}
+
+func TestDetailNoMergeStatusWhenEmpty(t *testing.T) {
+	d := NewDetail()
+	d.SetSize(80, 15)
+
+	r := &run.Run{
+		ID:          "013",
+		Branch:      "feat/nomerge",
+		State:       run.StateRunning,
+		MergeStatus: "",
+	}
+	d.SetRun(r)
+	view := d.View()
+
+	if strings.Contains(view, "Merge") {
+		t.Error("expected no Merge row when MergeStatus is empty")
+	}
+}

@@ -283,3 +283,21 @@ func TestTerminalStateCompleted(t *testing.T) {
 		}
 	}
 }
+
+// --- isNonModifyingSkill tests ---
+
+func TestIsNonModifyingSkillTrue(t *testing.T) {
+	for _, name := range []string{"route", "decompose", "review", "document"} {
+		if !isNonModifyingSkill(name) {
+			t.Errorf("isNonModifyingSkill(%q) = false, want true", name)
+		}
+	}
+}
+
+func TestIsNonModifyingSkillFalse(t *testing.T) {
+	for _, name := range []string{"build", "test", "commit", "spec", ""} {
+		if isNonModifyingSkill(name) {
+			t.Errorf("isNonModifyingSkill(%q) = true, want false", name)
+		}
+	}
+}
