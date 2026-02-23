@@ -23,6 +23,7 @@ type modelOption struct {
 }
 
 var workflows = []workflowOption{
+	{key: "^a", name: "auto", workflow: "auto"},
 	{key: "^b", name: "build", workflow: "build"},
 	{key: "^p", name: "plan", workflow: "plan-build"},
 	{key: "^l", name: "sdlc", workflow: "sdlc"},
@@ -54,7 +55,7 @@ func NewNewRunModal(screenW, screenH int) *NewRunModal {
 
 	m := &NewRunModal{
 		promptInput: ta,
-		workflow:    "build",
+		workflow:    "auto",
 		model:       "",
 	}
 	m.SetSize(screenW, screenH)
@@ -117,6 +118,9 @@ func (m *NewRunModal) Update(msg tea.Msg) (*NewRunModal, tea.Cmd) {
 			for i := 0; i < half; i++ {
 				m.promptInput, _ = m.promptInput.Update(tea.KeyMsg{Type: tea.KeyDown})
 			}
+			return m, nil
+		case "ctrl+a":
+			m.workflow = "auto"
 			return m, nil
 		case "ctrl+b":
 			m.workflow = "build"

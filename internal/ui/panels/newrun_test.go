@@ -8,8 +8,8 @@ import (
 
 func TestNewRunModalDefaults(t *testing.T) {
 	m := NewNewRunModal(120, 40)
-	if m.Workflow() != "build" {
-		t.Errorf("default workflow = %q, want %q", m.Workflow(), "build")
+	if m.Workflow() != "auto" {
+		t.Errorf("default workflow = %q, want %q", m.Workflow(), "auto")
 	}
 	if m.Model() != "" {
 		t.Errorf("default model = %q, want empty", m.Model())
@@ -24,6 +24,7 @@ func TestNewRunModalWorkflowSelection(t *testing.T) {
 		key      string
 		expected string
 	}{
+		{"ctrl+a", "auto"},
 		{"ctrl+b", "build"},
 		{"ctrl+p", "plan-build"},
 		{"ctrl+l", "sdlc"},
@@ -67,6 +68,35 @@ func TestNewRunModalModelOverride(t *testing.T) {
 				t.Errorf("model = %q, want %q", m.Model(), tt.expected)
 			}
 		})
+	}
+}
+
+func TestNewRunModalSubmitDefaultAuto(t *testing.T) {
+	m := NewNewRunModal(120, 40)
+
+	// Type a prompt without changing workflow
+	for _, ch := range "do the thing" {
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+		if m == nil {
+			t.Fatal("modal dismissed during typing")
+		}
+	}
+
+	result, cmd := m.Update(newRunKeyMsg("ctrl+s"))
+	if result != nil {
+		t.Error("modal should be nil after submit")
+	}
+	if cmd == nil {
+		t.Fatal("expected a command from submit")
+	}
+
+	msg := cmd()
+	sub, ok := msg.(SubmitNewRunMsg)
+	if !ok {
+		t.Fatalf("expected SubmitNewRunMsg, got %T", msg)
+	}
+	if sub.Workflow != "auto" {
+		t.Errorf("workflow = %q, want %q", sub.Workflow, "auto")
 	}
 }
 
@@ -179,10 +209,10 @@ func TestNewRunModalView(t *testing.T) {
 func containsPlain(s, sub string) bool {
 	// Strip ANSI for a simple check
 	plain := stripAnsi(s)
-	return contains(plain, sub)
+	return containsStr(plain, sub)
 }
 
-func contains(s, sub string) bool {
+func containsStr(s, sub string) bool {
 	return len(s) >= len(sub) && searchString(s, sub)
 }
 
@@ -224,6 +254,8 @@ func newRunKeyMsg(key string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyEnter}
 	case "esc":
 		return tea.KeyMsg{Type: tea.KeyEscape}
+	case "ctrl+a":
+		return tea.KeyMsg{Type: tea.KeyCtrlA}
 	case "ctrl+b":
 		return tea.KeyMsg{Type: tea.KeyCtrlB}
 	case "ctrl+p":
