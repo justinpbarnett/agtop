@@ -36,3 +36,6 @@ type YankMsg struct {
 
 // InitAcceptedMsg signals the user accepted the init prompt.
 type InitAcceptedMsg struct{}
+
+// AnimTickMsg is sent at a fast interval to drive spinner/animation frames.
+type AnimTickMsg struct{}

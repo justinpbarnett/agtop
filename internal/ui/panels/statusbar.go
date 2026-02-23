@@ -13,6 +13,8 @@ import (
 
 const flashDurationVal = 5 * time.Second
 
+var statusSpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
 // Version is set via -ldflags at build time. Falls back to "dev".
 var Version = "dev"
 
@@ -35,6 +37,7 @@ type StatusBar struct {
 	flash      string
 	flashLevel FlashLevel
 	flashUntil time.Time
+	tickStep   int
 }
 
 func NewStatusBar(store *run.Store) StatusBar {
@@ -60,7 +63,13 @@ func (s StatusBar) View() string {
 	sep := styles.TextDimStyle.Render(" │ ")
 
 	// Build sections
-	version := styles.TextSecondaryStyle.Render("agtop " + Version)
+	appName := "agtop " + Version
+	if running > 0 {
+		frame := statusSpinnerFrames[s.tickStep%len(statusSpinnerFrames)]
+		spinner := lipgloss.NewStyle().Foreground(styles.StatusRunning).Render(frame)
+		appName = spinner + " " + appName
+	}
+	version := styles.TextSecondaryStyle.Render(appName)
 
 	counts := fmt.Sprintf("%s %s %s",
 		lipgloss.NewStyle().Foreground(styles.StatusRunning).Render(fmt.Sprintf("%d running", running)),
@@ -128,4 +137,9 @@ func (s *StatusBar) ClearFlash() {
 
 func (s *StatusBar) SetSize(w int) {
 	s.width = w
+}
+
+// Tick advances the animation frame for the status bar spinner.
+func (s *StatusBar) Tick() {
+	s.tickStep++
 }
