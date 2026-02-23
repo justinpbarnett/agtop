@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/justinpbarnett/agtop/internal/run"
 )
 
@@ -196,5 +197,116 @@ func TestDetailNoMergeStatusWhenEmpty(t *testing.T) {
 
 	if strings.Contains(view, "Merge") {
 		t.Error("expected no Merge row when MergeStatus is empty")
+	}
+}
+
+func TestDetailPromptScrollable(t *testing.T) {
+	d := NewDetail()
+	d.SetSize(40, 10)
+	d.SetFocused(true)
+
+	longPrompt := strings.Repeat("word ", 50) // 250 chars, will wrap to many lines
+	r := &run.Run{
+		ID:     "020",
+		Branch: "feat/scroll",
+		State:  run.StateRunning,
+		Prompt: longPrompt,
+		Cost:   0.10,
+	}
+	d.SetRun(r)
+
+	// The initial view shows the beginning of the prompt
+	view := d.View()
+	if !strings.Contains(view, "Prompt") {
+		t.Error("expected Prompt field to be visible at top")
+	}
+
+	// Scroll down enough to see fields below the prompt
+	for i := 0; i < 20; i++ {
+		d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	}
+	scrolledView := d.View()
+	// After scrolling, Status or Cost should be visible
+	if !strings.Contains(scrolledView, "Status") && !strings.Contains(scrolledView, "Cost") && !strings.Contains(scrolledView, "Branch") {
+		t.Error("expected fields below prompt to be visible after scrolling down")
+	}
+}
+
+func TestDetailScrollKeys(t *testing.T) {
+	d := NewDetail()
+	d.SetSize(40, 10)
+	d.SetFocused(true)
+
+	// Create a run with a long prompt that requires scrolling
+	longPrompt := strings.Repeat("word ", 60)
+	r := &run.Run{
+		ID:     "021",
+		Branch: "feat/scrollkeys",
+		State:  run.StateRunning,
+		Prompt: longPrompt,
+		Cost:   0.10,
+	}
+	d.SetRun(r)
+
+	// Scroll down with j
+	initialOffset := d.viewport.YOffset
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if d.viewport.YOffset <= initialOffset {
+		t.Error("expected j to scroll down")
+	}
+
+	// Scroll back up with k
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	if d.viewport.YOffset != initialOffset {
+		t.Errorf("expected k to scroll back to initial offset %d, got %d", initialOffset, d.viewport.YOffset)
+	}
+
+	// G should jump to bottom
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
+	if !d.viewport.AtBottom() {
+		t.Error("expected G to jump to bottom")
+	}
+
+	// gg should jump to top
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	if d.viewport.YOffset != 0 {
+		t.Errorf("expected gg to jump to top (offset 0), got %d", d.viewport.YOffset)
+	}
+}
+
+func TestDetailScrollResetOnRunChange(t *testing.T) {
+	d := NewDetail()
+	d.SetSize(40, 10)
+	d.SetFocused(true)
+
+	longPrompt := strings.Repeat("word ", 60)
+	r1 := &run.Run{
+		ID:     "030",
+		Branch: "feat/first",
+		State:  run.StateRunning,
+		Prompt: longPrompt,
+	}
+	d.SetRun(r1)
+
+	// Scroll down
+	for i := 0; i < 10; i++ {
+		d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	}
+	if d.viewport.YOffset == 0 {
+		t.Error("expected non-zero scroll after j key presses")
+	}
+
+	// Switch to a different run — scroll should reset to top
+	r2 := &run.Run{
+		ID:     "031",
+		Branch: "feat/second",
+		State:  run.StateRunning,
+		Prompt: longPrompt,
+	}
+	d.SetRun(r2)
+
+	if d.viewport.YOffset != 0 {
+		t.Errorf("expected scroll to reset to 0 on run change, got %d", d.viewport.YOffset)
 	}
 }
