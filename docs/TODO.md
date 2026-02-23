@@ -1,10 +1,20 @@
 # TODO
 
-- [ ] Accept images in new run input
-- [ ] Allow select/cut/copy/paste and mouse select text in new run input
-- [ ] Move default model option to be first in new run input
-- [ ] ctrl+c should close the new run modal
-- [ ] instead of one hotkey per model type or workflow type, just have a hotkey for workflows and a hotkey for models. each hotkey will cycle through all available options
-- [ ] pressing y with detail panel selected should copy all contents of it
-- [ ] log panel should have each collapsed line hovered and pressing j/k will move up or down to the next line. pressing enter should expand the log details and those lines can be hovered now when navigating up or down.
-- [ ] add a decorative loading spinner next to the agtop name just to reasure the user that the app is running and updating live
+[ ] Accept images in new run input
+[x] Allow select/cut/copy/paste and mouse select text in new run input
+[ ] Move default model option of new run modal to be first in new run input
+[ ] ctrl+c should close the new run modal
+[ ] instead of one hotkey per model type or workflow type in the new run modal, just have a hotkey for workflows and a hotkey for models. each otkey will cycle through all available options
+[?] pressing y with detail panel selected should copy all contents of it
+[ ] add a decorative loading spinner next to the agtop name just to reasure the user that the app is running and updating live
+[?] details panel should show current step and current model and selected workflow for this run
+[ ] pressing enter on a run in the runs panel should show a dropdown list of all concurrent runs happening or just one if one is the only run
+[?] add ability to update (provide follow-on prompts) a run after it's completed
+[?] accepting a completed run seems to do nothing. worktree may be getting pre-maturely cleaned up.
+[?] format expanded log details. wrap markdown text
+[?] in log panel, if json is a type: user and has a message: content, just show the content on the line. can show full json if expanded
+[?] in log panel, hide successful rate limit queries
+[?] in log panel, if message is a tool use, let's show that in a nice way instead of raw json
+[?] in log panel, basically interpret all expected json responses into nice one-liners for the user to view, pressing enter to expand any of them should show the full, formatted, json response.
+[x] drasically expand the default context deadlines
+[x] update the default config to be agtop.toml and not a yaml file
