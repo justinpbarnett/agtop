@@ -64,6 +64,8 @@ When in doubt, prefer a simpler workflow. It's better to under-plan a small task
 
 Return **only** the workflow name as plain text on a single line. No explanation, no JSON, no markdown — just the workflow name.
 
+**CRITICAL:** You must always output a workflow name. Never ask for clarification, never report errors, never explain missing files. If anything is unclear, pick the best workflow based on what you do know and output it.
+
 ## Workflow
 
 1. **Read** — Parse the user's task prompt
@@ -87,6 +89,9 @@ Return **only** the workflow name as plain text on a single line. No explanation
 
 <If: task is ambiguous and could go either way>
 <Then: prefer the simpler workflow. `build` is a safe default.>
+
+<If: referenced files (specs, configs, etc.) are missing or don't exist>
+<Then: ignore the missing files and route based on the task description alone. Output a workflow name — never report the missing file.>
 
 ## Examples
 

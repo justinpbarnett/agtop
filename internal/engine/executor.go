@@ -730,9 +730,18 @@ func parseRouteResult(resultText string) string {
 		if candidate == "" {
 			continue
 		}
+
+		// First try as a standalone name
 		candidate = stripWrapping(candidate)
 		if isWorkflowName(candidate) {
 			return candidate
+		}
+
+		// If not a standalone name, try to extract a workflow name from the line
+		// by searching for known workflow names (this handles cases like "use build" or "build workflow")
+		found := extractWorkflowName(lines[i])
+		if found != "" {
+			return found
 		}
 	}
 	return ""
@@ -760,6 +769,25 @@ func isWorkflowName(s string) bool {
 		}
 	}
 	return true
+}
+
+// extractWorkflowName searches a line for known workflow names and returns the
+// first match found. This handles cases where the workflow name is embedded in text,
+// e.g., "I recommend the build workflow" or "use quick-fix for this task".
+func extractWorkflowName(line string) string {
+	// Known workflow names from defaults
+	knownWorkflows := []string{"build", "plan-build", "sdlc", "quick-fix"}
+
+	// Convert line to lowercase for case-insensitive matching
+	lowerLine := strings.ToLower(line)
+
+	// Search for each known workflow name in the line
+	for _, wf := range knownWorkflows {
+		if strings.Contains(lowerLine, strings.ToLower(wf)) {
+			return wf
+		}
+	}
+	return ""
 }
 
 // logToBuffer writes a timestamped message to the run's log buffer.
