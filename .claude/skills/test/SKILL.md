@@ -43,14 +43,23 @@ Map discovered commands to these test categories:
 
 If a category has no discoverable command, skip it. If no test commands are found at all, report this and stop.
 
-### Step 2: Execute Tests in Sequence
+### Step 2: Execute Tests
 
-Execute each discovered test in category order (linting → type check → unit → e2e). For each test:
+If a combined `check` command is available (e.g., `make check`, `just check`, `npm run check`), prefer it — it runs all independent checks in one shot. Map its result to the appropriate test categories in the report.
+
+Otherwise, run independent test categories in **parallel** using concurrent Bash tool calls:
+
+- Launch **linting** and **unit_tests** simultaneously (concurrent Bash tool calls)
+- Wait for both to complete
+- If either fails, mark it as failed and **do not proceed to e2e_tests**
+- Run **e2e_tests** only after unit_tests pass (e2e tests often depend on a correct build)
+- Run **type_check** in parallel with linting and unit_tests when available
+
+For each test:
 
 1. Run the command with a **5 minute timeout**
 2. Capture the result (passed/failed) and any error output
-3. If a test **fails** (non-zero exit code), mark it as failed, capture stderr, and **stop processing immediately** — do not run subsequent tests
-4. If a test **passes**, continue to the next test
+3. If any parallel test **fails** (non-zero exit code), mark it as failed, capture stderr, and do not proceed to e2e_tests
 
 ### Step 3: Produce the Report
 
@@ -99,7 +108,7 @@ Return ONLY a JSON array — no surrounding text, markdown formatting, or explan
 ## Workflow
 
 1. **Discover** — Detect available test commands from justfile, package.json, Makefile, or language-specific config
-2. **Run** — Execute tests sequentially (lint → typecheck → unit → e2e), stopping on first failure
+2. **Run** — Prefer a combined `check` command when available; otherwise run linting, type_check, and unit_tests in parallel, then e2e_tests if all pass
 3. **Report** — Produce a JSON array with results, failed tests sorted to top
 
 ## Cookbook
@@ -107,8 +116,8 @@ Return ONLY a JSON array — no surrounding text, markdown formatting, or explan
 <If: no test commands discovered>
 <Then: report that no test infrastructure was found. Suggest the user check their project setup or specify commands manually.>
 
-<If: a combined check command exists (e.g., `just check`, `npm run check`)>
-<Then: still prefer running individual test categories separately for granular reporting. Only fall back to the combined command if individual commands are not available.>
+<If: a combined check command exists (e.g., `make check`, `just check`, `npm run check`)>
+<Then: prefer running the combined command — it handles parallelism internally and reduces overhead. Map its pass/fail result to the relevant test categories in the report.>
 
 <If: test runner discovers no tests>
 <Then: verify test files exist. Check the project's config for test file patterns.>
