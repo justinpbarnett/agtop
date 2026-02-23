@@ -26,6 +26,7 @@ func (c *ClaudeRuntime) BuildArgs(prompt string, opts RunOptions) []string {
 	args := []string{
 		"-p", prompt,
 		"--output-format", "stream-json",
+		"--verbose",
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
@@ -38,9 +39,6 @@ func (c *ClaudeRuntime) BuildArgs(prompt string, opts RunOptions) []string {
 	}
 	if opts.PermissionMode != "" {
 		args = append(args, "--permission-mode", opts.PermissionMode)
-	}
-	if opts.WorkDir != "" {
-		args = append(args, "--cwd", opts.WorkDir)
 	}
 	return args
 }
