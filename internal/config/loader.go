@@ -173,6 +173,9 @@ func merge(base *Config, override *Config) {
 	if override.Runtime.Claude.AllowedTools != nil {
 		base.Runtime.Claude.AllowedTools = override.Runtime.Claude.AllowedTools
 	}
+	if override.Runtime.Claude.Subscription {
+		base.Runtime.Claude.Subscription = true
+	}
 	if override.Runtime.OpenCode.Model != "" {
 		base.Runtime.OpenCode.Model = override.Runtime.OpenCode.Model
 	}

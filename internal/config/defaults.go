@@ -54,7 +54,7 @@ func DefaultConfig() Config {
 		},
 		Limits: LimitsConfig{
 			MaxTokensPerRun:     500000,
-			MaxCostPerRun:       5.00,
+			MaxCostPerRun:       50.00,
 			MaxConcurrentRuns:   5,
 			RateLimitBackoff:    60,
 			RateLimitMaxRetries: 3,

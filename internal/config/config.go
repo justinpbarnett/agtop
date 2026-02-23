@@ -47,6 +47,7 @@ type ClaudeConfig struct {
 	PermissionMode string   `toml:"permission_mode"`
 	MaxTurns       int      `toml:"max_turns"`
 	AllowedTools   []string `toml:"allowed_tools"`
+	Subscription   bool     `toml:"subscription"`
 }
 
 type OpenCodeConfig struct {

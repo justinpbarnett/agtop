@@ -18,6 +18,7 @@ model = "opus"                  # Default model for skills
 permission_mode = "acceptEdits" # acceptEdits | acceptAll | manual
 max_turns = 50
 allowed_tools = ["Read", "Write", "Edit", "MultiEdit", "Bash", "Grep", "Glob"]
+subscription = false            # Set true if on Claude Max/Team — disables cost threshold
 
 [runtime.opencode]
 model = "anthropic/claude-sonnet-4-6"
@@ -92,7 +93,7 @@ allow_overrides = false
 
 [limits]
 max_tokens_per_run = 500000
-max_cost_per_run = 5.00
+max_cost_per_run = 50.00
 max_concurrent_runs = 5
 rate_limit_backoff = 60    # Seconds
 

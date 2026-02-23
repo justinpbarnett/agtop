@@ -21,8 +21,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Runtime.Claude.Model != "opus" {
 		t.Errorf("expected claude model %q, got %q", "opus", cfg.Runtime.Claude.Model)
 	}
-	if cfg.Limits.MaxCostPerRun != 5.00 {
-		t.Errorf("expected max cost 5.00, got %f", cfg.Limits.MaxCostPerRun)
+	if cfg.Limits.MaxCostPerRun != 50.00 {
+		t.Errorf("expected max cost 50.00, got %f", cfg.Limits.MaxCostPerRun)
 	}
 	if len(cfg.Workflows) != 4 {
 		t.Errorf("expected 4 default workflows, got %d", len(cfg.Workflows))
@@ -327,8 +327,8 @@ func TestEnvOverrideInvalidFloat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFrom() should succeed with invalid env override, got: %v", err)
 	}
-	if cfg.Limits.MaxCostPerRun != 5.00 {
-		t.Errorf("expected default max cost 5.00 (invalid env ignored), got %f", cfg.Limits.MaxCostPerRun)
+	if cfg.Limits.MaxCostPerRun != 50.00 {
+		t.Errorf("expected default max cost 50.00 (invalid env ignored), got %f", cfg.Limits.MaxCostPerRun)
 	}
 }
 

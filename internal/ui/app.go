@@ -83,9 +83,13 @@ func NewApp(cfg *config.Config) App {
 	store := run.NewStore()
 
 	tracker := cost.NewTracker()
+	maxCostPerRun := cfg.Limits.MaxCostPerRun
+	if cfg.Runtime.Default == "claude" && cfg.Runtime.Claude.Subscription {
+		maxCostPerRun = 0 // subscription billing — disable cost threshold
+	}
 	limiter := &cost.LimitChecker{
 		MaxTokensPerRun: cfg.Limits.MaxTokensPerRun,
-		MaxCostPerRun:   cfg.Limits.MaxCostPerRun,
+		MaxCostPerRun:   maxCostPerRun,
 	}
 
 	var safetyMatcher *safety.PatternMatcher
