@@ -339,6 +339,76 @@ A.
 	}
 }
 
+func TestRegistryOpenCodeProjectSkills(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Place a skill in .opencode/skills/
+	opencodeDir := filepath.Join(tmp, ".opencode", "skills")
+	writeSkillFile(t, opencodeDir, "deploy", `---
+name: deploy
+description: opencode deploy
+---
+
+Deploy content.
+`)
+
+	reg := NewRegistry(testConfig())
+	if err := reg.Load(tmp, nil); err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+
+	s, ok := reg.Get("deploy")
+	if !ok {
+		t.Fatal("expected to find 'deploy' skill from .opencode/skills/")
+	}
+	if s.Description != "opencode deploy" {
+		t.Errorf("deploy.Description = %q, want %q", s.Description, "opencode deploy")
+	}
+	if s.Priority != PriorityProjectOpenCode {
+		t.Errorf("deploy.Priority = %d, want %d", s.Priority, PriorityProjectOpenCode)
+	}
+}
+
+func TestRegistryOpenCodeOverriddenByClaudeAndAgtop(t *testing.T) {
+	tmp := t.TempDir()
+
+	// .opencode/skills/ (lower precedence)
+	opencodeDir := filepath.Join(tmp, ".opencode", "skills")
+	writeSkillFile(t, opencodeDir, "build", `---
+name: build
+description: opencode build
+---
+
+OpenCode build.
+`)
+
+	// .claude/skills/ (higher precedence)
+	claudeDir := filepath.Join(tmp, ".claude", "skills")
+	writeSkillFile(t, claudeDir, "build", `---
+name: build
+description: claude build
+---
+
+Claude build.
+`)
+
+	reg := NewRegistry(testConfig())
+	if err := reg.Load(tmp, nil); err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+
+	s, ok := reg.Get("build")
+	if !ok {
+		t.Fatal("expected to find 'build' skill")
+	}
+	if s.Description != "claude build" {
+		t.Errorf("build.Description = %q, want %q (claude should override opencode)", s.Description, "claude build")
+	}
+	if s.Priority != PriorityProjectClaude {
+		t.Errorf("build.Priority = %d, want %d", s.Priority, PriorityProjectClaude)
+	}
+}
+
 func TestRegistrySkillForRun(t *testing.T) {
 	tmp := t.TempDir()
 	skillsDir := filepath.Join(tmp, ".agtop", "skills")

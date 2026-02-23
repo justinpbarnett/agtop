@@ -10,12 +10,14 @@ import (
 )
 
 const (
-	PriorityProjectAgtop  = 0 // .agtop/skills/*/SKILL.md
-	PriorityProjectClaude = 1 // .claude/skills/*/SKILL.md
-	PriorityProjectAgents = 2 // .agents/skills/*/SKILL.md
-	PriorityUserAgtop     = 3 // ~/.config/agtop/skills/*/SKILL.md
-	PriorityUserClaude    = 4 // ~/.claude/skills/*/SKILL.md
-	PriorityBuiltIn       = 5 // <binary-dir>/skills/*/SKILL.md
+	PriorityProjectAgtop    = 0 // .agtop/skills/*/SKILL.md
+	PriorityProjectClaude   = 1 // .claude/skills/*/SKILL.md
+	PriorityProjectOpenCode = 2 // .opencode/skills/*/SKILL.md
+	PriorityProjectAgents   = 3 // .agents/skills/*/SKILL.md
+	PriorityUserAgtop       = 4 // ~/.config/agtop/skills/*/SKILL.md
+	PriorityUserClaude      = 5 // ~/.claude/skills/*/SKILL.md
+	PriorityUserOpenCode    = 6 // ~/.config/opencode/skills/*/SKILL.md
+	PriorityBuiltIn         = 7 // <binary-dir>/skills/*/SKILL.md
 )
 
 type Skill struct {

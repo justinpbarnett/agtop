@@ -47,6 +47,10 @@ func (r *Registry) Load(projectRoot string, builtInFS fs.FS) error {
 
 	if home != "" {
 		sources = append(sources, SkillSource{
+			Dir:      filepath.Join(home, ".config", "opencode", "skills"),
+			Priority: PriorityUserOpenCode,
+		})
+		sources = append(sources, SkillSource{
 			Dir:      filepath.Join(home, ".claude", "skills"),
 			Priority: PriorityUserClaude,
 		})
@@ -57,6 +61,7 @@ func (r *Registry) Load(projectRoot string, builtInFS fs.FS) error {
 	}
 	sources = append(sources,
 		SkillSource{Dir: filepath.Join(projectRoot, ".agents", "skills"), Priority: PriorityProjectAgents},
+		SkillSource{Dir: filepath.Join(projectRoot, ".opencode", "skills"), Priority: PriorityProjectOpenCode},
 		SkillSource{Dir: filepath.Join(projectRoot, ".claude", "skills"), Priority: PriorityProjectClaude},
 		SkillSource{Dir: filepath.Join(projectRoot, ".agtop", "skills"), Priority: PriorityProjectAgtop},
 	)
