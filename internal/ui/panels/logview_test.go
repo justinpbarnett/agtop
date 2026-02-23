@@ -27,8 +27,8 @@ func TestLogViewDefaultContent(t *testing.T) {
 	lv.SetSize(80, 30)
 
 	view := lv.View()
-	if !strings.Contains(view, "route") {
-		t.Error("expected default mock log content")
+	if !strings.Contains(view, "No run selected") {
+		t.Error("expected empty state message when no buffer is set")
 	}
 }
 
