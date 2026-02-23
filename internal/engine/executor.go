@@ -775,6 +775,14 @@ func isWorkflowName(s string) bool {
 // first match found. This handles cases where the workflow name is embedded in text,
 // e.g., "I recommend the build workflow" or "use quick-fix for this task".
 func extractWorkflowName(line string) string {
+	// Only attempt extraction on short lines (≤ 4 words). This handles
+	// near-direct references like "use build" or "build workflow" while
+	// rejecting full sentences such as "I think you should use the build workflow".
+	words := strings.Fields(line)
+	if len(words) > 4 {
+		return ""
+	}
+
 	// Known workflow names from defaults
 	knownWorkflows := []string{"build", "plan-build", "sdlc", "quick-fix"}
 
