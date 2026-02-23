@@ -44,6 +44,7 @@ func (e *Executor) Execute(runID string, workflowName string, userPrompt string)
 		e.store.Update(runID, func(r *run.Run) {
 			r.State = run.StateFailed
 			r.Error = err.Error()
+			r.CompletedAt = time.Now()
 		})
 		return
 	}
@@ -142,6 +143,7 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 			e.store.Update(runID, func(r *run.Run) {
 				r.State = run.StateFailed
 				r.Error = "cancelled"
+				r.CompletedAt = time.Now()
 			})
 			return
 		default:
@@ -165,6 +167,7 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 			e.store.Update(runID, func(r *run.Run) {
 				r.State = run.StateFailed
 				r.Error = fmt.Sprintf("skill not found: %s", skillName)
+				r.CompletedAt = time.Now()
 			})
 			return
 		}
@@ -188,6 +191,7 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 			e.store.Update(runID, func(r *run.Run) {
 				r.State = run.StateFailed
 				r.Error = fmt.Sprintf("skill %s failed: %v", skillName, err)
+				r.CompletedAt = time.Now()
 			})
 			return
 		}
@@ -221,6 +225,7 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 					e.store.Update(runID, func(r *run.Run) {
 						r.State = run.StateFailed
 						r.Error = fmt.Sprintf("parallel execution failed: %v", err)
+						r.CompletedAt = time.Now()
 					})
 					return
 				}
@@ -234,6 +239,7 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 	e.store.Update(runID, func(r *run.Run) {
 		r.State = finalState
 		r.CurrentSkill = ""
+		r.CompletedAt = time.Now()
 	})
 }
 
@@ -306,6 +312,7 @@ func (e *Executor) waitIfPaused(ctx context.Context, runID string) bool {
 			e.store.Update(runID, func(r *run.Run) {
 				r.State = run.StateFailed
 				r.Error = "cancelled"
+				r.CompletedAt = time.Now()
 			})
 			return false
 		case <-e.store.Changes():

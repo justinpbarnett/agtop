@@ -75,7 +75,7 @@ func (d Detail) renderDetails() string {
 	costColor := lipgloss.NewStyle().Foreground(styles.CostColor(r.Cost))
 
 	statusText := string(r.State)
-	if !r.IsTerminal() && !r.StartedAt.IsZero() {
+	if !r.StartedAt.IsZero() {
 		statusText += fmt.Sprintf(" (%s)", text.FormatElapsed(r.ElapsedTime()))
 	}
 
@@ -86,10 +86,10 @@ func (d Detail) renderDetails() string {
 
 	var b strings.Builder
 	row := func(key, val string) string {
-		return keyStyle.Render(key+": ") + valStyle.Render(val)
+		return keyStyle.Render(fmt.Sprintf("%-9s: ", key)) + valStyle.Render(val)
 	}
 	styledRow := func(key string, val string, style lipgloss.Style) string {
-		return keyStyle.Render(key+": ") + style.Render(val)
+		return keyStyle.Render(fmt.Sprintf("%-9s: ", key)) + style.Render(val)
 	}
 
 	if r.TaskID != "" {
@@ -114,7 +114,7 @@ func (d Detail) renderDetails() string {
 	}
 	fmt.Fprintf(&b, "  %s\n", row("Model", model))
 
-	tokStr := fmt.Sprintf("%s in / %s out", text.FormatTokens(r.TokensIn), text.FormatTokens(r.TokensOut))
+	tokStr := fmt.Sprintf("%s (%s in / %s out)", text.FormatTokens(r.Tokens), text.FormatTokens(r.TokensIn), text.FormatTokens(r.TokensOut))
 	fmt.Fprintf(&b, "  %s\n", row("Tokens", tokStr))
 	fmt.Fprintf(&b, "  %s\n", styledRow("Cost", text.FormatCost(r.Cost), costColor))
 

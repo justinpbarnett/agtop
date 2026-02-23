@@ -36,6 +36,7 @@ type Run struct {
 	Cost         float64       `json:"cost"`
 	CreatedAt    time.Time     `json:"created_at"`
 	StartedAt    time.Time     `json:"started_at"`
+	CompletedAt  time.Time     `json:"completed_at"`
 	CurrentSkill string        `json:"current_skill"`
 	Model        string        `json:"model"`
 	Command      string        `json:"command"`
@@ -76,6 +77,9 @@ func (r *Run) IsTerminal() bool {
 func (r *Run) ElapsedTime() time.Duration {
 	if r.StartedAt.IsZero() {
 		return 0
+	}
+	if !r.CompletedAt.IsZero() {
+		return r.CompletedAt.Sub(r.StartedAt)
 	}
 	return time.Since(r.StartedAt)
 }

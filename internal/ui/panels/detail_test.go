@@ -3,6 +3,7 @@ package panels
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/justinpbarnett/agtop/internal/run"
 )
@@ -48,6 +49,9 @@ func TestDetailSetRun(t *testing.T) {
 	if !strings.Contains(view, "claude-sonnet-4-5") {
 		t.Error("expected details to show model name")
 	}
+	if !strings.Contains(view, "5.0k") {
+		t.Error("expected details to show total tokens")
+	}
 	if !strings.Contains(view, "3.2k in") {
 		t.Error("expected details to show token in/out format")
 	}
@@ -81,6 +85,26 @@ func TestDetailCostColoring(t *testing.T) {
 
 	if !strings.Contains(view, "$5.50") {
 		t.Error("expected cost to be displayed")
+	}
+}
+
+func TestDetailTerminalElapsedTime(t *testing.T) {
+	d := NewDetail()
+	d.SetSize(80, 15)
+
+	now := time.Now()
+	r := &run.Run{
+		ID:          "003",
+		Branch:      "test",
+		State:       run.StateCompleted,
+		StartedAt:   now.Add(-5 * time.Minute),
+		CompletedAt: now.Add(-2 * time.Minute),
+	}
+	d.SetRun(r)
+	view := d.View()
+
+	if !strings.Contains(view, "3m") {
+		t.Error("expected completed run to show elapsed duration")
 	}
 }
 
