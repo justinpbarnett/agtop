@@ -72,66 +72,51 @@ func (d Detail) renderDetails() string {
 	}
 
 	var b strings.Builder
-	// Two-column key-value layout
-	leftCol := func(key, val string) string {
+	row := func(key, val string) string {
 		return keyStyle.Render(key+": ") + valStyle.Render(val)
 	}
-	rightCol := func(key, val string) string {
-		return keyStyle.Render(key+": ") + valStyle.Render(val)
-	}
-	styledRight := func(key string, val string, style lipgloss.Style) string {
+	styledRow := func(key string, val string, style lipgloss.Style) string {
 		return keyStyle.Render(key+": ") + style.Render(val)
 	}
 
-	// Row 1: Prompt (if present)
 	if r.Prompt != "" {
 		prompt := r.Prompt
 		if len(prompt) > 60 {
 			prompt = prompt[:57] + "..."
 		}
-		fmt.Fprintf(&b, "  %s\n", leftCol("Prompt", prompt))
+		fmt.Fprintf(&b, "  %s\n", row("Prompt", prompt))
 	}
 
-	// Row 2: Skill + Branch
-	fmt.Fprintf(&b, "  %s    %s\n",
-		leftCol("Skill", skillName),
-		rightCol("Branch", r.Branch))
+	fmt.Fprintf(&b, "  %s\n", styledRow("Status", statusText, stateColor))
+	fmt.Fprintf(&b, "  %s\n", row("Skill", skillName))
+	fmt.Fprintf(&b, "  %s\n", row("Branch", r.Branch))
 
-	// Row 2: Model + Status
 	model := r.Model
 	if model == "" {
 		model = "—"
 	}
-	fmt.Fprintf(&b, "  %s    %s\n",
-		leftCol("Model", model),
-		styledRight("Status", statusText, stateColor))
+	fmt.Fprintf(&b, "  %s\n", row("Model", model))
 
-	// Row 3: Tokens + Cost
 	tokStr := fmt.Sprintf("%s in / %s out", text.FormatTokens(r.TokensIn), text.FormatTokens(r.TokensOut))
-	fmt.Fprintf(&b, "  %s    %s\n",
-		leftCol("Tokens", tokStr),
-		styledRight("Cost", text.FormatCost(r.Cost), costColor))
+	fmt.Fprintf(&b, "  %s\n", row("Tokens", tokStr))
+	fmt.Fprintf(&b, "  %s\n", styledRow("Cost", text.FormatCost(r.Cost), costColor))
 
-	// Row 4: Worktree (if present)
 	if r.Worktree != "" {
-		fmt.Fprintf(&b, "  %s\n", leftCol("Worktree", r.Worktree))
+		fmt.Fprintf(&b, "  %s\n", row("Worktree", r.Worktree))
 	}
 
-	// Row 5: Dev Server (if running)
 	if r.DevServerURL != "" {
 		devStyle := lipgloss.NewStyle().Foreground(styles.StatusRunning)
-		fmt.Fprintf(&b, "  %s\n", styledRight("DevServer", r.DevServerURL, devStyle))
+		fmt.Fprintf(&b, "  %s\n", styledRow("DevServer", r.DevServerURL, devStyle))
 	}
 
-	// Row 6: Command (if present)
 	if r.Command != "" {
-		fmt.Fprintf(&b, "  %s\n", leftCol("Command", r.Command))
+		fmt.Fprintf(&b, "  %s\n", row("Command", r.Command))
 	}
 
-	// Row 7: Error (if present)
 	if r.Error != "" {
 		errorStyle := lipgloss.NewStyle().Foreground(styles.StatusError)
-		fmt.Fprintf(&b, "  %s\n", styledRight("Error", r.Error, errorStyle))
+		fmt.Fprintf(&b, "  %s\n", styledRow("Error", r.Error, errorStyle))
 	}
 
 	// Per-skill cost breakdown
