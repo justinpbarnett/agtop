@@ -1,7 +1,6 @@
 package panels
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -12,30 +11,28 @@ import (
 )
 
 type workflowOption struct {
-	key      string
 	name     string
 	workflow string
 }
 
 type modelOption struct {
-	key   string
 	name  string
 	model string
 }
 
 var workflows = []workflowOption{
-	{key: "M-a", name: "auto", workflow: "auto"},
-	{key: "M-b", name: "build", workflow: "build"},
-	{key: "M-p", name: "plan", workflow: "plan-build"},
-	{key: "M-l", name: "sdlc", workflow: "sdlc"},
-	{key: "M-q", name: "quick", workflow: "quick-fix"},
+	{name: "auto", workflow: "auto"},
+	{name: "build", workflow: "build"},
+	{name: "plan", workflow: "plan-build"},
+	{name: "sdlc", workflow: "sdlc"},
+	{name: "quick", workflow: "quick-fix"},
 }
 
 var models = []modelOption{
-	{key: "M-x", name: "default", model: ""},
-	{key: "M-h", name: "haiku", model: "haiku"},
-	{key: "M-o", name: "opus", model: "opus"},
-	{key: "M-n", name: "sonnet", model: "sonnet"},
+	{name: "default", model: ""},
+	{name: "haiku", model: "haiku"},
+	{name: "opus", model: "opus"},
+	{name: "sonnet", model: "sonnet"},
 }
 
 type NewRunModal struct {
@@ -114,32 +111,23 @@ func (m *NewRunModal) Update(msg tea.Msg) (*NewRunModal, tea.Cmd) {
 			return nil, func() tea.Msg {
 				return SubmitNewRunMsg{Prompt: p, Workflow: w, Model: mo}
 			}
-		case "alt+a":
-			m.workflow = "auto"
+		case "alt+w":
+			for i, w := range workflows {
+				if w.workflow == m.workflow {
+					m.workflow = workflows[(i+1)%len(workflows)].workflow
+					return m, nil
+				}
+			}
+			m.workflow = workflows[0].workflow
 			return m, nil
-		case "alt+b":
-			m.workflow = "build"
-			return m, nil
-		case "alt+p":
-			m.workflow = "plan-build"
-			return m, nil
-		case "alt+l":
-			m.workflow = "sdlc"
-			return m, nil
-		case "alt+q":
-			m.workflow = "quick-fix"
-			return m, nil
-		case "alt+h":
-			m.model = "haiku"
-			return m, nil
-		case "alt+o":
-			m.model = "opus"
-			return m, nil
-		case "alt+n":
-			m.model = "sonnet"
-			return m, nil
-		case "alt+x":
-			m.model = ""
+		case "alt+m":
+			for i, mo := range models {
+				if mo.model == m.model {
+					m.model = models[(i+1)%len(models)].model
+					return m, nil
+				}
+			}
+			m.model = models[0].model
 			return m, nil
 		}
 	case tea.MouseMsg:
@@ -250,38 +238,41 @@ func (m *NewRunModal) View() string {
 	b.WriteString("\n\n")
 
 	// Workflow row
-	b.WriteString(styles.TextSecondaryStyle.Render("Workflow  "))
+	b.WriteString(styles.TextSecondaryStyle.Render("Workflow "))
+	b.WriteString(keyStyle.Render("[M-w]"))
+	b.WriteString("  ")
 	for i, w := range workflows {
 		if i > 0 {
 			b.WriteString("  ")
 		}
-		label := fmt.Sprintf("[%s] %s", w.key, w.name)
 		if w.workflow == m.workflow {
-			b.WriteString(selectedStyle.Render(label))
+			b.WriteString(selectedStyle.Render(w.name))
 		} else {
-			b.WriteString(keyStyle.Render(label))
+			b.WriteString(keyStyle.Render(w.name))
 		}
 	}
 	b.WriteString("\n")
 
 	// Model row
-	b.WriteString(styles.TextSecondaryStyle.Render("Model     "))
+	b.WriteString(styles.TextSecondaryStyle.Render("Model    "))
+	b.WriteString(keyStyle.Render("[M-m]"))
+	b.WriteString("  ")
 	for i, mo := range models {
 		if i > 0 {
 			b.WriteString("  ")
 		}
-		label := fmt.Sprintf("[%s] %s", mo.key, mo.name)
 		if mo.model == m.model {
-			b.WriteString(selectedStyle.Render(label))
+			b.WriteString(selectedStyle.Render(mo.name))
 		} else {
-			b.WriteString(keyStyle.Render(label))
+			b.WriteString(keyStyle.Render(mo.name))
 		}
 	}
 
 	bottomKb := []border.Keybind{
 		{Key: "^S", Label: " submit"},
 		{Key: "Esc", Label: " cancel"},
-		{Key: "M-·", Label: " workflow/model"},
+		{Key: "M-w", Label: " workflow"},
+		{Key: "M-m", Label: " model"},
 	}
 	return border.RenderPanel("New Run", b.String(), bottomKb, m.width, m.height, true)
 }
