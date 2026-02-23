@@ -83,7 +83,7 @@ func NewApp(cfg *config.Config) App {
 	var mgr *process.Manager
 	rt, rtName, err := runtime.NewRuntime(&cfg.Runtime)
 	if err != nil {
-		log.Printf("warning: %v (running with mock data)", err)
+		log.Printf("warning: %v (starting without process management)", err)
 	} else {
 		mgr = process.NewManager(store, rt, rtName, &cfg.Limits, tracker, limiter, safetyMatcher)
 	}
@@ -380,6 +380,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleAccept()
 		case "x":
 			return a.handleReject()
+		case "p":
+			return a.handlePause()
+		case "r":
+			return a.handleResume()
+		case "c":
+			return a.handleCancel()
 		case "d":
 			return a.handleDevServerToggle()
 		}
@@ -536,7 +542,11 @@ func (a App) handleAccept() (tea.Model, tea.Cmd) {
 				cmd.Dir = r.Worktree
 			}
 		}
-		_ = cmd.Run()
+		if err := cmd.Run(); err != nil {
+			a.store.Update(runID, func(r *run.Run) {
+				r.Error = fmt.Sprintf("git push failed: %v", err)
+			})
+		}
 		_ = a.worktrees.Remove(runID)
 	}()
 
@@ -599,6 +609,68 @@ func (a App) handleDevServerToggle() (tea.Model, tea.Cmd) {
 		}
 	}
 
+	return a, nil
+}
+
+func (a App) handlePause() (tea.Model, tea.Cmd) {
+	selected := a.runList.SelectedRun()
+	if selected == nil || a.manager == nil {
+		return a, nil
+	}
+	if selected.State != run.StateRunning {
+		return a, nil
+	}
+	if err := a.manager.Pause(selected.ID); err != nil {
+		a.statusBar.SetFlash(fmt.Sprintf("pause: %v", err))
+		return a, flashClearCmd()
+	}
+	return a, nil
+}
+
+func (a App) handleResume() (tea.Model, tea.Cmd) {
+	selected := a.runList.SelectedRun()
+	if selected == nil {
+		return a, nil
+	}
+
+	if selected.State == run.StatePaused && a.manager != nil {
+		if err := a.manager.Resume(selected.ID); err != nil {
+			a.statusBar.SetFlash(fmt.Sprintf("resume: %v", err))
+			return a, flashClearCmd()
+		}
+		return a, nil
+	}
+
+	if (selected.State == run.StateFailed || selected.State == run.StatePaused) && a.executor != nil {
+		if err := a.executor.Resume(selected.ID, selected.Prompt); err != nil {
+			a.statusBar.SetFlash(fmt.Sprintf("resume: %v", err))
+			return a, flashClearCmd()
+		}
+		return a, nil
+	}
+
+	return a, nil
+}
+
+func (a App) handleCancel() (tea.Model, tea.Cmd) {
+	selected := a.runList.SelectedRun()
+	if selected == nil || a.manager == nil {
+		return a, nil
+	}
+	if selected.State != run.StateRunning && selected.State != run.StatePaused && selected.State != run.StateQueued {
+		return a, nil
+	}
+
+	if a.executor != nil {
+		a.executor.Cancel(selected.ID)
+	}
+	if err := a.manager.Stop(selected.ID); err != nil {
+		// Process may have already exited
+		a.store.Update(selected.ID, func(r *run.Run) {
+			r.State = run.StateFailed
+			r.Error = "cancelled"
+		})
+	}
 	return a, nil
 }
 
