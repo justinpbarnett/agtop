@@ -181,9 +181,6 @@ func (d Detail) plainText() string {
 	}
 	row("Model", model)
 
-	row("Tokens", fmt.Sprintf("%s (%s in / %s out)", text.FormatTokens(r.Tokens), text.FormatTokens(r.TokensIn), text.FormatTokens(r.TokensOut)))
-	row("Cost", text.FormatCost(r.Cost))
-
 	if r.Worktree != "" {
 		row("Worktree", r.Worktree)
 	}
@@ -203,19 +200,6 @@ func (d Detail) plainText() string {
 		row("Error", r.Error)
 	}
 
-	if len(r.SkillCosts) > 0 {
-		fmt.Fprintf(&b, "\n%-12s %8s %8s\n", "Skill", "Tokens", "Cost")
-		for _, sc := range r.SkillCosts {
-			name := sc.SkillName
-			if name == "" {
-				name = "—"
-			}
-			fmt.Fprintf(&b, "%-12s %8s %s\n", text.Truncate(name, 12), text.FormatTokens(sc.TotalTokens), text.FormatCost(sc.CostUSD))
-		}
-		fmt.Fprintf(&b, "%s\n", strings.Repeat("─", 32))
-		fmt.Fprintf(&b, "%-12s %8s %s\n", "Total", text.FormatTokens(r.Tokens), text.FormatCost(r.Cost))
-	}
-
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -228,8 +212,6 @@ func (d Detail) renderDetails() string {
 	keyStyle := styles.TextSecondaryStyle
 	valStyle := styles.TextPrimaryStyle
 	stateColor := lipgloss.NewStyle().Foreground(styles.RunStateColor(r.State))
-	costColor := lipgloss.NewStyle().Foreground(styles.CostColor(r.Cost))
-
 	statusText := string(r.State)
 	if !r.StartedAt.IsZero() {
 		statusText += fmt.Sprintf(" (%s)", text.FormatElapsedVerbose(r.ElapsedTime()))
@@ -314,10 +296,6 @@ func (d Detail) renderDetails() string {
 	}
 	fmt.Fprintf(&b, "  %s\n", row("Model", model))
 
-	tokStr := fmt.Sprintf("%s (%s in / %s out)", text.FormatTokens(r.Tokens), text.FormatTokens(r.TokensIn), text.FormatTokens(r.TokensOut))
-	fmt.Fprintf(&b, "  %s\n", row("Tokens", tokStr))
-	fmt.Fprintf(&b, "  %s\n", styledRow("Cost", text.FormatCost(r.Cost), costColor))
-
 	if r.Worktree != "" {
 		fmt.Fprintf(&b, "  %s\n", row("Worktree", r.Worktree))
 	}
@@ -348,33 +326,6 @@ func (d Detail) renderDetails() string {
 	if r.Error != "" {
 		errorStyle := lipgloss.NewStyle().Foreground(styles.StatusError)
 		fmt.Fprintf(&b, "  %s\n", styledRow("Error", r.Error, errorStyle))
-	}
-
-	// Per-skill cost breakdown
-	if len(r.SkillCosts) > 0 {
-		b.WriteString("\n")
-		headerStyle := styles.TextSecondaryStyle
-		b.WriteString(fmt.Sprintf("  %s\n", headerStyle.Render(fmt.Sprintf("%-12s %8s %8s", "Skill", "Tokens", "Cost"))))
-
-		for _, sc := range r.SkillCosts {
-			name := sc.SkillName
-			if name == "" {
-				name = "—"
-			}
-			scCostStyle := lipgloss.NewStyle().Foreground(styles.CostColor(sc.CostUSD))
-			b.WriteString(fmt.Sprintf("  %-12s %8s %s\n",
-				valStyle.Render(text.Truncate(name, 12)),
-				valStyle.Render(text.FormatTokens(sc.TotalTokens)),
-				scCostStyle.Render(text.FormatCost(sc.CostUSD)),
-			))
-		}
-
-		b.WriteString(fmt.Sprintf("  %s\n", headerStyle.Render(strings.Repeat("─", 32))))
-		b.WriteString(fmt.Sprintf("  %-12s %8s %s\n",
-			valStyle.Render("Total"),
-			valStyle.Render(text.FormatTokens(r.Tokens)),
-			costColor.Render(text.FormatCost(r.Cost)),
-		))
 	}
 
 	return b.String()
