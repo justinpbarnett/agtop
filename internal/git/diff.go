@@ -3,6 +3,7 @@ package git
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 )
 
 type DiffGenerator struct {
@@ -13,8 +14,19 @@ func NewDiffGenerator(repoRoot string) *DiffGenerator {
 	return &DiffGenerator{repoRoot: repoRoot}
 }
 
+func (d *DiffGenerator) mergeBase(worktreeDir string) string {
+	cmd := exec.Command("git", "merge-base", "HEAD", "main")
+	cmd.Dir = worktreeDir
+	out, err := cmd.Output()
+	if err != nil {
+		return "main"
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func (d *DiffGenerator) Diff(worktreeDir string) (string, error) {
-	cmd := exec.Command("git", "diff", "--color=never", "main")
+	base := d.mergeBase(worktreeDir)
+	cmd := exec.Command("git", "diff", "--color=never", base)
 	cmd.Dir = worktreeDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -24,7 +36,8 @@ func (d *DiffGenerator) Diff(worktreeDir string) (string, error) {
 }
 
 func (d *DiffGenerator) DiffStat(worktreeDir string) (string, error) {
-	cmd := exec.Command("git", "diff", "--color=never", "--stat", "main")
+	base := d.mergeBase(worktreeDir)
+	cmd := exec.Command("git", "diff", "--color=never", "--stat", base)
 	cmd.Dir = worktreeDir
 	out, err := cmd.Output()
 	if err != nil {
