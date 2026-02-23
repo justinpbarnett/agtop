@@ -625,6 +625,196 @@ func TestSetRunResetsActiveTab(t *testing.T) {
 	}
 }
 
+func TestLogViewCtrlDMovesForwardHalfPage(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 20) // viewport height = 18 (20 - 2 border)
+	eb := process.NewEntryBuffer(100)
+	for i := 0; i < 20; i++ {
+		eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, fmt.Sprintf("Entry %d", i)))
+	}
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+	lv.cursorEntry = 0
+	lv.follow = false
+	lv.viewport.SetYOffset(0)
+
+	half := lv.viewport.Height / 2
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+
+	if lv.follow {
+		t.Error("expected follow disabled after ctrl+d")
+	}
+	if lv.cursorEntry != half {
+		t.Errorf("expected cursorEntry=%d after ctrl+d, got %d", half, lv.cursorEntry)
+	}
+}
+
+func TestLogViewCtrlUMovesBackwardHalfPage(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 20)
+	eb := process.NewEntryBuffer(100)
+	for i := 0; i < 20; i++ {
+		eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, fmt.Sprintf("Entry %d", i)))
+	}
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+	lv.follow = false
+
+	half := lv.viewport.Height / 2
+	lv.cursorEntry = half * 2
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+
+	if lv.follow {
+		t.Error("expected follow disabled after ctrl+u")
+	}
+	if lv.cursorEntry != half {
+		t.Errorf("expected cursorEntry=%d after ctrl+u, got %d", half, lv.cursorEntry)
+	}
+}
+
+func TestLogViewCtrlDClampsAtLastEntry(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 20)
+	eb := process.NewEntryBuffer(100)
+	for i := 0; i < 5; i++ {
+		eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, fmt.Sprintf("Entry %d", i)))
+	}
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+	lv.cursorEntry = 3
+	lv.follow = false
+
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+
+	if lv.cursorEntry != 4 {
+		t.Errorf("expected cursorEntry clamped to 4 (last), got %d", lv.cursorEntry)
+	}
+}
+
+func TestLogViewCtrlUClampsAtFirstEntry(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 20)
+	eb := process.NewEntryBuffer(100)
+	for i := 0; i < 5; i++ {
+		eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, fmt.Sprintf("Entry %d", i)))
+	}
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+	lv.cursorEntry = 1
+	lv.follow = false
+
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+
+	if lv.cursorEntry != 0 {
+		t.Errorf("expected cursorEntry clamped to 0, got %d", lv.cursorEntry)
+	}
+}
+
+func TestLogViewCtrlFMovesForwardFullPage(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 20)
+	eb := process.NewEntryBuffer(100)
+	for i := 0; i < 30; i++ {
+		eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, fmt.Sprintf("Entry %d", i)))
+	}
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+	lv.cursorEntry = 0
+	lv.follow = false
+	lv.viewport.SetYOffset(0)
+
+	full := lv.viewport.Height
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyCtrlF})
+
+	if lv.cursorEntry != full {
+		t.Errorf("expected cursorEntry=%d after ctrl+f, got %d", full, lv.cursorEntry)
+	}
+}
+
+func TestLogViewPageScrollDisablesFollow(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 20)
+	eb := process.NewEntryBuffer(100)
+	for i := 0; i < 20; i++ {
+		eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, fmt.Sprintf("Entry %d", i)))
+	}
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+	lv.follow = true
+	lv.cursorEntry = 0
+
+	for _, key := range []tea.KeyType{tea.KeyCtrlD, tea.KeyCtrlU, tea.KeyCtrlF, tea.KeyCtrlB} {
+		lv.follow = true
+		lv, _ = lv.Update(tea.KeyMsg{Type: key})
+		if lv.follow {
+			t.Errorf("expected follow disabled after %v", key)
+		}
+	}
+}
+
+func TestEntryAtViewportTopCollapsed(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 8) // viewport height = 6 (8 - 2 border)
+	eb := process.NewEntryBuffer(100)
+	for i := 0; i < 30; i++ {
+		eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, fmt.Sprintf("Entry %d", i)))
+	}
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+
+	// 30 lines, viewport height=6 → max YOffset=24; SetYOffset(3) is valid
+	// With all entries collapsed (1 line each), YOffset=3 should point to entry 3
+	lv.viewport.SetYOffset(3)
+	idx := lv.entryAtViewportTop()
+	if idx != 3 {
+		t.Errorf("expected entryAtViewportTop=3 at YOffset=3, got %d", idx)
+	}
+}
+
+func TestEntryAtViewportTopWithExpanded(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 8) // viewport height = 6
+	eb := process.NewEntryBuffer(100)
+	// "Entry 0\nDetail line A\nDetail line B": Summary="Entry 0", Detail has 2 newlines
+	// → lineCount = 1 + 2 + 1 = 4 when expanded (lines 0-3)
+	eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, "Entry 0\nDetail line A\nDetail line B"))
+	for i := 1; i <= 12; i++ {
+		eb.Append(process.NewLogEntry("14:32:02", "build", process.EventText, fmt.Sprintf("Entry %d", i)))
+	}
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+	lv.expandedEntries = map[int]bool{0: true}
+	// Refresh to set content with expansion applied
+	lv.refreshContent()
+
+	// Entry 0: lines 0-3 (4 lines), Entry 1: line 4, ...
+	// Total lines = 4 + 12 = 16, max YOffset = 16 - 6 = 10
+	lv.viewport.SetYOffset(2)
+	idx := lv.entryAtViewportTop()
+	if idx != 0 {
+		t.Errorf("expected entryAtViewportTop=0 when offset within expanded entry 0, got %d", idx)
+	}
+
+	lv.viewport.SetYOffset(4)
+	idx = lv.entryAtViewportTop()
+	if idx != 1 {
+		t.Errorf("expected entryAtViewportTop=1 at line 4, got %d", idx)
+	}
+}
+
+func TestEntryAtViewportTopEmpty(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 20)
+	eb := process.NewEntryBuffer(100)
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+
+	idx := lv.entryAtViewportTop()
+	if idx != 0 {
+		t.Errorf("expected entryAtViewportTop=0 for empty buffer, got %d", idx)
+	}
+}
+
 func TestLogViewEvictionClampsToZero(t *testing.T) {
 	lv := NewLogView()
 	lv.SetSize(80, 30)

@@ -258,11 +258,43 @@ func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
 				l.viewport.SetYOffset(offset)
 			}
 			return l, nil
+		case "ctrl+d", "ctrl+u", "ctrl+f", "ctrl+b":
+			if l.entryBuffer != nil {
+				l.follow = false
+				count := l.entryBuffer.Len()
+				step := l.viewport.Height / 2
+				if msg.String() == "ctrl+f" || msg.String() == "ctrl+b" {
+					step = l.viewport.Height
+				}
+				if step < 1 {
+					step = 1
+				}
+				if msg.String() == "ctrl+d" || msg.String() == "ctrl+f" {
+					l.cursorEntry += step
+					if count > 0 && l.cursorEntry > count-1 {
+						l.cursorEntry = count - 1
+					}
+				} else {
+					l.cursorEntry -= step
+					if l.cursorEntry < 0 {
+						l.cursorEntry = 0
+					}
+				}
+				l.refreshContent()
+				l.scrollToCursorEntry()
+				return l, nil
+			}
 		}
 	}
 
+	prevOffset := l.viewport.YOffset
 	var cmd tea.Cmd
 	l.viewport, cmd = l.viewport.Update(msg)
+	if l.entryBuffer != nil && l.viewport.YOffset != prevOffset {
+		l.follow = false
+		l.cursorEntry = l.entryAtViewportTop()
+		l.refreshContent()
+	}
 	return l, cmd
 }
 
@@ -697,6 +729,29 @@ func (l *LogView) scrollToCursorEntry() {
 	} else if lineOffset >= l.viewport.YOffset+l.viewport.Height {
 		l.viewport.SetYOffset(lineOffset - l.viewport.Height + 1)
 	}
+}
+
+// entryAtViewportTop returns the index of the entry visible at the top of the viewport.
+func (l *LogView) entryAtViewportTop() int {
+	entries := l.entryBuffer.Entries()
+	if len(entries) == 0 {
+		return 0
+	}
+	lineOffset := 0
+	for i, e := range entries {
+		lineCount := 1 // summary line
+		if l.expandedEntries[i] || (l.active && i == len(entries)-1) {
+			if e.Detail != "" && e.Detail != e.Summary {
+				lineCount += strings.Count(e.Detail, "\n") + 1
+			}
+		}
+		entryEnd := lineOffset + lineCount - 1
+		if l.viewport.YOffset <= entryEnd {
+			return i
+		}
+		lineOffset += lineCount
+	}
+	return len(entries) - 1
 }
 
 // renderContent builds the styled log content, including search and selection highlights.
