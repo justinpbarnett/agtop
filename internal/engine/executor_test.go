@@ -133,6 +133,17 @@ func TestParseRouteResultPlainText(t *testing.T) {
 		{"The task involves fixing auto-resume.\nRecommended approach: plan with spec first.\n\nplan-build\n", "plan-build"},
 		// Workflow name buried in the middle
 		{"Some preamble text.\nsdlc\nSome trailing explanation.", "sdlc"},
+		// Wrapped in backticks (common LLM output)
+		{"`build`", "build"},
+		{"`plan-build`\n", "plan-build"},
+		// Wrapped in quotes
+		{`"sdlc"`, "sdlc"},
+		{"'quick-fix'", "quick-fix"},
+		// Trailing punctuation
+		{"build.", "build"},
+		{"plan-build,", "plan-build"},
+		// Backticks on the last line after explanation
+		{"Based on analysis:\n`build`", "build"},
 	}
 
 	for _, tt := range tests {

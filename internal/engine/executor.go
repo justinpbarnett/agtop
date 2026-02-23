@@ -619,11 +619,20 @@ func parseRouteResult(resultText string) string {
 		if candidate == "" {
 			continue
 		}
+		candidate = stripWrapping(candidate)
 		if isWorkflowName(candidate) {
 			return candidate
 		}
 	}
 	return ""
+}
+
+// stripWrapping removes backticks, quotes, and trailing punctuation that
+// LLMs commonly add around a bare workflow name.
+func stripWrapping(s string) string {
+	s = strings.Trim(s, "`\"'")
+	s = strings.TrimRight(s, ".,;:!?")
+	return strings.TrimSpace(s)
 }
 
 // isWorkflowName returns true if s looks like a valid workflow identifier
