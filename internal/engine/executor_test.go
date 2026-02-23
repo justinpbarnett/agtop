@@ -12,8 +12,8 @@ func executorTestConfig() *config.Config {
 	return &config.Config{
 		Workflows: map[string]config.WorkflowConfig{
 			"build":      {Skills: []string{"build", "test"}},
-			"plan-build": {Skills: []string{"route", "spec", "build", "test"}},
-			"sdlc":       {Skills: []string{"route", "spec", "decompose", "build", "test", "review", "document"}},
+			"plan-build": {Skills: []string{"spec", "build", "test"}},
+			"sdlc":       {Skills: []string{"spec", "decompose", "build", "test", "review", "document"}},
 			"quick-fix":  {Skills: []string{"build", "test", "commit"}},
 			"empty":      {Skills: []string{}},
 		},
@@ -72,10 +72,10 @@ func TestResolveWorkflowSDLC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(skills) != 7 {
-		t.Fatalf("expected 7 skills, got %d", len(skills))
+	if len(skills) != 6 {
+		t.Fatalf("expected 6 skills, got %d", len(skills))
 	}
-	expected := []string{"route", "spec", "decompose", "build", "test", "review", "document"}
+	expected := []string{"spec", "decompose", "build", "test", "review", "document"}
 	for i, s := range expected {
 		if skills[i] != s {
 			t.Errorf("skill[%d]: expected %q, got %q", i, s, skills[i])

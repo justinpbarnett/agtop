@@ -40,14 +40,21 @@ func NewExecutor(store *run.Store, manager *process.Manager, registry *Registry,
 // Execute runs a workflow for the given run. It spawns a goroutine
 // and communicates progress via the run store. Call Cancel() to stop.
 func (e *Executor) Execute(runID string, workflowName string, userPrompt string) {
-	skills, err := ResolveWorkflow(e.cfg, workflowName)
-	if err != nil {
-		e.store.Update(runID, func(r *run.Run) {
-			r.State = run.StateFailed
-			r.Error = err.Error()
-			r.CompletedAt = time.Now()
-		})
-		return
+	// "auto" is a special mode: run the route skill to pick the real workflow.
+	var skills []string
+	if workflowName == "auto" {
+		skills = []string{"route"}
+	} else {
+		var err error
+		skills, err = ResolveWorkflow(e.cfg, workflowName)
+		if err != nil {
+			e.store.Update(runID, func(r *run.Run) {
+				r.State = run.StateFailed
+				r.Error = err.Error()
+				r.CompletedAt = time.Now()
+			})
+			return
+		}
 	}
 
 	e.store.Update(runID, func(r *run.Run) {
@@ -93,9 +100,15 @@ func (e *Executor) Resume(runID string, userPrompt string) error {
 		return fmt.Errorf("run %s is %s, not resumable", runID, r.State)
 	}
 
-	skills, err := ResolveWorkflow(e.cfg, r.Workflow)
-	if err != nil {
-		return err
+	var skills []string
+	if r.Workflow == "auto" {
+		skills = []string{"route"}
+	} else {
+		var err error
+		skills, err = ResolveWorkflow(e.cfg, r.Workflow)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Start from the failed skill (SkillIndex is 1-based)

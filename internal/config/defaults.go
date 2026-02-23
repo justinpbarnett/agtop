@@ -25,9 +25,9 @@ func DefaultConfig() Config {
 			},
 		},
 		Workflows: map[string]WorkflowConfig{
-			"build":      {Skills: []string{"route", "build", "test"}},
-			"plan-build": {Skills: []string{"route", "spec", "build", "test"}},
-			"sdlc":       {Skills: []string{"route", "spec", "decompose", "build", "test", "review", "document"}},
+			"build":      {Skills: []string{"build", "test"}},
+			"plan-build": {Skills: []string{"spec", "build", "test"}},
+			"sdlc":       {Skills: []string{"spec", "decompose", "build", "test", "review", "document"}},
 			"quick-fix":  {Skills: []string{"build", "test", "commit"}},
 		},
 		Skills: map[string]SkillConfig{
