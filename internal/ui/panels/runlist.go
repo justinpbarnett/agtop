@@ -246,13 +246,14 @@ func (r RunList) renderContent(width, height int) string {
 				text.PadRight(statusIcon, colIconW),
 			)
 			costStyle := lipgloss.NewStyle().Foreground(styles.CostColor(rn.Cost))
-			line = fmt.Sprintf("%s %*s  %-*s %*s %*s %*s",
+			paddedCost := fmt.Sprintf("%*s", colCostW, cost)
+			line = fmt.Sprintf("%s %*s  %-*s %*s %*s %s",
 				icon,
 				colIDW, rn.ID,
 				colStateW, text.Truncate(string(rn.State), colStateW),
 				colTimeW, elapsed,
 				colTokensW, tokens,
-				colCostW, costStyle.Render(cost),
+				costStyle.Render(paddedCost),
 			)
 			line = text.Truncate(line, width)
 			if rn.IsTerminal() {
