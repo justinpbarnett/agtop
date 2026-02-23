@@ -54,3 +54,11 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+func runInit(cfg *config.Config) error {
+	return fmt.Errorf("init command not yet implemented")
+}
+
+func runCleanup(cfg *config.Config, dryRun bool) error {
+	return fmt.Errorf("cleanup command not yet implemented")
+}
