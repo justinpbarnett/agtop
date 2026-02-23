@@ -18,22 +18,34 @@ Running AI coding agents in the background means losing visibility into what the
 - **Safety guardrails** — Blocked command patterns, tool restrictions, and hook-based filtering
 - **Session persistence** — Run state saved to disk and recovered on restart
 - **Dev server management** — Auto-detection and port allocation for dev servers
+- **Auto-update** — Self-update from GitHub Releases via `agtop update`
 - **TOML configuration** — Project, runtime, workflow, and UI settings with sensible defaults
 
 ## Getting Started
 
 ### Prerequisites
 
-- Go 1.25+
-- One of: [Claude Code](https://github.com/anthropics/claude-code) or [OpenCode](https://github.com/opencode-ai/opencode)
+One of: [Claude Code](https://github.com/anthropics/claude-code) or [OpenCode](https://github.com/opencode-ai/opencode)
 
 ### Install
+
+**Download a pre-built binary** (Linux and macOS, amd64/arm64):
+
+```bash
+# macOS/Linux via curl — replace VERSION and ARCH as needed
+curl -L https://github.com/justinpbarnett/agtop/releases/latest/download/agtop_VERSION_linux_amd64.tar.gz | tar xz
+mv agtop /usr/local/bin/
+```
+
+Pre-built archives for all supported platforms are available on the [Releases](https://github.com/justinpbarnett/agtop/releases) page.
+
+**Or install with Go** (requires Go 1.25+):
 
 ```bash
 go install github.com/justinpbarnett/agtop/cmd/agtop@latest
 ```
 
-Or build from source:
+**Or build from source**:
 
 ```bash
 git clone https://github.com/justinpbarnett/agtop.git
@@ -52,12 +64,14 @@ agtop
 
 #### Subcommands
 
-| Command               | Description                                            |
-| --------------------- | ------------------------------------------------------ |
-| `agtop`               | Start the interactive dashboard                        |
-| `agtop init`          | Initialize project (hooks, config, safety guard)       |
-| `agtop cleanup`       | Remove stale sessions and orphaned worktrees           |
-| `agtop cleanup --dry-run` | Preview cleanup without deleting anything          |
+| Command                   | Description                                            |
+| ------------------------- | ------------------------------------------------------ |
+| `agtop`                   | Start the interactive dashboard                        |
+| `agtop init`              | Initialize project (hooks, config, safety guard)       |
+| `agtop cleanup`           | Remove stale sessions and orphaned worktrees           |
+| `agtop cleanup --dry-run` | Preview cleanup without deleting anything              |
+| `agtop version`           | Print the current version                              |
+| `agtop update`            | Self-update to the latest GitHub release               |
 
 `agtop init` creates `.agtop/hooks/` with a safety guard script, wires it into `.claude/settings.json` as a PreToolUse hook, and copies `agtop.example.toml` to `agtop.toml` if one doesn't exist.
 
@@ -88,9 +102,11 @@ default = "claude"       # claude | opencode
 model = "opus"
 permission_mode = "acceptEdits"
 max_turns = 50
+allowed_tools = ["Read", "Write", "Edit", "MultiEdit", "Bash", "Grep", "Glob"]
+subscription = false            # Set true if on Claude Max/Team — disables cost threshold
 
 [runtime.opencode]
-model = "anthropic/claude-sonnet-4-5"
+model = "anthropic/claude-sonnet-4-6"
 agent = "build"
 
 [workflows.build]
@@ -108,6 +124,10 @@ skills = ["build", "test", "commit"]
 [limits]
 max_cost_per_run = 5.00
 max_concurrent_runs = 5
+
+[update]
+auto_check = true
+repo = "justinpbarnett/agtop"
 ```
 
 ### Key Bindings
@@ -133,9 +153,9 @@ max_concurrent_runs = 5
 ## Project Structure
 
 ```
-cmd/agtop/         Entry point and subcommands (init, cleanup)
+cmd/agtop/         Entry point and subcommands (init, cleanup, version, update)
 internal/
-  config/          YAML config loading and validation
+  config/          TOML config loading and validation
   ui/              Bubble Tea UI components
     panels/        Run list, logs, details, diffs, status bar, help, modals
     layout/        Terminal layout management
@@ -148,6 +168,7 @@ internal/
   cost/            Token and cost tracking
   safety/          Command pattern filtering and hooks
   server/          Dev server management
+  update/          Self-update via GitHub Releases
 skills/            Built-in skill definitions (SKILL.md files)
 ```
 
@@ -158,6 +179,8 @@ make build    # compile to bin/agtop
 make run      # go run
 make install  # install to $GOPATH/bin
 make lint     # go vet
+make test     # go test
+make check    # lint + test in parallel
 make clean    # remove build artifacts
 ```
 
