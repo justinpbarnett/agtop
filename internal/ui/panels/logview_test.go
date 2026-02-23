@@ -375,6 +375,24 @@ func TestLogViewEntryRendering(t *testing.T) {
 	}
 }
 
+func TestLogViewNoArrowWhenNotExpandable(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 30)
+	eb := process.NewEntryBuffer(100)
+	// EventText with single-line detail: Detail == Summary, so not expandable
+	eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, "No extra detail here"))
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+
+	view := lv.View()
+	if strings.Contains(view, "▸") {
+		t.Error("expected no expand arrow for non-expandable entry")
+	}
+	if strings.Contains(view, "▾") {
+		t.Error("expected no expand arrow for non-expandable entry")
+	}
+}
+
 func TestLogViewEntryExpandCollapse(t *testing.T) {
 	lv := NewLogView()
 	lv.SetSize(80, 30)

@@ -559,10 +559,14 @@ func (l *LogView) renderEntries() string {
 			prefix += skillStyle.Render(e.Skill) + " "
 		}
 
-		// Collapse/expand indicator
-		icon := "▸ "
-		if isExpanded {
-			icon = "▾ "
+		// Collapse/expand indicator — only shown when the entry has expandable detail
+		hasDetail := e.Detail != "" && e.Detail != e.Summary
+		icon := "  "
+		if hasDetail {
+			icon = "▸ "
+			if isExpanded {
+				icon = "▾ "
+			}
 		}
 
 		// Summary line
