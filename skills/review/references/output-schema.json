@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Review Report",
+  "description": "Structured output from the review skill. Must be valid JSON parseable by JSON.parse().",
+  "type": "object",
+  "required": ["success", "review_summary", "review_issues", "screenshots"],
+  "properties": {
+    "success": {
+      "type": "boolean",
+      "description": "true if there are NO blocker issues (can have skippable/tech_debt issues), false if there are blocker issues"
+    },
+    "review_summary": {
+      "type": "string",
+      "description": "2-4 sentences describing what was built and whether it matches the spec. Written as a standup-style update.",
+      "examples": [
+        "The authentication feature has been implemented with JWT token management and session handling. The implementation matches the spec requirements for login, logout, and token refresh. Password reset flow is missing from the implementation but was listed as a stretch goal in the spec."
+      ]
+    },
+    "review_issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["review_issue_number", "issue_description", "issue_resolution", "issue_severity"],
+        "properties": {
+          "review_issue_number": {
+            "type": "integer",
+            "description": "Sequential issue number starting from 1"
+          },
+          "screenshot_path": {
+            "type": "string",
+            "description": "Absolute path to a screenshot showing the issue. Only required for UI issues."
+          },
+          "issue_description": {
+            "type": "string",
+            "description": "Clear description of what the issue is and how it deviates from the spec"
+          },
+          "issue_resolution": {
+            "type": "string",
+            "description": "Recommended action to resolve the issue"
+          },
+          "issue_severity": {
+            "type": "string",
+            "enum": ["skippable", "tech_debt", "blocker"],
+            "description": "Impact classification per the severity guide"
+          }
+        }
+      }
+    },
+    "screenshots": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "description": "Absolute path to a screenshot showcasing implemented functionality"
+      },
+      "description": "Always include screenshots when UI review was performed, regardless of success status"
+    }
+  }
+}
