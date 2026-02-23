@@ -177,25 +177,50 @@ func (d Detail) renderDetails() string {
 	styledRow := func(key string, val string, style lipgloss.Style) string {
 		return keyStyle.Render(fmt.Sprintf("%-9s: ", key)) + style.Render(val)
 	}
+	// wrappedRow renders a field whose value may span multiple lines.
+	// Lines are wrapped to fit the panel width; output is capped at maxLines
+	// (plus a "+N lines" indicator when truncated).
+	// prefixWidth = 2 (indent) + 11 ("%-9s: ") = 13
+	const prefixWidth = 13
+	wrappedRow := func(key, val string, style lipgloss.Style, maxLines int) string {
+		innerW := d.width - 2
+		valW := innerW - prefixWidth
+		if valW < 20 {
+			return fmt.Sprintf("  %s\n", styledRow(key, text.Truncate(val, valW), style))
+		}
+		wrapped := text.WrapText(val, valW)
+		totalLines := len(wrapped)
+		truncated := totalLines > maxLines
+		if truncated {
+			wrapped = wrapped[:maxLines]
+		}
+		var sb strings.Builder
+		for i, line := range wrapped {
+			if i == 0 {
+				sb.WriteString(fmt.Sprintf("  %s\n", keyStyle.Render(fmt.Sprintf("%-9s: ", key))+style.Render(line)))
+			} else {
+				sb.WriteString(fmt.Sprintf("  %s%s\n", strings.Repeat(" ", 11), style.Render(line)))
+			}
+		}
+		if truncated {
+			remaining := totalLines - maxLines
+			indicator := fmt.Sprintf("%s+%d lines", strings.Repeat(" ", 11), remaining)
+			sb.WriteString("  " + styles.TextSecondaryStyle.Render(indicator) + "\n")
+		}
+		return sb.String()
+	}
 
 	if r.TaskID != "" {
 		fmt.Fprintf(&b, "  %s\n", row("Task", r.TaskID))
 	}
 
 	if r.Prompt != "" {
-		prompt := r.Prompt
-		if len(prompt) > 60 {
-			prompt = prompt[:57] + "..."
-		}
-		fmt.Fprintf(&b, "  %s\n", row("Prompt", prompt))
+		b.WriteString(wrappedRow("Prompt", r.Prompt, valStyle, 6))
 	}
 
 	for i, fp := range r.FollowUpPrompts {
 		label := fmt.Sprintf("Update %d", i+1)
-		if len(fp) > 55 {
-			fp = fp[:52] + "..."
-		}
-		fmt.Fprintf(&b, "  %s\n", row(label, fp))
+		b.WriteString(wrappedRow(label, fp, valStyle, 3))
 	}
 
 	fmt.Fprintf(&b, "  %s\n", styledRow("Status", statusText, stateColor))
