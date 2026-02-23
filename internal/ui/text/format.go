@@ -63,3 +63,24 @@ func FormatElapsed(d time.Duration) string {
 	}
 	return fmt.Sprintf("%dm", m)
 }
+
+// FormatElapsedVerbose formats a duration with full precision: "4m 13s", "1h 12m 34s", "2d 3h 45m 12s".
+func FormatElapsedVerbose(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	mins := int(d.Minutes()) % 60
+	secs := int(d.Seconds()) % 60
+	switch {
+	case days > 0:
+		return fmt.Sprintf("%dd %dh %dm %ds", days, hours, mins, secs)
+	case hours > 0:
+		return fmt.Sprintf("%dh %dm %ds", hours, mins, secs)
+	case mins > 0:
+		return fmt.Sprintf("%dm %ds", mins, secs)
+	default:
+		return fmt.Sprintf("%ds", secs)
+	}
+}

@@ -86,7 +86,7 @@ func (d Detail) plainText() string {
 
 	statusText := string(r.State)
 	if !r.StartedAt.IsZero() {
-		statusText += fmt.Sprintf(" (%s)", text.FormatElapsed(r.ElapsedTime()))
+		statusText += fmt.Sprintf(" (%s)", text.FormatElapsedVerbose(r.ElapsedTime()))
 	}
 	row("Status", statusText)
 
@@ -162,7 +162,7 @@ func (d Detail) renderDetails() string {
 
 	statusText := string(r.State)
 	if !r.StartedAt.IsZero() {
-		statusText += fmt.Sprintf(" (%s)", text.FormatElapsed(r.ElapsedTime()))
+		statusText += fmt.Sprintf(" (%s)", text.FormatElapsedVerbose(r.ElapsedTime()))
 	}
 
 	skillName := r.CurrentSkill
