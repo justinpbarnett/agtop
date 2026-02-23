@@ -19,10 +19,21 @@ var Version = "dev"
 // FlashDuration returns how long the status bar flash is shown.
 func FlashDuration() time.Duration { return flashDurationVal }
 
+// FlashLevel controls the icon and color of a status bar flash message.
+type FlashLevel int
+
+const (
+	FlashInfo    FlashLevel = iota // blue ●
+	FlashSuccess                   // green ✓
+	FlashWarning                   // yellow ⚠
+	FlashError                     // red ✗
+)
+
 type StatusBar struct {
 	width      int
 	store      *run.Store
 	flash      string
+	flashLevel FlashLevel
 	flashUntil time.Time
 }
 
@@ -71,7 +82,19 @@ func (s StatusBar) View() string {
 	left := " " + version + sep + counts + sep + tokensStr + sep + costStr
 
 	if s.flash != "" && time.Now().Before(s.flashUntil) {
-		flashStr := lipgloss.NewStyle().Foreground(styles.StatusError).Bold(true).Render("⚠ " + s.flash)
+		var icon string
+		var color lipgloss.TerminalColor
+		switch s.flashLevel {
+		case FlashSuccess:
+			icon, color = "✓", styles.StatusSuccess
+		case FlashError:
+			icon, color = "✗", styles.StatusError
+		case FlashWarning:
+			icon, color = "⚠", styles.StatusWarning
+		default: // FlashInfo
+			icon, color = "●", styles.StatusRunning
+		}
+		flashStr := lipgloss.NewStyle().Foreground(color).Bold(true).Render(icon + " " + s.flash)
 		left += sep + flashStr
 	}
 
@@ -88,12 +111,18 @@ func (s StatusBar) View() string {
 }
 
 func (s *StatusBar) SetFlash(msg string) {
+	s.SetFlashWithLevel(msg, FlashInfo)
+}
+
+func (s *StatusBar) SetFlashWithLevel(msg string, level FlashLevel) {
 	s.flash = msg
+	s.flashLevel = level
 	s.flashUntil = time.Now().Add(flashDurationVal)
 }
 
 func (s *StatusBar) ClearFlash() {
 	s.flash = ""
+	s.flashLevel = FlashInfo
 	s.flashUntil = time.Time{}
 }
 
