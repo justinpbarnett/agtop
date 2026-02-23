@@ -185,9 +185,9 @@ func TestRunListIconRendering(t *testing.T) {
 	rl.SetSize(60, 20)
 	view := rl.View()
 
-	// Running run should have ● icon
-	if !strings.Contains(view, "●") {
-		t.Error("expected ● icon for running run")
+	// Running run should have spinner icon
+	if !strings.Contains(view, "⠋") {
+		t.Error("expected ⠋ spinner icon for running run")
 	}
 	// Failed run should have ✗ icon
 	if !strings.Contains(view, "✗") {

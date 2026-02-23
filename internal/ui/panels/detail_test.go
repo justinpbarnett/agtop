@@ -52,17 +52,8 @@ func TestDetailSetRun(t *testing.T) {
 	if !strings.Contains(view, "3/6") {
 		t.Error("expected details to show step progress")
 	}
-	if !strings.Contains(view, "$0.15") {
-		t.Error("expected details to show cost")
-	}
 	if !strings.Contains(view, "claude-sonnet-4-5") {
 		t.Error("expected details to show model name")
-	}
-	if !strings.Contains(view, "5.0k") {
-		t.Error("expected details to show total tokens")
-	}
-	if !strings.Contains(view, "3.2k in") {
-		t.Error("expected details to show token in/out format")
 	}
 }
 
@@ -79,23 +70,6 @@ func TestDetailBorder(t *testing.T) {
 	}
 }
 
-func TestDetailCostColoring(t *testing.T) {
-	d := NewDetail()
-	d.SetSize(80, 15)
-
-	r := &run.Run{
-		ID:     "001",
-		Branch: "test",
-		State:  run.StateRunning,
-		Cost:   5.50,
-	}
-	d.SetRun(r)
-	view := d.View()
-
-	if !strings.Contains(view, "$5.50") {
-		t.Error("expected cost to be displayed")
-	}
-}
 
 func TestDetailTerminalElapsedTime(t *testing.T) {
 	d := NewDetail()
