@@ -19,55 +19,41 @@ func TestNewRunModalDefaults(t *testing.T) {
 	}
 }
 
-func TestNewRunModalWorkflowSelection(t *testing.T) {
-	tests := []struct {
-		key      string
-		expected string
-	}{
-		{"alt+a", "auto"},
-		{"alt+b", "build"},
-		{"alt+p", "plan-build"},
-		{"alt+l", "sdlc"},
-		{"alt+q", "quick-fix"},
+func TestNewRunModalWorkflowCycle(t *testing.T) {
+	m := NewNewRunModal(120, 40)
+	if m.Workflow() != "auto" {
+		t.Fatalf("expected initial workflow 'auto', got %q", m.Workflow())
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.key, func(t *testing.T) {
-			m := NewNewRunModal(120, 40)
-			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: nil}) // dummy to init
-			m, _ = m.Update(newRunKeyMsg(tt.key))
-			if m == nil {
-				t.Fatal("modal was unexpectedly dismissed")
-			}
-			if m.Workflow() != tt.expected {
-				t.Errorf("workflow = %q, want %q", m.Workflow(), tt.expected)
-			}
-		})
+	// Each press of alt+w advances to the next workflow, wrapping around
+	expected := []string{"build", "plan-build", "sdlc", "quick-fix", "auto"}
+	for _, want := range expected {
+		m, _ = m.Update(newRunKeyMsg("alt+w"))
+		if m == nil {
+			t.Fatal("modal was unexpectedly dismissed")
+		}
+		if m.Workflow() != want {
+			t.Errorf("workflow = %q, want %q", m.Workflow(), want)
+		}
 	}
 }
 
-func TestNewRunModalModelOverride(t *testing.T) {
-	tests := []struct {
-		key      string
-		expected string
-	}{
-		{"alt+h", "haiku"},
-		{"alt+o", "opus"},
-		{"alt+n", "sonnet"},
-		{"alt+x", ""},
+func TestNewRunModalModelCycle(t *testing.T) {
+	m := NewNewRunModal(120, 40)
+	if m.Model() != "" {
+		t.Fatalf("expected initial model '', got %q", m.Model())
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.key, func(t *testing.T) {
-			m := NewNewRunModal(120, 40)
-			m, _ = m.Update(newRunKeyMsg(tt.key))
-			if m == nil {
-				t.Fatal("modal was unexpectedly dismissed")
-			}
-			if m.Model() != tt.expected {
-				t.Errorf("model = %q, want %q", m.Model(), tt.expected)
-			}
-		})
+	// Each press of alt+m advances to the next model, wrapping around
+	expected := []string{"haiku", "opus", "sonnet", ""}
+	for _, want := range expected {
+		m, _ = m.Update(newRunKeyMsg("alt+m"))
+		if m == nil {
+			t.Fatal("modal was unexpectedly dismissed")
+		}
+		if m.Model() != want {
+			t.Errorf("model = %q, want %q", m.Model(), want)
+		}
 	}
 }
 
@@ -111,16 +97,20 @@ func TestNewRunModalSubmit(t *testing.T) {
 		}
 	}
 
-	// Select workflow
-	m, _ = m.Update(newRunKeyMsg("alt+l"))
-	if m == nil {
-		t.Fatal("modal dismissed on workflow select")
+	// Cycle workflow to sdlc: auto -> build -> plan-build -> sdlc
+	for i := 0; i < 3; i++ {
+		m, _ = m.Update(newRunKeyMsg("alt+w"))
+		if m == nil {
+			t.Fatal("modal dismissed on workflow cycle")
+		}
 	}
 
-	// Select model
-	m, _ = m.Update(newRunKeyMsg("alt+o"))
-	if m == nil {
-		t.Fatal("modal dismissed on model select")
+	// Cycle model to opus: default -> haiku -> opus
+	for i := 0; i < 2; i++ {
+		m, _ = m.Update(newRunKeyMsg("alt+m"))
+		if m == nil {
+			t.Fatal("modal dismissed on model cycle")
+		}
 	}
 
 	// Submit
@@ -260,24 +250,10 @@ func newRunKeyMsg(key string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyEscape}
 	case "ctrl+s":
 		return tea.KeyMsg{Type: tea.KeyCtrlS}
-	case "alt+a":
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}, Alt: true}
-	case "alt+b":
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}, Alt: true}
-	case "alt+p":
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}, Alt: true}
-	case "alt+l":
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}, Alt: true}
-	case "alt+q":
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}, Alt: true}
-	case "alt+h":
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}, Alt: true}
-	case "alt+o":
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}, Alt: true}
-	case "alt+n":
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}, Alt: true}
-	case "alt+x":
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}, Alt: true}
+	case "alt+w":
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}, Alt: true}
+	case "alt+m":
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
 	}
