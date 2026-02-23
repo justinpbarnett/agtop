@@ -234,3 +234,49 @@ func TestAppKeyRoutingToRunList(t *testing.T) {
 		t.Errorf("expected to stay on panel 0, got %d", a.focusedPanel)
 	}
 }
+
+func TestAppDeleteTerminalRun(t *testing.T) {
+	a := newTestApp()
+	a = sendWindowSize(a, 120, 40)
+
+	countBefore := a.store.Count()
+	a.store.Add(&run.Run{State: run.StateCompleted, Prompt: "test run"})
+	m, _ := a.Update(RunStoreUpdatedMsg{})
+	a = m.(App)
+
+	if a.store.Count() != countBefore+1 {
+		t.Fatalf("expected %d runs, got %d", countBefore+1, a.store.Count())
+	}
+
+	// The newly added run is at the top of the list (newest first), so it's selected
+	a = sendKey(a, "d")
+
+	if a.store.Count() != countBefore {
+		t.Errorf("expected %d runs after delete, got %d", countBefore, a.store.Count())
+	}
+}
+
+func TestAppDeleteNonTerminalRunNoOp(t *testing.T) {
+	a := newTestApp()
+	a = sendWindowSize(a, 120, 40)
+
+	a.store.Add(&run.Run{State: run.StateRunning, Prompt: "active run"})
+	m, _ := a.Update(RunStoreUpdatedMsg{})
+	a = m.(App)
+
+	countBefore := a.store.Count()
+	a = sendKey(a, "d")
+
+	if a.store.Count() != countBefore {
+		t.Errorf("expected count unchanged at %d, got %d", countBefore, a.store.Count())
+	}
+}
+
+func TestAppDeleteNoSelection(t *testing.T) {
+	a := newTestApp()
+	// Don't add any runs — but rehydration may have added some.
+	// Pressing d on whatever is selected (if anything) should not panic.
+	a = sendWindowSize(a, 120, 40)
+	a = sendKey(a, "d")
+	// Just verify no panic occurred
+}

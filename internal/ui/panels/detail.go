@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/justinpbarnett/agtop/internal/run"
 	"github.com/justinpbarnett/agtop/internal/ui/border"
@@ -20,6 +21,18 @@ type Detail struct {
 
 func NewDetail() Detail {
 	return Detail{}
+}
+
+func (d Detail) Update(msg tea.Msg) (Detail, tea.Cmd) {
+	if msg, ok := msg.(tea.KeyMsg); ok {
+		switch msg.String() {
+		case "y":
+			if d.selectedRun != nil {
+				return d, func() tea.Msg { return YankMsg{Text: d.selectedRun.ID} }
+			}
+		}
+	}
+	return d, nil
 }
 
 func (d Detail) View() string {

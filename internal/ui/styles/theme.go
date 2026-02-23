@@ -25,4 +25,6 @@ var (
 	DiffHunkStyle    = lipgloss.NewStyle().Foreground(DiffHunk)
 
 	SelectedOptionStyle = lipgloss.NewStyle().Foreground(SelectedOption).Bold(true)
+
+	SelectionStyle = lipgloss.NewStyle().Background(SelectionBg)
 )

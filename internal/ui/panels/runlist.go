@@ -76,6 +76,10 @@ func (r RunList) Update(msg tea.Msg) (RunList, tea.Cmd) {
 			r.scrollToSelection()
 		}
 		r.lastKeyG = false
+	case "y":
+		if sel := r.SelectedRun(); sel != nil {
+			return r, func() tea.Msg { return YankMsg{Text: sel.ID} }
+		}
 	case "G":
 		r.selected = max(len(r.filtered)-1, 0)
 		r.scrollToSelection()
@@ -139,6 +143,7 @@ func (r RunList) View() string {
 	if r.focused {
 		keybinds = []border.Keybind{
 			{Key: "n", Label: "ew"},
+			{Key: "y", Label: "ank ID"},
 			{Key: "/", Label: "filter"},
 		}
 	}

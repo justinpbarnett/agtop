@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/justinpbarnett/agtop/internal/process"
 	"github.com/justinpbarnett/agtop/internal/ui/border"
 	"github.com/justinpbarnett/agtop/internal/ui/styles"
@@ -53,6 +54,18 @@ type LogView struct {
 	searchQuery  string
 	matchIndices []int
 	currentMatch int
+
+	// Copy mode state
+	copyMode   bool
+	copyAnchor int // buffer line index where selection started
+	copyCursor int // buffer line index of current cursor
+
+	// Mouse selection state (character-level)
+	mouseSelecting  bool
+	mouseAnchorLine int
+	mouseAnchorCol  int
+	mouseCurrentLine int
+	mouseCurrentCol  int
 }
 
 func NewLogView() LogView {
@@ -112,6 +125,11 @@ func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
 			return l.updateSearch(msg)
 		}
 
+		// Copy mode key handling
+		if l.copyMode {
+			return l.updateCopyMode(msg)
+		}
+
 		// Search query active (not typing) — handle n/N navigation
 		if l.searchQuery != "" {
 			switch msg.String() {
@@ -160,6 +178,9 @@ func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
 			l.searchInput.Focus()
 			l.resizeViewport()
 			return l, textinput.Blink
+		case "y":
+			l.enterCopyMode()
+			return l, nil
 		case "j", "down":
 			l.follow = false
 			step := l.scrollSpeed
@@ -253,20 +274,36 @@ func (l LogView) View() string {
 
 	if l.activeTab == tabLog {
 		if l.focused {
-			keybinds = []border.Keybind{
-				{Key: "G", Label: "bottom"},
-				{Key: "g", Label: "g top"},
-				{Key: "/", Label: "search"},
-			}
-			if !l.viewport.AtBottom() && !l.follow {
-				keybinds = append(keybinds, border.Keybind{Key: "↓", Label: " new output"})
+			if l.copyMode {
+				keybinds = []border.Keybind{
+					{Key: "y", Label: "ank"},
+					{Key: "j", Label: "/k select"},
+					{Key: "Esc", Label: " cancel"},
+				}
+			} else {
+				keybinds = []border.Keybind{
+					{Key: "y", Label: "ank/copy"},
+					{Key: "G", Label: "bottom"},
+					{Key: "g", Label: "g top"},
+					{Key: "/", Label: "search"},
+				}
+				if !l.viewport.AtBottom() && !l.follow {
+					keybinds = append(keybinds, border.Keybind{Key: "↓", Label: " new output"})
+				}
 			}
 		}
 
 		content = l.viewport.View()
 
-		// Append search bar or match status below the viewport
-		if l.searching {
+		// Append copy mode status, search bar, or match status below the viewport
+		if l.copyMode {
+			selStart, selEnd := l.copySelectionRange()
+			count := selEnd - selStart + 1
+			status := styles.TextSecondaryStyle.Render(
+				fmt.Sprintf("  VISUAL: %d line(s) selected", count),
+			) + styles.TextDimStyle.Render(" (y yank, Esc cancel)")
+			content += "\n" + status
+		} else if l.searching {
 			content += "\n" + l.searchInput.View()
 		} else if l.searchQuery != "" {
 			total := len(l.matchIndices)
@@ -322,10 +359,10 @@ func (l *LogView) SetScrollSpeed(speed int) {
 // consume all key events (search input or active search query navigation).
 // Returns false on the diff tab since search doesn't apply there.
 func (l LogView) ConsumesKeys() bool {
-	if l.activeTab != tabLog {
-		return false
+	if l.activeTab == tabDiff {
+		return l.diffView.ConsumesKeys()
 	}
-	return l.searching || l.searchQuery != ""
+	return l.searching || l.searchQuery != "" || l.copyMode
 }
 
 func (l *LogView) SetRun(runID, skill, branch string, buf *process.RingBuffer, active bool) {
@@ -338,6 +375,8 @@ func (l *LogView) SetRun(runID, skill, branch string, buf *process.RingBuffer, a
 	l.searchQuery = ""
 	l.matchIndices = nil
 	l.searching = false
+	l.copyMode = false
+	l.mouseSelecting = false
 	l.activeTab = tabLog
 	l.updateDiffFocus()
 	l.refreshContent()
@@ -361,8 +400,8 @@ func (l *LogView) updateDiffFocus() {
 func (l *LogView) resizeViewport() {
 	innerW := l.width - 2
 	innerH := l.height - 2
-	if l.searching || l.searchQuery != "" {
-		innerH-- // Reserve 1 row for search bar / status
+	if l.searching || l.searchQuery != "" || l.copyMode {
+		innerH-- // Reserve 1 row for search bar / status / copy mode
 	}
 	if innerW < 0 {
 		innerW = 0
@@ -383,8 +422,8 @@ func (l *LogView) refreshContent() {
 	}
 }
 
-// renderContent builds the styled log content, including search highlights.
-func (l *LogView) renderContent() string {
+// renderContentBase builds the styled log content without selection highlighting.
+func (l *LogView) renderContentBase() string {
 	var raw string
 	if l.buffer != nil {
 		lines := l.buffer.Lines()
@@ -397,6 +436,21 @@ func (l *LogView) renderContent() string {
 		raw = "No run selected"
 	}
 	return formatLogContent(raw, l.active, l.searchQuery, l.matchIndices, l.currentMatch)
+}
+
+// renderContent builds the styled log content, including search and selection highlights.
+func (l *LogView) renderContent() string {
+	content := l.renderContentBase()
+
+	if l.copyMode {
+		selStart, selEnd := l.copySelectionRange()
+		content = applySelectionHighlight(content, selStart, selEnd)
+	} else if l.mouseSelecting {
+		sl, sc, el, ec := l.normalizedMouseSelection()
+		content = applyCharSelectionHighlight(content, sl, sc, el, ec)
+	}
+
+	return content
 }
 
 func (l *LogView) recomputeMatches() {
@@ -441,6 +495,222 @@ func (l *LogView) jumpToMatch() {
 	l.follow = false
 	l.viewport.SetYOffset(lineIdx)
 	l.refreshContent()
+}
+
+func (l *LogView) enterCopyMode() {
+	if l.buffer == nil {
+		return
+	}
+	lines := l.buffer.Lines()
+	if len(lines) == 0 {
+		return
+	}
+	// Anchor at the center of the visible viewport
+	centerLine := l.viewport.YOffset + l.viewport.Height/2
+	if centerLine >= len(lines) {
+		centerLine = len(lines) - 1
+	}
+	if centerLine < 0 {
+		centerLine = 0
+	}
+	l.copyMode = true
+	l.mouseSelecting = false
+	l.copyAnchor = centerLine
+	l.copyCursor = centerLine
+	l.follow = false
+	l.refreshContent()
+}
+
+func (l *LogView) updateCopyMode(msg tea.KeyMsg) (LogView, tea.Cmd) {
+	lineCount := 0
+	if l.buffer != nil {
+		lineCount = len(l.buffer.Lines())
+	}
+
+	switch msg.String() {
+	case "esc":
+		l.copyMode = false
+		l.refreshContent()
+		return *l, nil
+	case "y":
+		// Yank the selected lines
+		text := l.yankSelection()
+		l.copyMode = false
+		l.refreshContent()
+		if text != "" {
+			return *l, func() tea.Msg { return YankMsg{Text: text} }
+		}
+		return *l, nil
+	case "j", "down":
+		if l.copyCursor < lineCount-1 {
+			l.copyCursor++
+			// Scroll viewport to keep cursor visible
+			if l.copyCursor >= l.viewport.YOffset+l.viewport.Height {
+				l.viewport.SetYOffset(l.copyCursor - l.viewport.Height + 1)
+			}
+			l.refreshContent()
+		}
+		return *l, nil
+	case "k", "up":
+		if l.copyCursor > 0 {
+			l.copyCursor--
+			// Scroll viewport to keep cursor visible
+			if l.copyCursor < l.viewport.YOffset {
+				l.viewport.SetYOffset(l.copyCursor)
+			}
+			l.refreshContent()
+		}
+		return *l, nil
+	case "G":
+		l.copyCursor = lineCount - 1
+		l.viewport.GotoBottom()
+		l.refreshContent()
+		return *l, nil
+	case "g":
+		if l.gPending {
+			l.gPending = false
+			l.copyCursor = 0
+			l.viewport.GotoTop()
+			l.refreshContent()
+			return *l, nil
+		}
+		l.gPending = true
+		return *l, tea.Tick(gTimeout, func(time.Time) tea.Msg {
+			return GTimerExpiredMsg{}
+		})
+	}
+	return *l, nil
+}
+
+func (l *LogView) yankSelection() string {
+	if l.buffer == nil {
+		return ""
+	}
+	lines := l.buffer.Lines()
+	if len(lines) == 0 {
+		return ""
+	}
+	start := l.copyAnchor
+	end := l.copyCursor
+	if start > end {
+		start, end = end, start
+	}
+	if start < 0 {
+		start = 0
+	}
+	if end >= len(lines) {
+		end = len(lines) - 1
+	}
+	return strings.Join(lines[start:end+1], "\n")
+}
+
+func (l *LogView) copySelectionRange() (int, int) {
+	start := l.copyAnchor
+	end := l.copyCursor
+	if start > end {
+		start, end = end, start
+	}
+	return start, end
+}
+
+// StartMouseSelection begins a mouse drag selection at the given panel-relative coordinates.
+func (l *LogView) StartMouseSelection(relX, relY int) {
+	if l.activeTab == tabDiff {
+		l.diffView.StartMouseSelection(relX, relY)
+		return
+	}
+	l.copyMode = false
+	bufLine := l.viewport.YOffset + (relY - 1)
+	if bufLine < 0 {
+		bufLine = 0
+	}
+	col := relX - 1 // account for left border
+	if col < 0 {
+		col = 0
+	}
+	l.mouseSelecting = true
+	l.mouseAnchorLine = bufLine
+	l.mouseAnchorCol = col
+	l.mouseCurrentLine = bufLine
+	l.mouseCurrentCol = col
+	l.follow = false
+	l.refreshContent()
+}
+
+// ExtendMouseSelection updates the cursor position during a mouse drag.
+func (l *LogView) ExtendMouseSelection(relX, relY int) {
+	if l.activeTab == tabDiff {
+		l.diffView.ExtendMouseSelection(relX, relY)
+		return
+	}
+	if !l.mouseSelecting {
+		return
+	}
+	bufLine := l.viewport.YOffset + (relY - 1)
+	if bufLine < 0 {
+		bufLine = 0
+	}
+	col := relX - 1
+	if col < 0 {
+		col = 0
+	}
+	l.mouseCurrentLine = bufLine
+	l.mouseCurrentCol = col
+	l.refreshContent()
+}
+
+// FinalizeMouseSelection ends the mouse drag and returns the selected text.
+// Returns empty string for single-click (no drag).
+func (l *LogView) FinalizeMouseSelection(relX, relY int) string {
+	if l.activeTab == tabDiff {
+		return l.diffView.FinalizeMouseSelection(relX, relY)
+	}
+	if !l.mouseSelecting {
+		return ""
+	}
+	l.mouseSelecting = false
+	bufLine := l.viewport.YOffset + (relY - 1)
+	if bufLine < 0 {
+		bufLine = 0
+	}
+	col := relX - 1
+	if col < 0 {
+		col = 0
+	}
+	l.mouseCurrentLine = bufLine
+	l.mouseCurrentCol = col
+
+	// Single click (same position) — no copy
+	if l.mouseAnchorLine == l.mouseCurrentLine && l.mouseAnchorCol == l.mouseCurrentCol {
+		l.refreshContent()
+		return ""
+	}
+
+	content := l.renderContentBase()
+	sl, sc, el, ec := l.normalizedMouseSelection()
+	text := extractCharSelection(content, sl, sc, el, ec)
+	l.refreshContent()
+	return text
+}
+
+// CancelMouseSelection clears mouse selection state without copying.
+func (l *LogView) CancelMouseSelection() {
+	if l.activeTab == tabDiff {
+		l.diffView.CancelMouseSelection()
+		return
+	}
+	l.mouseSelecting = false
+	l.refreshContent()
+}
+
+// normalizedMouseSelection returns the mouse selection with start before end.
+func (l *LogView) normalizedMouseSelection() (startLine, startCol, endLine, endCol int) {
+	startLine, startCol = l.mouseAnchorLine, l.mouseAnchorCol
+	endLine, endCol = l.mouseCurrentLine, l.mouseCurrentCol
+	if startLine > endLine || (startLine == endLine && startCol > endCol) {
+		startLine, startCol, endLine, endCol = endLine, endCol, startLine, startCol
+	}
+	return
 }
 
 // formatLogContent styles log lines: timestamps in TextDim, tool names in TextSecondary,
@@ -508,6 +778,108 @@ func formatLogContent(content string, active bool, searchQuery string, matchIndi
 	}
 
 	return result
+}
+
+// applySelectionHighlight wraps lines within the selection range with SelectionStyle.
+func applySelectionHighlight(content string, selStart, selEnd int) string {
+	lines := strings.Split(content, "\n")
+	for i := selStart; i <= selEnd && i < len(lines); i++ {
+		if i >= 0 {
+			lines[i] = styles.SelectionStyle.Render(lines[i])
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// applyCharSelectionHighlight applies character-level selection highlighting.
+// Uses ANSI-aware cutting so styled content is handled correctly.
+func applyCharSelectionHighlight(content string, startLine, startCol, endLine, endCol int) string {
+	lines := strings.Split(content, "\n")
+	for i := range lines {
+		if i < startLine || i > endLine {
+			continue
+		}
+		lineWidth := ansi.StringWidth(lines[i])
+		if lineWidth == 0 {
+			continue
+		}
+
+		var sc, ec int
+		if i == startLine && i == endLine {
+			sc = startCol
+			ec = endCol + 1
+		} else if i == startLine {
+			sc = startCol
+			ec = lineWidth
+		} else if i == endLine {
+			sc = 0
+			ec = endCol + 1
+		} else {
+			sc = 0
+			ec = lineWidth
+		}
+
+		if sc > lineWidth {
+			sc = lineWidth
+		}
+		if ec > lineWidth {
+			ec = lineWidth
+		}
+		if sc >= ec {
+			continue
+		}
+
+		before := ansi.Cut(lines[i], 0, sc)
+		selected := ansi.Cut(lines[i], sc, ec)
+		after := ansi.Cut(lines[i], ec, lineWidth)
+		lines[i] = before + styles.SelectionStyle.Render(ansi.Strip(selected)) + after
+	}
+	return strings.Join(lines, "\n")
+}
+
+// extractCharSelection extracts plain text from a character-level selection
+// on styled content. Returns the visible text within the selection range.
+func extractCharSelection(styledContent string, startLine, startCol, endLine, endCol int) string {
+	lines := strings.Split(styledContent, "\n")
+	var result []string
+
+	for i := startLine; i <= endLine && i < len(lines); i++ {
+		if i < 0 {
+			continue
+		}
+		lineWidth := ansi.StringWidth(lines[i])
+
+		var sc, ec int
+		if i == startLine && i == endLine {
+			sc = startCol
+			ec = endCol + 1
+		} else if i == startLine {
+			sc = startCol
+			ec = lineWidth
+		} else if i == endLine {
+			sc = 0
+			ec = endCol + 1
+		} else {
+			sc = 0
+			ec = lineWidth
+		}
+
+		if sc > lineWidth {
+			sc = lineWidth
+		}
+		if ec > lineWidth {
+			ec = lineWidth
+		}
+		if sc >= ec {
+			result = append(result, "")
+			continue
+		}
+
+		extracted := ansi.Cut(lines[i], sc, ec)
+		result = append(result, ansi.Strip(extracted))
+	}
+
+	return strings.Join(result, "\n")
 }
 
 // highlightMatches wraps occurrences of query in line with highlight styling.

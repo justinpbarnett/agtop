@@ -207,6 +207,12 @@ func (m *Manager) InjectBuffer(runID string, lines []string) {
 	m.mu.Unlock()
 }
 
+func (m *Manager) RemoveBuffer(runID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.buffers, runID)
+}
+
 func (m *Manager) ActiveCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()

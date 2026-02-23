@@ -14,6 +14,7 @@ type KeyMap struct {
 	Filter    key.Binding
 	Help      key.Binding
 	Quit      key.Binding
+	Yank      key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -59,6 +60,10 @@ func DefaultKeyMap() KeyMap {
 		Quit: key.NewBinding(
 			key.WithKeys("q"),
 			key.WithHelp("q", "quit"),
+		),
+		Yank: key.NewBinding(
+			key.WithKeys("y"),
+			key.WithHelp("y", "yank/copy"),
 		),
 	}
 }

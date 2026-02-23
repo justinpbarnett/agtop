@@ -12,11 +12,13 @@ import (
 	"github.com/justinpbarnett/agtop/internal/config"
 	"github.com/justinpbarnett/agtop/internal/cost"
 	"github.com/justinpbarnett/agtop/internal/engine"
+	"github.com/justinpbarnett/agtop/skills"
 	gitpkg "github.com/justinpbarnett/agtop/internal/git"
 	"github.com/justinpbarnett/agtop/internal/process"
 	"github.com/justinpbarnett/agtop/internal/run"
 	"github.com/justinpbarnett/agtop/internal/runtime"
 	"github.com/justinpbarnett/agtop/internal/safety"
+	"github.com/justinpbarnett/agtop/internal/ui/clipboard"
 	"github.com/justinpbarnett/agtop/internal/server"
 	"github.com/justinpbarnett/agtop/internal/ui/layout"
 	"github.com/justinpbarnett/agtop/internal/ui/panels"
@@ -93,7 +95,7 @@ func NewApp(cfg *config.Config) App {
 	if projectRoot == "" || projectRoot == "." {
 		projectRoot, _ = os.Getwd()
 	}
-	if err := reg.Load(projectRoot); err != nil {
+	if err := reg.Load(projectRoot, skills.FS); err != nil {
 		log.Printf("warning: skill registry load: %v", err)
 	}
 
@@ -271,6 +273,17 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.statusBar.ClearFlash()
 		return a, nil
 
+	case YankMsg:
+		if msg.Text != "" {
+			if err := clipboard.Write(msg.Text); err != nil {
+				a.statusBar.SetFlash(fmt.Sprintf("Copy failed: %v", err))
+			} else {
+				a.statusBar.SetFlash("Copied to clipboard")
+			}
+			return a, flashClearCmd()
+		}
+		return a, nil
+
 	case process.LogLineMsg:
 		selected := a.runList.SelectedRun()
 		if selected != nil && selected.ID == msg.RunID {
@@ -289,6 +302,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.logView, cmd = a.logView.Update(msg)
 		return a, cmd
+
+	case tea.MouseMsg:
+		return a.handleMouse(msg)
 
 	case tea.KeyMsg:
 		if a.helpOverlay != nil {
@@ -390,6 +406,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "c":
 			return a.handleCancel()
 		case "d":
+			return a.handleDelete()
+		case "D":
 			return a.handleDevServerToggle()
 		}
 
@@ -455,6 +473,67 @@ func (a App) Executor() *engine.Executor {
 	return a.executor
 }
 
+func (a App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.MouseWheelUp, tea.MouseWheelDown:
+		relX, relY, ok := a.mouseInLogView(msg.X, msg.Y)
+		if ok {
+			_, _ = relX, relY
+			var cmd tea.Cmd
+			a.logView, cmd = a.logView.Update(msg)
+			return a, cmd
+		}
+		return a, nil
+
+	case tea.MouseLeft:
+		relX, relY, ok := a.mouseInLogView(msg.X, msg.Y)
+		if ok {
+			a.logView.StartMouseSelection(relX, relY)
+		} else {
+			a.logView.CancelMouseSelection()
+		}
+		return a, nil
+
+	case tea.MouseMotion:
+		relX, relY, ok := a.mouseInLogView(msg.X, msg.Y)
+		if ok {
+			a.logView.ExtendMouseSelection(relX, relY)
+		}
+		return a, nil
+
+	case tea.MouseRelease:
+		relX, relY, ok := a.mouseInLogView(msg.X, msg.Y)
+		if ok {
+			text := a.logView.FinalizeMouseSelection(relX, relY)
+			if text != "" {
+				if err := clipboard.Write(text); err != nil {
+					a.statusBar.SetFlash(fmt.Sprintf("Copy failed: %v", err))
+				} else {
+					a.statusBar.SetFlash("Copied to clipboard")
+				}
+				return a, flashClearCmd()
+			}
+		} else {
+			a.logView.CancelMouseSelection()
+		}
+		return a, nil
+	}
+
+	return a, nil
+}
+
+// mouseInLogView tests whether absolute screen coordinates fall within the
+// log view panel. Returns panel-relative coordinates and true if inside.
+// LogView occupies X=[RunListWidth, RunListWidth+LogViewWidth), Y=[0, LogViewHeight).
+func (a App) mouseInLogView(x, y int) (relX, relY int, ok bool) {
+	l := a.layout
+	if x >= l.RunListWidth && x < l.RunListWidth+l.LogViewWidth &&
+		y >= 0 && y < l.LogViewHeight {
+		return x - l.RunListWidth, y, true
+	}
+	return 0, 0, false
+}
+
 func (a App) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch a.focusedPanel {
 	case panelRunList:
@@ -465,6 +544,10 @@ func (a App) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case panelLogView:
 		var cmd tea.Cmd
 		a.logView, cmd = a.logView.Update(msg)
+		return a, cmd
+	case panelDetail:
+		var cmd tea.Cmd
+		a.detail, cmd = a.detail.Update(msg)
 		return a, cmd
 	}
 	return a, nil
@@ -480,9 +563,9 @@ func (a *App) syncSelection() tea.Cmd {
 		}
 		a.logView.SetRun(selected.ID, selected.CurrentSkill, selected.Branch, buf, !selected.IsTerminal())
 
-		if selected.Branch != "" {
+		if selected.Worktree != "" {
 			a.logView.SetDiffLoading()
-			return a.fetchDiff(selected.ID, selected.Branch)
+			return a.fetchDiff(selected.ID, selected.Worktree)
 		}
 		if selected.State == run.StateQueued || selected.State == run.StateRouting {
 			a.logView.SetDiffWaiting()
@@ -493,14 +576,14 @@ func (a *App) syncSelection() tea.Cmd {
 	return nil
 }
 
-func (a *App) fetchDiff(runID, branch string) tea.Cmd {
+func (a *App) fetchDiff(runID, worktreeDir string) tea.Cmd {
 	dg := a.diffGen
 	return func() tea.Msg {
-		diff, err := dg.Diff(branch)
+		diff, err := dg.Diff(worktreeDir)
 		if err != nil {
 			return DiffResultMsg{RunID: runID, Err: err}
 		}
-		stat, _ := dg.DiffStat(branch)
+		stat, _ := dg.DiffStat(worktreeDir)
 		return DiffResultMsg{RunID: runID, Diff: diff, DiffStat: stat}
 	}
 }
@@ -675,6 +758,34 @@ func (a App) handleCancel() (tea.Model, tea.Cmd) {
 		})
 	}
 	return a, nil
+}
+
+func (a App) handleDelete() (tea.Model, tea.Cmd) {
+	selected := a.runList.SelectedRun()
+	if selected == nil {
+		return a, nil
+	}
+	if !selected.IsTerminal() {
+		return a, nil
+	}
+
+	runID := selected.ID
+
+	_ = a.devServers.Stop(runID)
+	a.store.Remove(runID)
+	if a.manager != nil {
+		a.manager.RemoveBuffer(runID)
+	}
+
+	go func() {
+		_ = a.worktrees.Remove(runID)
+		if a.persistence != nil {
+			_ = a.persistence.Remove(runID)
+		}
+	}()
+
+	a.statusBar.SetFlash(fmt.Sprintf("Deleted run %s", runID))
+	return a, flashClearCmd()
 }
 
 func (a *App) autoStartDevServers() {

@@ -21,3 +21,6 @@ type DiffResultMsg = panels.DiffResultMsg
 
 // SubmitNewRunMsg is sent when the user confirms the new run modal.
 type SubmitNewRunMsg = panels.SubmitNewRunMsg
+
+// YankMsg is sent when text has been yanked (copied) from a panel.
+type YankMsg = panels.YankMsg

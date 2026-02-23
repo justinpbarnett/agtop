@@ -114,8 +114,10 @@ limits:
 | `p`            | Pause run                  |
 | `r`            | Resume / retry run         |
 | `c`            | Cancel run                 |
+| `d`            | Delete run                 |
 | `a`            | Accept run outcome         |
 | `x`            | Reject run outcome         |
+| `D`            | Toggle dev server          |
 | `?`            | Toggle help                |
 | `q` / `Ctrl+C` | Quit                       |
 

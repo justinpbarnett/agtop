@@ -30,6 +30,8 @@ var (
 	DiffHunk    = lipgloss.AdaptiveColor{Light: "#8250df", Dark: "#bb9af7"}
 
 	SelectedOption = lipgloss.AdaptiveColor{Light: "#1a7f37", Dark: "#9ece6a"}
+
+	SelectionBg = lipgloss.AdaptiveColor{Light: "#c8d8f0", Dark: "#283457"}
 )
 
 // CostColor returns the appropriate color for a cost value per §2.3 thresholds.

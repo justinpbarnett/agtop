@@ -28,3 +28,8 @@ type SubmitNewRunMsg struct {
 	Workflow string
 	Model    string
 }
+
+// YankMsg is sent when text has been yanked (copied) from a panel.
+type YankMsg struct {
+	Text string
+}

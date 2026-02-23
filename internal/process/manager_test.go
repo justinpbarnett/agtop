@@ -523,3 +523,26 @@ func TestManagerBufferNonExistent(t *testing.T) {
 		t.Error("expected nil buffer for non-existent run")
 	}
 }
+
+func TestManagerRemoveBuffer(t *testing.T) {
+	rt := &mockRuntime{}
+	mgr, _ := testManager(rt)
+
+	mgr.InjectBuffer("001", []string{"line1", "line2"})
+	if mgr.Buffer("001") == nil {
+		t.Fatal("expected non-nil buffer after inject")
+	}
+
+	mgr.RemoveBuffer("001")
+	if mgr.Buffer("001") != nil {
+		t.Error("expected nil buffer after RemoveBuffer")
+	}
+}
+
+func TestManagerRemoveBufferNonExistent(t *testing.T) {
+	rt := &mockRuntime{}
+	mgr, _ := testManager(rt)
+
+	// Should not panic
+	mgr.RemoveBuffer("nonexistent")
+}

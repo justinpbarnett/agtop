@@ -17,7 +17,7 @@ type HelpOverlay struct {
 func NewHelpOverlay() *HelpOverlay {
 	return &HelpOverlay{
 		width:  44,
-		height: 22,
+		height: 23,
 	}
 }
 
@@ -50,11 +50,14 @@ func (h HelpOverlay) View() string {
 	b.WriteString("\n")
 	b.WriteString(sectionStyle.Render("Actions") + "\n")
 	b.WriteString(kv("n", "New run") + "\n")
+	b.WriteString(kv("y", "Yank / copy") + "\n")
 	b.WriteString(kv("p", "Pause") + "\n")
 	b.WriteString(kv("r", "Resume / Retry") + "\n")
 	b.WriteString(kv("c", "Cancel") + "\n")
+	b.WriteString(kv("d", "Delete run") + "\n")
 	b.WriteString(kv("a", "Accept") + "\n")
 	b.WriteString(kv("x", "Reject") + "\n")
+	b.WriteString(kv("D", "Dev server toggle") + "\n")
 	b.WriteString("\n")
 	b.WriteString(sectionStyle.Render("Global") + "\n")
 	b.WriteString(kv("/", "Filter runs") + "\n")
