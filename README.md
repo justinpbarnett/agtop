@@ -8,13 +8,16 @@ Running AI coding agents in the background means losing visibility into what the
 
 ## Features
 
-- **Multi-panel TUI** — Run list, tabbed detail view (details/logs/diffs), and status bar in a responsive terminal layout
-- **Vim-style navigation** — `j`/`k` to move, `l`/`h` to switch tabs, `Tab` to cycle panels, `?` for help
+- **Multi-panel TUI** — Run list, tabbed detail view (details/logs/diffs), status bar, and help overlay in a responsive terminal layout
+- **Vim-style navigation** — `j`/`k` to move, `l`/`h` to switch tabs, `G`/`gg` to jump, `/` to filter, `?` for help
+- **Run controls** — Pause, resume, cancel, accept, and reject runs directly from the dashboard
 - **Skill-based workflows** — Configurable chains of skills (route, spec, decompose, build, test, review, document, commit, PR)
 - **Multiple runtimes** — Supports Claude Code (`claude -p`) and OpenCode (`opencode run`)
 - **Git worktree isolation** — Each agent run operates in its own worktree
-- **Cost and token tracking** — Per-run and global aggregation with auto-pause thresholds
-- **Safety guardrails** — Blocked command patterns, tool restrictions, and prompt-level safeguards
+- **Cost and token tracking** — Per-run and session-wide aggregation with auto-pause thresholds
+- **Safety guardrails** — Blocked command patterns, tool restrictions, and hook-based filtering
+- **Session persistence** — Run state saved to disk and recovered on restart
+- **Dev server management** — Auto-detection and port allocation for dev servers
 - **YAML configuration** — Project, runtime, workflow, and UI settings with sensible defaults
 
 ## Getting Started
@@ -47,6 +50,19 @@ Run `agtop` from within a project directory:
 agtop
 ```
 
+#### Subcommands
+
+| Command               | Description                                            |
+| --------------------- | ------------------------------------------------------ |
+| `agtop`               | Start the interactive dashboard                        |
+| `agtop init`          | Initialize project (hooks, config, safety guard)       |
+| `agtop cleanup`       | Remove stale sessions and orphaned worktrees           |
+| `agtop cleanup --dry-run` | Preview cleanup without deleting anything          |
+
+`agtop init` creates `.agtop/hooks/` with a safety guard script, wires it into `.claude/settings.json` as a PreToolUse hook, and copies `agtop.example.yaml` to `agtop.yaml` if one doesn't exist.
+
+### Configuration
+
 agtop looks for configuration in this order:
 
 1. `./agtop.yaml` (project root)
@@ -55,29 +71,24 @@ agtop looks for configuration in this order:
 
 See [`agtop.example.yaml`](agtop.example.yaml) for all available options.
 
-### Key Bindings
-
-| Key            | Action                     |
-| -------------- | -------------------------- |
-| `j` / `k`      | Navigate run list          |
-| `l` / `h`      | Next / previous detail tab |
-| `G` / `gg`     | Jump to bottom / top       |
-| `Tab`          | Cycle panel focus          |
-| `?`            | Toggle help                |
-| `q` / `Ctrl+C` | Quit                       |
-
-## Configuration
-
 ```yaml
 project:
   name: my-project
   test_command: "npm test"
+  dev_server:
+    command: "npm run dev"
+    port_strategy: hash   # hash | sequential | fixed
+    base_port: 3100
 
 runtime:
-  default: claude
+  default: claude         # claude | opencode
   claude:
     model: sonnet
+    permission_mode: acceptEdits
     max_turns: 50
+  opencode:
+    model: anthropic/claude-sonnet-4-5
+    agent: build
 
 workflows:
   build: { skills: [route, build, test] }
@@ -90,20 +101,42 @@ limits:
   max_concurrent_runs: 5
 ```
 
+### Key Bindings
+
+| Key            | Action                     |
+| -------------- | -------------------------- |
+| `j` / `k`      | Navigate run list          |
+| `l` / `h`      | Next / previous detail tab |
+| `G` / `gg`     | Jump to bottom / top       |
+| `Tab`          | Cycle panel focus          |
+| `/`            | Filter runs                |
+| `n`            | New run                    |
+| `p`            | Pause run                  |
+| `r`            | Resume / retry run         |
+| `c`            | Cancel run                 |
+| `a`            | Accept run outcome         |
+| `x`            | Reject run outcome         |
+| `?`            | Toggle help                |
+| `q` / `Ctrl+C` | Quit                       |
+
 ## Project Structure
 
 ```
-cmd/agtop/         Entry point
+cmd/agtop/         Entry point and subcommands (init, cleanup)
 internal/
   config/          YAML config loading and validation
-  tui/             Bubble Tea UI components
-  run/             Run state management
-  engine/          Skill parsing and workflow execution
+  ui/              Bubble Tea UI components
+    panels/        Run list, logs, details, diffs, status bar, help, modals
+    layout/        Terminal layout management
+    styles/        Theme and style definitions
+  engine/          Skill registry and workflow execution
+  run/             Run state management and persistence
   runtime/         Agent runtime abstraction (Claude, OpenCode)
   process/         Subprocess management and streaming
   git/             Worktree and diff operations
   cost/            Token and cost tracking
-  safety/          Command pattern filtering
+  safety/          Command pattern filtering and hooks
+  server/          Dev server management
 skills/            Built-in skill definitions (SKILL.md files)
 ```
 
@@ -112,6 +145,7 @@ skills/            Built-in skill definitions (SKILL.md files)
 ```bash
 make build    # compile to bin/agtop
 make run      # go run
+make install  # install to $GOPATH/bin
 make lint     # go vet
 make clean    # remove build artifacts
 ```
