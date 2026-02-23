@@ -1,6 +1,7 @@
 package process
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -42,6 +43,8 @@ func NewLogEntry(ts, skill string, eventType StreamEventType, detail string) *Lo
 		e.Summary = detail
 	case EventError:
 		e.Summary = "ERROR: " + truncateLine(firstLine(detail), 60)
+	case EventUser:
+		e.Summary = "User: " + truncateLine(firstLine(detail), 70)
 	default:
 		e.Summary = truncateLine(firstLine(detail), 80)
 	}
@@ -98,6 +101,34 @@ func ToolUseSummary(toolName, toolInput string) string {
 		if json.Unmarshal([]byte(toolInput), &input) == nil && input.Pattern != "" {
 			return "Tool: Grep — " + input.Pattern
 		}
+	case "WebSearch":
+		var input struct {
+			Query string `json:"query"`
+		}
+		if json.Unmarshal([]byte(toolInput), &input) == nil && input.Query != "" {
+			return "Tool: WebSearch — " + truncateLine(input.Query, 60)
+		}
+	case "WebFetch":
+		var input struct {
+			URL string `json:"url"`
+		}
+		if json.Unmarshal([]byte(toolInput), &input) == nil && input.URL != "" {
+			return "Tool: WebFetch — " + truncateLine(input.URL, 60)
+		}
+	case "Task":
+		var input struct {
+			Description string `json:"description"`
+		}
+		if json.Unmarshal([]byte(toolInput), &input) == nil && input.Description != "" {
+			return "Tool: Task — " + truncateLine(input.Description, 60)
+		}
+	case "TodoWrite", "TaskCreate":
+		var input struct {
+			Subject string `json:"subject"`
+		}
+		if json.Unmarshal([]byte(toolInput), &input) == nil && input.Subject != "" {
+			return "Tool: " + toolName + " — " + truncateLine(input.Subject, 50)
+		}
 	}
 	return "Tool: " + toolName
 }
@@ -114,6 +145,49 @@ func truncateLine(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "…"
+}
+
+// FormatJSON pretty-prints a JSON string with 2-space indentation.
+// Returns the input unchanged if it's not valid JSON.
+func FormatJSON(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || (s[0] != '{' && s[0] != '[') {
+		return s
+	}
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, []byte(s), "", "  "); err != nil {
+		return s
+	}
+	return buf.String()
+}
+
+// WordWrap wraps text to the given width at word boundaries.
+// Preserves existing newlines and only wraps lines that exceed width.
+func WordWrap(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	var result []string
+	for _, line := range lines {
+		if len(line) <= width {
+			result = append(result, line)
+			continue
+		}
+		remaining := line
+		for len(remaining) > width {
+			breakAt := strings.LastIndex(remaining[:width], " ")
+			if breakAt <= 0 {
+				breakAt = width
+			}
+			result = append(result, remaining[:breakAt])
+			remaining = strings.TrimLeft(remaining[breakAt:], " ")
+		}
+		if remaining != "" {
+			result = append(result, remaining)
+		}
+	}
+	return strings.Join(result, "\n")
 }
 
 // EntryBuffer is a thread-safe circular buffer of LogEntry pointers.

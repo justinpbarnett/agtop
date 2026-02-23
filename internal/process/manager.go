@@ -216,7 +216,9 @@ func (m *Manager) InjectBuffer(runID string, lines []string) {
 	eb := NewEntryBuffer(5000)
 	for _, line := range lines {
 		buf.Append(line)
-		eb.Append(lineToEntry(line))
+		if entry := lineToEntry(line); entry != nil {
+			eb.Append(entry)
+		}
 	}
 	m.mu.Lock()
 	m.buffers[runID] = buf
@@ -354,7 +356,7 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 				Skill:     skill,
 				Type:      EventToolUse,
 				Summary:   summary,
-				Detail:    event.ToolInput,
+				Detail:    FormatJSON(event.ToolInput),
 				Complete:  true,
 			}
 		case EventToolResult:
@@ -377,6 +379,13 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 				}
 				entry = NewLogEntry(ts, skill, EventResult, fmt.Sprintf("Completed — %d tokens, $%.4f", event.Usage.TotalTokens, event.Usage.CostUSD))
 			}
+		case EventUser:
+			if skill != "" {
+				logLine = fmt.Sprintf("[%s %s] User: %s", ts, skill, event.Text)
+			} else {
+				logLine = fmt.Sprintf("[%s] User: %s", ts, event.Text)
+			}
+			entry = NewLogEntry(ts, skill, EventUser, event.Text)
 		case EventError:
 			if m.limiter != nil && m.limiter.IsRateLimit(event.Text) {
 				if skill != "" {
@@ -384,14 +393,15 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 				} else {
 					logLine = fmt.Sprintf("[%s] RATE LIMITED: %s", ts, event.Text)
 				}
+				// entry stays nil — hidden from structured entry view
 			} else {
 				if skill != "" {
 					logLine = fmt.Sprintf("[%s %s] ERROR: %s", ts, skill, event.Text)
 				} else {
 					logLine = fmt.Sprintf("[%s] ERROR: %s", ts, event.Text)
 				}
+				entry = NewLogEntry(ts, skill, EventError, event.Text)
 			}
-			entry = NewLogEntry(ts, skill, EventError, event.Text)
 		case EventRaw:
 			if skill != "" {
 				logLine = fmt.Sprintf("[%s %s] %s", ts, skill, event.Text)
@@ -488,7 +498,7 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 				Skill:     skill,
 				Type:      EventToolUse,
 				Summary:   summary,
-				Detail:    event.ToolInput,
+				Detail:    FormatJSON(event.ToolInput),
 				Complete:  true,
 			}
 		case EventToolResult:
@@ -509,6 +519,13 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 				}
 				entry = NewLogEntry(ts, skill, EventResult, fmt.Sprintf("Completed — %d tokens, $%.4f", event.Usage.TotalTokens, event.Usage.CostUSD))
 			}
+		case EventUser:
+			if skill != "" {
+				logLine = fmt.Sprintf("[%s %s] User: %s", ts, skill, event.Text)
+			} else {
+				logLine = fmt.Sprintf("[%s] User: %s", ts, event.Text)
+			}
+			entry = NewLogEntry(ts, skill, EventUser, event.Text)
 		case EventError:
 			if m.limiter != nil && m.limiter.IsRateLimit(event.Text) {
 				if skill != "" {
@@ -516,14 +533,15 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 				} else {
 					logLine = fmt.Sprintf("[%s] RATE LIMITED: %s", ts, event.Text)
 				}
+				// entry stays nil — hidden from structured entry view
 			} else {
 				if skill != "" {
 					logLine = fmt.Sprintf("[%s %s] ERROR: %s", ts, skill, event.Text)
 				} else {
 					logLine = fmt.Sprintf("[%s] ERROR: %s", ts, event.Text)
 				}
+				entry = NewLogEntry(ts, skill, EventError, event.Text)
 			}
-			entry = NewLogEntry(ts, skill, EventError, event.Text)
 		case EventRaw:
 			if skill != "" {
 				logLine = fmt.Sprintf("[%s %s] %s", ts, skill, event.Text)
@@ -640,6 +658,12 @@ func lineToEntry(line string) *LogEntry {
 	case strings.HasPrefix(msg, "ERROR: "):
 		detail := strings.TrimPrefix(msg, "ERROR: ")
 		return NewLogEntry(ts, skill, EventError, detail)
+	case strings.HasPrefix(msg, "RATE LIMITED: "):
+		// Rate limit entries are hidden from structured view during rehydration
+		return nil
+	case strings.HasPrefix(msg, "User: "):
+		detail := strings.TrimPrefix(msg, "User: ")
+		return NewLogEntry(ts, skill, EventUser, detail)
 	case strings.HasPrefix(msg, "Completed"):
 		return NewLogEntry(ts, skill, EventResult, msg)
 	default:

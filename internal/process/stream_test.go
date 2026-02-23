@@ -224,6 +224,52 @@ func TestParseMultipleMessages(t *testing.T) {
 	}
 }
 
+func TestParseUserEventContentBlocks(t *testing.T) {
+	input := `{"type":"user","message":{"content":[{"type":"text","text":"implement the feature"}]}}` + "\n"
+	parser := NewStreamParser(strings.NewReader(input), 10)
+
+	events := collectEvents(t, parser, context.Background())
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != EventUser {
+		t.Errorf("expected EventUser, got %s", events[0].Type)
+	}
+	if events[0].Text != "implement the feature" {
+		t.Errorf("expected 'implement the feature', got %q", events[0].Text)
+	}
+}
+
+func TestParseUserEventStringContent(t *testing.T) {
+	input := `{"type":"user","message":{"content":"fix the bug"}}` + "\n"
+	parser := NewStreamParser(strings.NewReader(input), 10)
+
+	events := collectEvents(t, parser, context.Background())
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != EventUser {
+		t.Errorf("expected EventUser, got %s", events[0].Type)
+	}
+	if events[0].Text != "fix the bug" {
+		t.Errorf("expected 'fix the bug', got %q", events[0].Text)
+	}
+}
+
+func TestParseUserEventEmptyContent(t *testing.T) {
+	// User message with no extractable content should not emit an event
+	input := `{"type":"user","message":{}}` + "\n"
+	parser := NewStreamParser(strings.NewReader(input), 10)
+
+	events := collectEvents(t, parser, context.Background())
+
+	if len(events) != 0 {
+		t.Fatalf("expected 0 events for empty user message, got %d", len(events))
+	}
+}
+
 func TestParseUnknownType(t *testing.T) {
 	input := `{"type":"unknown_event","data":"something"}` + "\n"
 	parser := NewStreamParser(strings.NewReader(input), 10)

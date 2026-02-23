@@ -320,6 +320,23 @@ func TestLineToEntryNoSkill(t *testing.T) {
 	}
 }
 
+func TestLineToEntryRateLimit(t *testing.T) {
+	e := lineToEntry("[14:32:01 build] RATE LIMITED: 429 Too Many Requests")
+	if e != nil {
+		t.Errorf("expected nil for rate limit entry, got %+v", e)
+	}
+}
+
+func TestLineToEntryUser(t *testing.T) {
+	e := lineToEntry("[14:32:01 build] User: implement the feature")
+	if e.Type != EventUser {
+		t.Errorf("expected EventUser, got %v", e.Type)
+	}
+	if e.Summary != "User: implement the feature" {
+		t.Errorf("unexpected summary: %q", e.Summary)
+	}
+}
+
 func TestLineToEntryUnparseable(t *testing.T) {
 	e := lineToEntry("raw output with no timestamp")
 	if e.Type != EventRaw {
@@ -327,6 +344,113 @@ func TestLineToEntryUnparseable(t *testing.T) {
 	}
 	if e.Summary != "raw output with no timestamp" {
 		t.Errorf("unexpected summary: %q", e.Summary)
+	}
+}
+
+func TestNewLogEntryUser(t *testing.T) {
+	e := NewLogEntry("14:32:01", "build", EventUser, "implement the feature")
+	if e.Summary != "User: implement the feature" {
+		t.Errorf("unexpected summary: %q", e.Summary)
+	}
+	if e.Type != EventUser {
+		t.Errorf("expected EventUser, got %v", e.Type)
+	}
+}
+
+func TestToolUseSummaryWebSearch(t *testing.T) {
+	s := ToolUseSummary("WebSearch", `{"query":"golang word wrap"}`)
+	if s != "Tool: WebSearch — golang word wrap" {
+		t.Errorf("unexpected: %q", s)
+	}
+}
+
+func TestToolUseSummaryWebFetch(t *testing.T) {
+	s := ToolUseSummary("WebFetch", `{"url":"https://example.com/docs"}`)
+	if s != "Tool: WebFetch — https://example.com/docs" {
+		t.Errorf("unexpected: %q", s)
+	}
+}
+
+func TestToolUseSummaryTask(t *testing.T) {
+	s := ToolUseSummary("Task", `{"description":"explore codebase"}`)
+	if s != "Tool: Task — explore codebase" {
+		t.Errorf("unexpected: %q", s)
+	}
+}
+
+func TestFormatJSONValid(t *testing.T) {
+	input := `{"file_path":"src/main.go","old_string":"foo"}`
+	got := FormatJSON(input)
+	if !strings.Contains(got, "\n") {
+		t.Errorf("expected multi-line output, got %q", got)
+	}
+	if !strings.Contains(got, "  ") {
+		t.Errorf("expected indentation, got %q", got)
+	}
+	if !strings.Contains(got, "file_path") {
+		t.Error("expected key to be preserved")
+	}
+}
+
+func TestFormatJSONInvalid(t *testing.T) {
+	input := "not json at all"
+	got := FormatJSON(input)
+	if got != input {
+		t.Errorf("expected input unchanged, got %q", got)
+	}
+}
+
+func TestFormatJSONEmpty(t *testing.T) {
+	got := FormatJSON("")
+	if got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestWordWrapShortLine(t *testing.T) {
+	input := "hello world"
+	got := WordWrap(input, 80)
+	if got != input {
+		t.Errorf("short line should be unchanged, got %q", got)
+	}
+}
+
+func TestWordWrapLongLine(t *testing.T) {
+	input := "the quick brown fox jumps over the lazy dog and then some more words"
+	got := WordWrap(input, 30)
+	lines := strings.Split(got, "\n")
+	for i, line := range lines {
+		if len(line) > 30 {
+			t.Errorf("line %d exceeds width: %q (%d chars)", i, line, len(line))
+		}
+	}
+	if len(lines) < 2 {
+		t.Error("expected multiple lines after wrapping")
+	}
+}
+
+func TestWordWrapPreservesNewlines(t *testing.T) {
+	input := "line one\nline two\nline three"
+	got := WordWrap(input, 80)
+	if got != input {
+		t.Errorf("existing newlines should be preserved, got %q", got)
+	}
+}
+
+func TestWordWrapNoSpaces(t *testing.T) {
+	input := strings.Repeat("x", 50)
+	got := WordWrap(input, 20)
+	lines := strings.Split(got, "\n")
+	if len(lines) < 2 {
+		t.Error("expected word-less line to be broken at width")
+	}
+}
+
+func TestWordWrapZeroWidth(t *testing.T) {
+	input := "hello"
+	got := WordWrap(input, 0)
+	if got != input {
+		t.Errorf("zero width should return input unchanged, got %q", got)
 	}
 }
 

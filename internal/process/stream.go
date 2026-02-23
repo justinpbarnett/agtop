@@ -16,6 +16,7 @@ const (
 	EventToolResult StreamEventType = "tool_result"
 	EventResult     StreamEventType = "result"
 	EventError      StreamEventType = "error"
+	EventUser       StreamEventType = "user"
 	EventRaw        StreamEventType = "raw"
 )
 
@@ -105,6 +106,13 @@ func (p *StreamParser) Parse(ctx context.Context) {
 
 		var msg streamMessage
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			// The full unmarshal may fail for messages with non-standard
+			// content format (e.g. "content": "string" instead of array).
+			// Try to extract the type and handle known cases.
+			if text := tryExtractUserContent(line); text != "" {
+				p.send(ctx, StreamEvent{Type: EventUser, Text: text})
+				continue
+			}
 			p.send(ctx, StreamEvent{Type: EventRaw, Text: line})
 			continue
 		}
@@ -126,6 +134,11 @@ func (p *StreamParser) Parse(ctx context.Context) {
 						p.send(ctx, StreamEvent{Type: EventToolResult, Text: block.Text})
 					}
 				}
+			}
+		case "user":
+			text := extractMessageContent(line, msg)
+			if text != "" {
+				p.send(ctx, StreamEvent{Type: EventUser, Text: text})
 			}
 		case "result":
 			event := StreamEvent{Type: EventResult, Text: msg.Result}
@@ -164,4 +177,46 @@ func (p *StreamParser) Events() <-chan StreamEvent {
 
 func (p *StreamParser) Done() <-chan error {
 	return p.done
+}
+
+// extractMessageContent extracts text from a message that uses either
+// content blocks ([]contentBlock) or a plain string content field.
+func extractMessageContent(rawLine string, msg streamMessage) string {
+	if msg.Message != nil {
+		for _, block := range msg.Message.Content {
+			if block.Text != "" {
+				return block.Text
+			}
+		}
+	}
+	// Content might be a plain string (not an array of blocks).
+	// Re-parse to extract it.
+	var raw struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	}
+	if json.Unmarshal([]byte(rawLine), &raw) == nil && raw.Message.Content != "" {
+		return raw.Message.Content
+	}
+	return ""
+}
+
+// tryExtractUserContent handles the case where the initial unmarshal fails
+// because content is a plain string rather than an array of content blocks.
+// Returns the extracted text, or empty string if the line is not a user message.
+func tryExtractUserContent(line string) string {
+	var header struct {
+		Type    string `json:"type"`
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	}
+	if json.Unmarshal([]byte(line), &header) != nil {
+		return ""
+	}
+	if header.Type == "user" && header.Message.Content != "" {
+		return header.Message.Content
+	}
+	return ""
 }
