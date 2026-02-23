@@ -17,24 +17,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Route subcommands
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "init":
-			if err := runInit(cfg); err != nil {
-				fmt.Fprintf(os.Stderr, "error: %v\n", err)
-				os.Exit(1)
-			}
-			return
-		case "cleanup":
-			dryRun := len(os.Args) > 2 && os.Args[2] == "--dry-run"
-			if err := runCleanup(cfg, dryRun); err != nil {
-				fmt.Fprintf(os.Stderr, "error: %v\n", err)
-				os.Exit(1)
-			}
-			return
-		}
-	}
 
 	// Initialize safety engine (log warnings for invalid patterns)
 	_, safetyErr := safety.NewHookEngine(cfg.Safety)
