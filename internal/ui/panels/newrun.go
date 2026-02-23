@@ -1,14 +1,54 @@
 package panels
 
 import (
+	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
+	cliputil "github.com/justinpbarnett/agtop/internal/ui/clipboard"
 	"github.com/justinpbarnett/agtop/internal/ui/border"
 	"github.com/justinpbarnett/agtop/internal/ui/styles"
 )
+
+// pastedImageMsg is sent when an image is read from clipboard and saved to a temp file.
+type pastedImageMsg struct{ path string }
+
+// pastedTextMsg is sent when text is read from the clipboard.
+type pastedTextMsg struct{ text string }
+
+// pasteCmd reads the clipboard: images take priority over text.
+func pasteCmd() tea.Cmd {
+	return func() tea.Msg {
+		data, _, err := cliputil.ReadImage()
+		if err == nil && len(data) > 0 {
+			if path, err := saveTempImage(data); err == nil {
+				return pastedImageMsg{path: path}
+			}
+		}
+		text, err := cliputil.ReadText()
+		if err == nil && text != "" {
+			return pastedTextMsg{text: text}
+		}
+		return nil
+	}
+}
+
+// saveTempImage writes PNG data to a temp file and returns its path.
+func saveTempImage(data []byte) (string, error) {
+	f, err := os.CreateTemp("", "agtop-image-*.png")
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	if _, err := f.Write(data); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
+}
 
 type workflowOption struct {
 	name     string
@@ -44,6 +84,7 @@ type NewRunModal struct {
 	screenW        int
 	screenH        int
 	textareaHeight int
+	attachedImages []string // paths to temp image files
 
 	// Mouse selection state
 	mouseSelecting   bool
@@ -95,12 +136,26 @@ func (m *NewRunModal) Init() tea.Cmd {
 	return m.promptInput.Focus()
 }
 
+func (m *NewRunModal) cleanupImages() {
+	for _, path := range m.attachedImages {
+		os.Remove(path)
+	}
+	m.attachedImages = nil
+}
+
 func (m *NewRunModal) Update(msg tea.Msg) (*NewRunModal, tea.Cmd) {
 	switch msg := msg.(type) {
+	case pastedImageMsg:
+		m.attachedImages = append(m.attachedImages, msg.path)
+		return m, nil
+	case pastedTextMsg:
+		m.promptInput.InsertString(msg.text)
+		return m, nil
 	case tea.KeyMsg:
 		m.mouseSelecting = false
 		switch msg.String() {
 		case "esc", "ctrl+c":
+			m.cleanupImages()
 			return nil, func() tea.Msg { return CloseModalMsg{} }
 		case "ctrl+s":
 			prompt := strings.TrimSpace(m.promptInput.Value())
@@ -108,9 +163,14 @@ func (m *NewRunModal) Update(msg tea.Msg) (*NewRunModal, tea.Cmd) {
 				return m, nil
 			}
 			p, w, mo := prompt, m.workflow, m.model
+			imgs := make([]string, len(m.attachedImages))
+			copy(imgs, m.attachedImages)
+			m.attachedImages = nil // images are handed off; don't clean up
 			return nil, func() tea.Msg {
-				return SubmitNewRunMsg{Prompt: p, Workflow: w, Model: mo}
+				return SubmitNewRunMsg{Prompt: p, Workflow: w, Model: mo, Images: imgs}
 			}
+		case "ctrl+v":
+			return m, pasteCmd()
 		case "alt+w":
 			for i, w := range workflows {
 				if w.workflow == m.workflow {
@@ -235,7 +295,18 @@ func (m *NewRunModal) View() string {
 		taView = m.applySelectionHighlight(taView, sl, sc, el, ec)
 	}
 	b.WriteString(taView)
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+
+	// Image indicator line (occupies the blank line between textarea and workflow)
+	if n := len(m.attachedImages); n > 0 {
+		noun := "image"
+		if n > 1 {
+			noun = "images"
+		}
+		b.WriteString(styles.TextSecondaryStyle.Render("Images    "))
+		b.WriteString(styles.SelectedOptionStyle.Render(fmt.Sprintf("%d %s attached", n, noun)))
+	}
+	b.WriteString("\n")
 
 	// Workflow row
 	b.WriteString(styles.TextSecondaryStyle.Render("Workflow "))
@@ -271,8 +342,8 @@ func (m *NewRunModal) View() string {
 	bottomKb := []border.Keybind{
 		{Key: "^S", Label: " submit"},
 		{Key: "Esc", Label: " cancel"},
-		{Key: "M-w", Label: " workflow"},
-		{Key: "M-m", Label: " model"},
+		{Key: "^V", Label: " paste/img"},
+		{Key: "M-·", Label: " workflow/model"},
 	}
 	return border.RenderPanel("New Run", b.String(), bottomKb, m.width, m.height, true)
 }

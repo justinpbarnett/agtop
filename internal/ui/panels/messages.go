@@ -27,6 +27,7 @@ type SubmitNewRunMsg struct {
 	Prompt   string
 	Workflow string
 	Model    string
+	Images   []string // paths to temp image files pasted into the modal
 }
 
 // YankMsg is sent when text has been yanked (copied) from a panel.

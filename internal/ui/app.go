@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -335,6 +336,17 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					prompt = expanded
 					taskID = tid
 				}
+			}
+			if len(msg.Images) > 0 {
+				var sb strings.Builder
+				sb.WriteString(prompt)
+				sb.WriteString("\n\nAttached images:\n")
+				for _, img := range msg.Images {
+					sb.WriteString("- ")
+					sb.WriteString(img)
+					sb.WriteString("\n")
+				}
+				prompt = sb.String()
 			}
 			return StartRunMsg{
 				Prompt:   prompt,

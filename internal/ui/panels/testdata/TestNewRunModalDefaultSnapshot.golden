@@ -29,4 +29,4 @@
 │                                                                                              │
 │Workflow [M-w]  auto  build  plan  sdlc  quick                                                │
 │Model    [M-m]  default  haiku  opus  sonnet                                                  │
-╰─ [^S] submit  [Esc] cancel  [M-w] workflow  [M-m] model ─────────────────────────────────────╯
+╰─ [^S] submit  [Esc] cancel  [^V] paste/img  [M-·] workflow/model ───────────────────────────╯
