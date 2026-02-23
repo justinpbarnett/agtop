@@ -547,6 +547,80 @@ func TestManagerRemoveBufferNonExistent(t *testing.T) {
 	mgr.RemoveBuffer("nonexistent")
 }
 
+func TestExtractSystemInitModel(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "system init with model",
+			input: `{"type":"system","subtype":"init","model":"claude-sonnet-4-6","permissionMode":"acceptEdits","tools":["Bash"],"claude_code_version":"2.1.50"}`,
+			want:  "claude-sonnet-4-6",
+		},
+		{
+			name:  "system init without model",
+			input: `{"type":"system","subtype":"init","permissionMode":"acceptEdits"}`,
+			want:  "",
+		},
+		{
+			name:  "non-system event",
+			input: `{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}`,
+			want:  "",
+		},
+		{
+			name:  "plain text",
+			input: "not json",
+			want:  "",
+		},
+		{
+			name:  "system non-init subtype",
+			input: `{"type":"system","subtype":"other","model":"claude-sonnet-4-6"}`,
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractSystemInitModel(tt.input)
+			if got != tt.want {
+				t.Errorf("extractSystemInitModel(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestManagerSystemInitUpdatesModel(t *testing.T) {
+	eventsCh := make(chan StreamEvent, 10)
+	doneCh := make(chan error, 1)
+	rt := makeMockRuntime(eventsCh, doneCh)
+	mgr, store := testManager(rt)
+
+	store.Add(&run.Run{State: run.StateQueued})
+	if err := mgr.Start("001", "test", runtime.RunOptions{}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	// Send system/init raw event containing the model name
+	eventsCh <- StreamEvent{
+		Type: EventRaw,
+		Text: `{"type":"system","subtype":"init","model":"claude-opus-4-6","permissionMode":"acceptEdits","tools":["Bash"],"claude_code_version":"2.1.50"}`,
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	r, ok := store.Get("001")
+	if !ok {
+		t.Fatal("run not found")
+	}
+	if r.Model != "claude-opus-4-6" {
+		t.Errorf("expected model %q, got %q", "claude-opus-4-6", r.Model)
+	}
+
+	close(eventsCh)
+	doneCh <- nil
+	time.Sleep(50 * time.Millisecond)
+}
+
 func TestManagerDisconnectPreservesRunState(t *testing.T) {
 	doneCh := make(chan error, 1)
 	rt := &mockRuntime{

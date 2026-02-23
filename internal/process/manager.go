@@ -823,6 +823,11 @@ func (m *Manager) formatEvent(event StreamEvent, ts string, skill string, safety
 			logLine = fmt.Sprintf("[%s] %s", ts, event.Text)
 		}
 		entry = InterpretRawEvent(ts, skill, event.Text)
+		if model := extractSystemInitModel(event.Text); model != "" {
+			m.store.Update(runID, func(r *run.Run) {
+				r.Model = model
+			})
+		}
 	}
 
 	return logLine, entry
@@ -933,6 +938,27 @@ func (m *Manager) sendCostThreshold(runID string, reason string) {
 // checkToolSafety checks a Bash tool invocation against safety patterns
 // and returns a warning log line if blocked. The actual blocking is handled
 // by the Claude Code PreToolUse hook — this is informational only.
+// extractSystemInitModel returns the model name from a system/init JSON event,
+// or empty string if the text is not a system/init event.
+func extractSystemInitModel(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" || text[0] != '{' {
+		return ""
+	}
+	var msg struct {
+		Type    string `json:"type"`
+		Subtype string `json:"subtype"`
+		Model   string `json:"model"`
+	}
+	if json.Unmarshal([]byte(text), &msg) != nil {
+		return ""
+	}
+	if msg.Type == "system" && msg.Subtype == "init" {
+		return msg.Model
+	}
+	return ""
+}
+
 func (m *Manager) checkToolSafety(toolName string, toolInput string, ts string, skill string, buf *RingBuffer, runID string) {
 	if m.safety == nil || toolName != "Bash" || toolInput == "" {
 		return
