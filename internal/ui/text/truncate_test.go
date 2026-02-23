@@ -114,3 +114,66 @@ func TestPadRightANSI(t *testing.T) {
 		t.Errorf("PadRight ANSI: visual width=%d, want 5", w)
 	}
 }
+
+func TestWrapTextEmpty(t *testing.T) {
+	got := WrapText("", 20)
+	if len(got) != 1 || got[0] != "" {
+		t.Errorf("WrapText empty: got %v", got)
+	}
+}
+
+func TestWrapTextFitsOnOneLine(t *testing.T) {
+	got := WrapText("hello world", 20)
+	if len(got) != 1 || got[0] != "hello world" {
+		t.Errorf("WrapText fits: got %v", got)
+	}
+}
+
+func TestWrapTextExactWidth(t *testing.T) {
+	got := WrapText("hello", 5)
+	if len(got) != 1 || got[0] != "hello" {
+		t.Errorf("WrapText exact: got %v", got)
+	}
+}
+
+func TestWrapTextBasicWrap(t *testing.T) {
+	got := WrapText("hello world", 7)
+	// "hello" (5) fits, "world" (5) needs new line
+	if len(got) != 2 || got[0] != "hello" || got[1] != "world" {
+		t.Errorf("WrapText basic wrap: got %v", got)
+	}
+}
+
+func TestWrapTextMultipleLines(t *testing.T) {
+	got := WrapText("one two three four five", 9)
+	// "one two" (7), "three" (5), "four five" (9)
+	if len(got) != 3 {
+		t.Errorf("WrapText multiple lines: got %d lines: %v", len(got), got)
+	}
+}
+
+func TestWrapTextRespectsExistingNewlines(t *testing.T) {
+	got := WrapText("line one\nline two", 20)
+	if len(got) != 2 || got[0] != "line one" || got[1] != "line two" {
+		t.Errorf("WrapText newlines: got %v", got)
+	}
+}
+
+func TestWrapTextZeroWidth(t *testing.T) {
+	got := WrapText("hello", 0)
+	if len(got) != 1 || got[0] != "hello" {
+		t.Errorf("WrapText zero width: got %v", got)
+	}
+}
+
+func TestWrapTextLongWordTruncated(t *testing.T) {
+	// A single word longer than width is truncated with …
+	got := WrapText("averylongwordthatexceedswidth", 10)
+	if len(got) != 1 {
+		t.Errorf("WrapText long word: expected 1 line, got %d: %v", len(got), got)
+	}
+	w := ansi.StringWidth(got[0])
+	if w > 10 {
+		t.Errorf("WrapText long word: visual width=%d, want <=10", w)
+	}
+}
