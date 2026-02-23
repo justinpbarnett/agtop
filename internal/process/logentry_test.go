@@ -253,3 +253,101 @@ func TestEntryBufferEntriesEmpty(t *testing.T) {
 		t.Error("expected nil for empty buffer")
 	}
 }
+
+func TestLineToEntryToolUse(t *testing.T) {
+	e := lineToEntry("[14:32:01 build] Tool: Read")
+	if e.Type != EventToolUse {
+		t.Errorf("expected EventToolUse, got %v", e.Type)
+	}
+	if e.Summary != "Tool: Read" {
+		t.Errorf("expected summary 'Tool: Read', got %q", e.Summary)
+	}
+	if e.Timestamp != "14:32:01" {
+		t.Errorf("expected ts '14:32:01', got %q", e.Timestamp)
+	}
+	if e.Skill != "build" {
+		t.Errorf("expected skill 'build', got %q", e.Skill)
+	}
+}
+
+func TestLineToEntryToolResult(t *testing.T) {
+	e := lineToEntry("[14:32:02 build] Result: File contents here")
+	if e.Type != EventToolResult {
+		t.Errorf("expected EventToolResult, got %v", e.Type)
+	}
+	if e.Summary != "Result: File contents here" {
+		t.Errorf("unexpected summary: %q", e.Summary)
+	}
+}
+
+func TestLineToEntryError(t *testing.T) {
+	e := lineToEntry("[14:32:03 build] ERROR: connection refused")
+	if e.Type != EventError {
+		t.Errorf("expected EventError, got %v", e.Type)
+	}
+	if e.Summary != "ERROR: connection refused" {
+		t.Errorf("unexpected summary: %q", e.Summary)
+	}
+}
+
+func TestLineToEntryCompleted(t *testing.T) {
+	e := lineToEntry("[14:32:04 build] Completed — 1500 tokens, $0.0300")
+	if e.Type != EventResult {
+		t.Errorf("expected EventResult, got %v", e.Type)
+	}
+	if e.Summary != "Completed — 1500 tokens, $0.0300" {
+		t.Errorf("unexpected summary: %q", e.Summary)
+	}
+}
+
+func TestLineToEntryText(t *testing.T) {
+	e := lineToEntry("[14:32:05 build] Building the project")
+	if e.Type != EventText {
+		t.Errorf("expected EventText, got %v", e.Type)
+	}
+	if e.Summary != "Building the project" {
+		t.Errorf("unexpected summary: %q", e.Summary)
+	}
+}
+
+func TestLineToEntryNoSkill(t *testing.T) {
+	e := lineToEntry("[14:32:06] Tool: Bash")
+	if e.Type != EventToolUse {
+		t.Errorf("expected EventToolUse, got %v", e.Type)
+	}
+	if e.Skill != "" {
+		t.Errorf("expected empty skill, got %q", e.Skill)
+	}
+}
+
+func TestLineToEntryUnparseable(t *testing.T) {
+	e := lineToEntry("raw output with no timestamp")
+	if e.Type != EventRaw {
+		t.Errorf("expected EventRaw, got %v", e.Type)
+	}
+	if e.Summary != "raw output with no timestamp" {
+		t.Errorf("unexpected summary: %q", e.Summary)
+	}
+}
+
+func TestEntryBufferTotalEvicted(t *testing.T) {
+	eb := NewEntryBuffer(3)
+	if eb.TotalEvicted() != 0 {
+		t.Error("expected 0 evictions initially")
+	}
+	eb.Append(&LogEntry{Summary: "0"})
+	eb.Append(&LogEntry{Summary: "1"})
+	eb.Append(&LogEntry{Summary: "2"})
+	if eb.TotalEvicted() != 0 {
+		t.Error("expected 0 evictions when buffer not yet full")
+	}
+	eb.Append(&LogEntry{Summary: "3"})
+	if eb.TotalEvicted() != 1 {
+		t.Errorf("expected 1 eviction, got %d", eb.TotalEvicted())
+	}
+	eb.Append(&LogEntry{Summary: "4"})
+	eb.Append(&LogEntry{Summary: "5"})
+	if eb.TotalEvicted() != 3 {
+		t.Errorf("expected 3 evictions, got %d", eb.TotalEvicted())
+	}
+}

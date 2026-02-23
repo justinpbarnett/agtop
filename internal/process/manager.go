@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -611,16 +612,39 @@ func (m *Manager) recordUsage(runID string, skill string, usage *UsageData, ts s
 }
 
 // lineToEntry converts a formatted log line back into a LogEntry.
-// Used when rehydrating persisted sessions.
+// Used when rehydrating persisted sessions. Detects event type from
+// known prefixes (Tool:, Result:, ERROR:, Completed) so rehydrated
+// entries preserve their original type and summary style.
 func lineToEntry(line string) *LogEntry {
 	parts := rehydrateLineRe.FindStringSubmatch(line)
-	if parts != nil {
-		ts := parts[1]
-		skill := parts[2]
-		msg := parts[3]
-		return NewLogEntry(ts, skill, EventRaw, msg)
+	if parts == nil {
+		return NewLogEntry("", "", EventRaw, line)
 	}
-	return NewLogEntry("", "", EventRaw, line)
+	ts := parts[1]
+	skill := parts[2]
+	msg := parts[3]
+
+	switch {
+	case strings.HasPrefix(msg, "Tool: "):
+		return &LogEntry{
+			Timestamp: ts,
+			Skill:     skill,
+			Type:      EventToolUse,
+			Summary:   msg,
+			Detail:    "",
+			Complete:  true,
+		}
+	case strings.HasPrefix(msg, "Result: "):
+		detail := strings.TrimPrefix(msg, "Result: ")
+		return NewLogEntry(ts, skill, EventToolResult, detail)
+	case strings.HasPrefix(msg, "ERROR: "):
+		detail := strings.TrimPrefix(msg, "ERROR: ")
+		return NewLogEntry(ts, skill, EventError, detail)
+	case strings.HasPrefix(msg, "Completed"):
+		return NewLogEntry(ts, skill, EventResult, msg)
+	default:
+		return NewLogEntry(ts, skill, EventText, msg)
+	}
 }
 
 func (m *Manager) sendLogLine(runID string) {
