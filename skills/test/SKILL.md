@@ -25,11 +25,11 @@ This skill requires no additional input.
 
 ### Step 1: Discover Available Test Commands
 
-Detect which test commands are available by checking these sources in priority order:
+Read all config files in **parallel** (single batch of tool calls): check for `justfile`, `package.json`, `Makefile`, and `pyproject.toml` / `setup.cfg` simultaneously. From the results, identify available commands:
 
-1. **justfile** — If a `justfile` exists, look for recipes like `check`, `lint`, `typecheck`, `test`, `test-e2e`
-2. **package.json** — If it exists, look for scripts like `lint`, `typecheck`, `test`, `test:e2e`, `test:unit`, `check`
-3. **Makefile** — If it exists, look for targets like `check`, `lint`, `test`
+1. **justfile** — look for recipes like `check`, `lint`, `typecheck`, `test`, `test-e2e`
+2. **package.json** — look for scripts like `lint`, `typecheck`, `test`, `test:e2e`, `test:unit`, `check`
+3. **Makefile** — look for targets like `check`, `lint`, `test`
 4. **pyproject.toml / setup.cfg** — For Python projects, look for test configuration (pytest, ruff, mypy)
 
 Map discovered commands to these test categories:
@@ -43,14 +43,23 @@ Map discovered commands to these test categories:
 
 If a category has no discoverable command, skip it. If no test commands are found at all, report this and stop.
 
-### Step 2: Execute Tests in Sequence
+### Step 2: Execute Tests
 
-Execute each discovered test in category order (linting → type check → unit → e2e). For each test:
+If a combined `check` command is available (e.g., `make check`, `just check`, `npm run check`), prefer it — it runs all independent checks in one shot. Map its result to the appropriate test categories in the report.
+
+Otherwise, run independent test categories in **parallel** using concurrent Bash tool calls:
+
+- Launch **linting** and **unit_tests** simultaneously (concurrent Bash tool calls)
+- Wait for both to complete
+- If either fails, mark it as failed and **do not proceed to e2e_tests**
+- Run **e2e_tests** only after unit_tests pass (e2e tests often depend on a correct build)
+- Run **type_check** in parallel with linting and unit_tests when available
+
+For each test:
 
 1. Run the command with a **5 minute timeout**
 2. Capture the result (passed/failed) and any error output
-3. If a test **fails** (non-zero exit code), mark it as failed, capture stderr, and **stop processing immediately** — do not run subsequent tests
-4. If a test **passes**, continue to the next test
+3. If any parallel test **fails** (non-zero exit code), mark it as failed, capture stderr, and do not proceed to e2e_tests
 
 ### Step 3: Produce the Report
 
@@ -99,7 +108,7 @@ Return ONLY a JSON array — no surrounding text, markdown formatting, or explan
 ## Workflow
 
 1. **Discover** — Detect available test commands from justfile, package.json, Makefile, or language-specific config
-2. **Run** — Execute tests sequentially (lint → typecheck → unit → e2e), stopping on first failure
+2. **Run** — Prefer a combined `check` command when available; otherwise run linting, type_check, and unit_tests in parallel, then e2e_tests if all pass
 3. **Report** — Produce a JSON array with results, failed tests sorted to top
 
 ## Cookbook
@@ -107,8 +116,8 @@ Return ONLY a JSON array — no surrounding text, markdown formatting, or explan
 <If: no test commands discovered>
 <Then: report that no test infrastructure was found. Suggest the user check their project setup or specify commands manually.>
 
-<If: a combined check command exists (e.g., `just check`, `npm run check`)>
-<Then: still prefer running individual test categories separately for granular reporting. Only fall back to the combined command if individual commands are not available.>
+<If: a combined check command exists (e.g., `make check`, `just check`, `npm run check`)>
+<Then: prefer running the combined command — it handles parallelism internally and reduces overhead. Map its pass/fail result to the relevant test categories in the report.>
 
 <If: test runner discovers no tests>
 <Then: verify test files exist. Check the project's config for test file patterns.>
@@ -132,23 +141,42 @@ Before returning the report:
 
 ## Examples
 
-### Example 1: Node.js Project with justfile
+### Example 1: Go project with Makefile `check` target
 
-**Discovery:** justfile has `lint`, `typecheck`, `test`, `test-e2e` recipes
+**Discovery:** Makefile has `check`, `lint`, `test` targets. `check` runs lint + tests together.
 **Actions:**
-1. Run `just lint`, `just typecheck`, `just test`, `just test-e2e` in sequence
-2. Return JSON report
+1. `make check` is available — run it as a single command (it handles parallelism internally)
+2. Return JSON report mapping the result to `linting` and `unit_tests` categories
 
-### Example 2: Python Project
+```json
+[
+  {
+    "test_name": "linting + unit_tests",
+    "passed": true,
+    "execution_command": "make check",
+    "test_purpose": "Runs go vet and go test in parallel"
+  }
+]
+```
 
-**Discovery:** pyproject.toml with ruff + mypy + pytest config
+### Example 2: Node.js project with justfile, no combined `check`
+
+**Discovery:** justfile has `lint`, `typecheck`, `test` recipes, but no `check` recipe.
 **Actions:**
-1. Run `ruff check .`, `mypy .`, `pytest` in sequence
-2. Return JSON report
+1. No combined command — launch `just lint`, `just typecheck`, `just test` as **concurrent Bash calls** (one parallel batch)
+2. Wait for all three to complete
+3. If all pass, return JSON report; if any fail, skip e2e and report failures
 
-### Example 3: Package.json Only
+### Example 3: Python project (no combined check)
 
-**Discovery:** package.json has `lint` and `test` scripts
+**Discovery:** pyproject.toml with ruff + pytest config; no combined `check` command.
 **Actions:**
-1. Run `npm run lint`, `npm test` in sequence
+1. Launch `ruff check .` and `pytest` as **concurrent Bash calls**
+2. Wait for both; report results
+
+### Example 4: package.json only
+
+**Discovery:** package.json has `lint` and `test` scripts; no `check` script.
+**Actions:**
+1. Launch `npm run lint` and `npm test` as **concurrent Bash calls**
 2. Return JSON report (no typecheck or e2e — not configured)
