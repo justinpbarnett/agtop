@@ -152,6 +152,18 @@ func (p *StreamParser) Parse(ctx context.Context) {
 				}
 			}
 			p.send(ctx, event)
+		case "rate_limit_event":
+			// Silently drop successful rate limit checks; surface failures.
+			var rl rateLimitEvent
+			if json.Unmarshal([]byte(line), &rl) == nil {
+				if rl.Info.Status == "allowed" {
+					continue
+				}
+				p.send(ctx, StreamEvent{
+					Type: EventError,
+					Text: "Rate limited (" + rl.Info.RateLimitType + "): " + rl.Info.Status,
+				})
+			}
 		default:
 			p.send(ctx, StreamEvent{Type: EventRaw, Text: line})
 		}
@@ -177,6 +189,13 @@ func (p *StreamParser) Events() <-chan StreamEvent {
 
 func (p *StreamParser) Done() <-chan error {
 	return p.done
+}
+
+type rateLimitEvent struct {
+	Info struct {
+		Status        string `json:"status"`
+		RateLimitType string `json:"rateLimitType"`
+	} `json:"rate_limit_info"`
 }
 
 // extractMessageContent extracts text from a message that uses either

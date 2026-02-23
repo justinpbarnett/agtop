@@ -270,6 +270,37 @@ func TestParseUserEventEmptyContent(t *testing.T) {
 	}
 }
 
+func TestParseRateLimitAllowedDropped(t *testing.T) {
+	input := `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1771858800,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false},"uuid":"abc","session_id":"def"}` + "\n"
+	parser := NewStreamParser(strings.NewReader(input), 10)
+
+	events := collectEvents(t, parser, context.Background())
+
+	if len(events) != 0 {
+		t.Fatalf("expected 0 events for allowed rate limit, got %d: %+v", len(events), events)
+	}
+}
+
+func TestParseRateLimitRejected(t *testing.T) {
+	input := `{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"five_hour"}}` + "\n"
+	parser := NewStreamParser(strings.NewReader(input), 10)
+
+	events := collectEvents(t, parser, context.Background())
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event for rejected rate limit, got %d", len(events))
+	}
+	if events[0].Type != EventError {
+		t.Errorf("expected EventError, got %s", events[0].Type)
+	}
+	if !strings.Contains(events[0].Text, "five_hour") {
+		t.Errorf("expected rate limit type in message, got %q", events[0].Text)
+	}
+	if !strings.Contains(events[0].Text, "rejected") {
+		t.Errorf("expected status in message, got %q", events[0].Text)
+	}
+}
+
 func TestParseUnknownType(t *testing.T) {
 	input := `{"type":"unknown_event","data":"something"}` + "\n"
 	parser := NewStreamParser(strings.NewReader(input), 10)
