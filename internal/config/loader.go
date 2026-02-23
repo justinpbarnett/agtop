@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -81,13 +82,55 @@ func discoverConfigPath(dir string) (string, error) {
 }
 
 // loadFromFile reads and unmarshals a TOML config file.
+// It pre-processes the raw TOML to normalize shorthand workflow syntax
+// (e.g. quick = ["build"]) into the table form the Config struct expects
+// (e.g. [workflows.quick] skills = ["build"]).
 func loadFromFile(path string) (*Config, error) {
-	var cfg Config
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	var raw map[string]interface{}
+	if _, err := toml.DecodeFile(path, &raw); err != nil {
 		return nil, fmt.Errorf("parsing TOML: %w", err)
 	}
 
+	normalizeWorkflows(raw)
+
+	var cfg Config
+	if err := mapToConfig(raw, &cfg); err != nil {
+		return nil, fmt.Errorf("decoding config: %w", err)
+	}
+
 	return &cfg, nil
+}
+
+// normalizeWorkflows converts shorthand workflow arrays into table form.
+// e.g. workflows.quick = ["build"] -> workflows.quick = {skills: ["build"]}
+func normalizeWorkflows(raw map[string]interface{}) {
+	wf, ok := raw["workflows"]
+	if !ok {
+		return
+	}
+	wfMap, ok := wf.(map[string]interface{})
+	if !ok {
+		return
+	}
+	for k, v := range wfMap {
+		if arr, ok := v.([]interface{}); ok {
+			skills := make([]interface{}, len(arr))
+			copy(skills, arr)
+			wfMap[k] = map[string]interface{}{"skills": skills}
+		}
+	}
+}
+
+// mapToConfig re-encodes a raw map to TOML and decodes it into Config.
+func mapToConfig(raw map[string]interface{}, cfg *Config) error {
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(raw); err != nil {
+		return err
+	}
+	if _, err := toml.NewDecoder(&buf).Decode(cfg); err != nil {
+		return err
+	}
+	return nil
 }
 
 // merge deep-merges override onto base. Scalar fields override when non-zero.
