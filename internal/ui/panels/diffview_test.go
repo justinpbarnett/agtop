@@ -442,7 +442,7 @@ func TestLogViewSetRunResetsTab(t *testing.T) {
 	}
 
 	// SetRun should reset to log tab
-	lv.SetRun("run-1", "build", "feat/x", nil, true)
+	lv.SetRun("run-1", "build", "feat/x", nil, nil, true)
 	if lv.ActiveTab() != tabLog {
 		t.Errorf("expected tab reset to tabLog after SetRun, got %d", lv.ActiveTab())
 	}

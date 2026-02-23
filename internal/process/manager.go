@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"sync"
 	"syscall"
 	"time"
@@ -17,6 +18,8 @@ import (
 	"github.com/justinpbarnett/agtop/internal/runtime"
 	"github.com/justinpbarnett/agtop/internal/safety"
 )
+
+var rehydrateLineRe = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})(?:\s+(\S+))?\]\s*(.*)$`)
 
 type LogLineMsg struct {
 	RunID string
@@ -41,30 +44,32 @@ type ManagedProcess struct {
 }
 
 type Manager struct {
-	store       *run.Store
-	rt          runtime.Runtime
-	runtimeName string
-	cfg         *config.LimitsConfig
-	tracker     *cost.Tracker
-	limiter     *cost.LimitChecker
-	safety      *safety.PatternMatcher
-	mu          sync.Mutex
-	processes   map[string]*ManagedProcess
-	buffers     map[string]*RingBuffer
-	program     *tea.Program
+	store        *run.Store
+	rt           runtime.Runtime
+	runtimeName  string
+	cfg          *config.LimitsConfig
+	tracker      *cost.Tracker
+	limiter      *cost.LimitChecker
+	safety       *safety.PatternMatcher
+	mu           sync.Mutex
+	processes    map[string]*ManagedProcess
+	buffers      map[string]*RingBuffer
+	entryBuffers map[string]*EntryBuffer
+	program      *tea.Program
 }
 
 func NewManager(store *run.Store, rt runtime.Runtime, runtimeName string, cfg *config.LimitsConfig, tracker *cost.Tracker, limiter *cost.LimitChecker, safetyMatcher *safety.PatternMatcher) *Manager {
 	return &Manager{
-		store:       store,
-		rt:          rt,
-		runtimeName: runtimeName,
-		cfg:         cfg,
-		tracker:     tracker,
-		limiter:     limiter,
-		safety:      safetyMatcher,
-		processes:   make(map[string]*ManagedProcess),
-		buffers:     make(map[string]*RingBuffer),
+		store:        store,
+		rt:           rt,
+		runtimeName:  runtimeName,
+		cfg:          cfg,
+		tracker:      tracker,
+		limiter:      limiter,
+		safety:       safetyMatcher,
+		processes:    make(map[string]*ManagedProcess),
+		buffers:      make(map[string]*RingBuffer),
+		entryBuffers: make(map[string]*EntryBuffer),
 	}
 }
 
@@ -102,6 +107,7 @@ func (m *Manager) Start(runID string, prompt string, opts runtime.RunOptions) er
 	}
 
 	buf := NewRingBuffer(10000)
+	eb := NewEntryBuffer(5000)
 
 	mp := &ManagedProcess{
 		proc:   proc,
@@ -112,6 +118,7 @@ func (m *Manager) Start(runID string, prompt string, opts runtime.RunOptions) er
 	m.mu.Lock()
 	m.processes[runID] = mp
 	m.buffers[runID] = buf
+	m.entryBuffers[runID] = eb
 	m.mu.Unlock()
 
 	m.store.Update(runID, func(r *run.Run) {
@@ -120,7 +127,7 @@ func (m *Manager) Start(runID string, prompt string, opts runtime.RunOptions) er
 		r.StartedAt = time.Now()
 	})
 
-	go m.consumeEvents(runID, mp, buf)
+	go m.consumeEvents(runID, mp, buf, eb)
 
 	return nil
 }
@@ -195,15 +202,24 @@ func (m *Manager) Buffer(runID string) *RingBuffer {
 	return m.buffers[runID]
 }
 
+func (m *Manager) EntryBuffer(runID string) *EntryBuffer {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.entryBuffers[runID]
+}
+
 // InjectBuffer creates a ring buffer pre-populated with log lines.
 // Used to restore log history for rehydrated runs.
 func (m *Manager) InjectBuffer(runID string, lines []string) {
 	buf := NewRingBuffer(10000)
+	eb := NewEntryBuffer(5000)
 	for _, line := range lines {
 		buf.Append(line)
+		eb.Append(lineToEntry(line))
 	}
 	m.mu.Lock()
 	m.buffers[runID] = buf
+	m.entryBuffers[runID] = eb
 	m.mu.Unlock()
 }
 
@@ -211,6 +227,7 @@ func (m *Manager) RemoveBuffer(runID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.buffers, runID)
+	delete(m.entryBuffers, runID)
 }
 
 func (m *Manager) ActiveCount() int {
@@ -247,6 +264,10 @@ func (m *Manager) StartSkill(runID string, prompt string, opts runtime.RunOption
 	if buf == nil {
 		buf = NewRingBuffer(10000)
 	}
+	eb := m.entryBuffers[runID]
+	if eb == nil {
+		eb = NewEntryBuffer(5000)
+	}
 
 	mp := &ManagedProcess{
 		proc:   proc,
@@ -259,18 +280,19 @@ func (m *Manager) StartSkill(runID string, prompt string, opts runtime.RunOption
 	m.mu.Lock()
 	m.processes[runID] = mp
 	m.buffers[runID] = buf
+	m.entryBuffers[runID] = eb
 	m.mu.Unlock()
 
 	m.store.Update(runID, func(r *run.Run) {
 		r.PID = proc.PID
 	})
 
-	go m.consumeSkillEvents(runID, mp, buf, resultCh)
+	go m.consumeSkillEvents(runID, mp, buf, eb, resultCh)
 
 	return resultCh, nil
 }
 
-func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *RingBuffer, resultCh chan<- SkillResult) {
+func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *RingBuffer, eb *EntryBuffer, resultCh chan<- SkillResult) {
 	defer close(resultCh)
 
 	var resultText string
@@ -299,6 +321,7 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 				formatted = fmt.Sprintf("[%s] %s", ts, line)
 			}
 			buf.Append(formatted)
+			eb.Append(NewLogEntry(ts, skill, EventRaw, line))
 			m.sendLogLine(runID)
 		}
 	}()
@@ -308,6 +331,7 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 		skill := skillName()
 
 		var logLine string
+		var entry *LogEntry
 		switch event.Type {
 		case EventText:
 			if skill != "" {
@@ -315,6 +339,7 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 			} else {
 				logLine = fmt.Sprintf("[%s] %s", ts, event.Text)
 			}
+			entry = NewLogEntry(ts, skill, EventText, event.Text)
 		case EventToolUse:
 			if skill != "" {
 				logLine = fmt.Sprintf("[%s %s] Tool: %s", ts, skill, event.ToolName)
@@ -322,12 +347,22 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 				logLine = fmt.Sprintf("[%s] Tool: %s", ts, event.ToolName)
 			}
 			m.checkToolSafety(event.ToolName, event.ToolInput, ts, skill, buf, runID)
+			summary := ToolUseSummary(event.ToolName, event.ToolInput)
+			entry = &LogEntry{
+				Timestamp: ts,
+				Skill:     skill,
+				Type:      EventToolUse,
+				Summary:   summary,
+				Detail:    event.ToolInput,
+				Complete:  true,
+			}
 		case EventToolResult:
 			if skill != "" {
 				logLine = fmt.Sprintf("[%s %s] Result: %s", ts, skill, event.Text)
 			} else {
 				logLine = fmt.Sprintf("[%s] Result: %s", ts, event.Text)
 			}
+			entry = NewLogEntry(ts, skill, EventToolResult, event.Text)
 		case EventResult:
 			resultText = event.Text
 
@@ -339,6 +374,7 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 				} else {
 					logLine = fmt.Sprintf("[%s] Completed — %d tokens, $%.4f", ts, event.Usage.TotalTokens, event.Usage.CostUSD)
 				}
+				entry = NewLogEntry(ts, skill, EventResult, fmt.Sprintf("Completed — %d tokens, $%.4f", event.Usage.TotalTokens, event.Usage.CostUSD))
 			}
 		case EventError:
 			if m.limiter != nil && m.limiter.IsRateLimit(event.Text) {
@@ -354,16 +390,21 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 					logLine = fmt.Sprintf("[%s] ERROR: %s", ts, event.Text)
 				}
 			}
+			entry = NewLogEntry(ts, skill, EventError, event.Text)
 		case EventRaw:
 			if skill != "" {
 				logLine = fmt.Sprintf("[%s %s] %s", ts, skill, event.Text)
 			} else {
 				logLine = fmt.Sprintf("[%s] %s", ts, event.Text)
 			}
+			entry = NewLogEntry(ts, skill, EventRaw, event.Text)
 		}
 
 		if logLine != "" {
 			buf.Append(logLine)
+			if entry != nil {
+				eb.Append(entry)
+			}
 			m.sendLogLine(runID)
 		}
 	}
@@ -386,7 +427,7 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 	resultCh <- SkillResult{ResultText: resultText, Err: exitErr}
 }
 
-func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffer) {
+func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffer, eb *EntryBuffer) {
 	// Get current skill name for log prefix
 	skillName := func() string {
 		r, ok := m.store.Get(runID)
@@ -414,6 +455,7 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 				formatted = fmt.Sprintf("[%s] %s", ts, line)
 			}
 			buf.Append(formatted)
+			eb.Append(NewLogEntry(ts, skill, EventRaw, line))
 			m.sendLogLine(runID)
 		}
 	}()
@@ -423,6 +465,7 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 		skill := skillName()
 
 		var logLine string
+		var entry *LogEntry
 		switch event.Type {
 		case EventText:
 			if skill != "" {
@@ -430,6 +473,7 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 			} else {
 				logLine = fmt.Sprintf("[%s] %s", ts, event.Text)
 			}
+			entry = NewLogEntry(ts, skill, EventText, event.Text)
 		case EventToolUse:
 			if skill != "" {
 				logLine = fmt.Sprintf("[%s %s] Tool: %s", ts, skill, event.ToolName)
@@ -437,12 +481,22 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 				logLine = fmt.Sprintf("[%s] Tool: %s", ts, event.ToolName)
 			}
 			m.checkToolSafety(event.ToolName, event.ToolInput, ts, skill, buf, runID)
+			summary := ToolUseSummary(event.ToolName, event.ToolInput)
+			entry = &LogEntry{
+				Timestamp: ts,
+				Skill:     skill,
+				Type:      EventToolUse,
+				Summary:   summary,
+				Detail:    event.ToolInput,
+				Complete:  true,
+			}
 		case EventToolResult:
 			if skill != "" {
 				logLine = fmt.Sprintf("[%s %s] Result: %s", ts, skill, event.Text)
 			} else {
 				logLine = fmt.Sprintf("[%s] Result: %s", ts, event.Text)
 			}
+			entry = NewLogEntry(ts, skill, EventToolResult, event.Text)
 		case EventResult:
 			if event.Usage != nil {
 				m.recordUsage(runID, skill, event.Usage, ts, buf)
@@ -452,6 +506,7 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 				} else {
 					logLine = fmt.Sprintf("[%s] Completed — %d tokens, $%.4f", ts, event.Usage.TotalTokens, event.Usage.CostUSD)
 				}
+				entry = NewLogEntry(ts, skill, EventResult, fmt.Sprintf("Completed — %d tokens, $%.4f", event.Usage.TotalTokens, event.Usage.CostUSD))
 			}
 		case EventError:
 			if m.limiter != nil && m.limiter.IsRateLimit(event.Text) {
@@ -467,16 +522,21 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 					logLine = fmt.Sprintf("[%s] ERROR: %s", ts, event.Text)
 				}
 			}
+			entry = NewLogEntry(ts, skill, EventError, event.Text)
 		case EventRaw:
 			if skill != "" {
 				logLine = fmt.Sprintf("[%s %s] %s", ts, skill, event.Text)
 			} else {
 				logLine = fmt.Sprintf("[%s] %s", ts, event.Text)
 			}
+			entry = NewLogEntry(ts, skill, EventRaw, event.Text)
 		}
 
 		if logLine != "" {
 			buf.Append(logLine)
+			if entry != nil {
+				eb.Append(entry)
+			}
 			m.sendLogLine(runID)
 		}
 	}
@@ -493,6 +553,7 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 	// Update run state based on exit
 	m.store.Update(runID, func(r *run.Run) {
 		r.PID = 0
+		r.CompletedAt = time.Now()
 		if exitErr == nil {
 			r.State = run.StateCompleted
 		} else {
@@ -547,6 +608,19 @@ func (m *Manager) recordUsage(runID string, skill string, usage *UsageData, ts s
 			}
 		}
 	}
+}
+
+// lineToEntry converts a formatted log line back into a LogEntry.
+// Used when rehydrating persisted sessions.
+func lineToEntry(line string) *LogEntry {
+	parts := rehydrateLineRe.FindStringSubmatch(line)
+	if parts != nil {
+		ts := parts[1]
+		skill := parts[2]
+		msg := parts[3]
+		return NewLogEntry(ts, skill, EventRaw, msg)
+	}
+	return NewLogEntry("", "", EventRaw, line)
 }
 
 func (m *Manager) sendLogLine(runID string) {

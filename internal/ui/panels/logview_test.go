@@ -11,7 +11,7 @@ import (
 func TestLogViewTitle(t *testing.T) {
 	lv := NewLogView()
 	lv.SetSize(60, 20)
-	lv.SetRun("001", "build", "feat/auth", nil, true)
+	lv.SetRun("001", "build", "feat/auth", nil, nil, true)
 
 	view := lv.View()
 	if !strings.Contains(view, "Log:") {
@@ -99,7 +99,7 @@ func TestLogViewGGJumpsToTop(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		buf.Append("[14:32:01 build] line of log output")
 	}
-	lv.SetRun("001", "build", "main", buf, true)
+	lv.SetRun("001", "build", "main", buf, nil, true)
 	// Viewport is at the bottom (follow mode). First g press:
 	var cmd tea.Cmd
 	lv, cmd = lv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
@@ -203,7 +203,7 @@ func TestLogViewSearchNavigation(t *testing.T) {
 	buf.Append("[14:32:01 build] first error line")
 	buf.Append("[14:32:02 build] second ok line")
 	buf.Append("[14:32:03 build] third error line")
-	lv.SetRun("001", "build", "main", buf, false)
+	lv.SetRun("001", "build", "main", buf, nil, false)
 
 	// Set search query manually
 	lv.searchQuery = "error"
@@ -250,7 +250,7 @@ func TestLogViewSearchNoMatches(t *testing.T) {
 	buf := process.NewRingBuffer(100)
 	buf.Append("line one")
 	buf.Append("line two")
-	lv.SetRun("001", "build", "main", buf, false)
+	lv.SetRun("001", "build", "main", buf, nil, false)
 	lv.searchQuery = "nonexistent"
 	lv.recomputeMatches()
 
@@ -289,7 +289,7 @@ func TestLogViewSearchCaseInsensitive(t *testing.T) {
 	buf := process.NewRingBuffer(100)
 	buf.Append("ERROR: something failed")
 	buf.Append("all good here")
-	lv.SetRun("001", "build", "main", buf, false)
+	lv.SetRun("001", "build", "main", buf, nil, false)
 	lv.searchQuery = "error"
 	lv.recomputeMatches()
 
@@ -337,7 +337,7 @@ func TestLogViewSetRunClearsSearch(t *testing.T) {
 	lv.matchIndices = []int{0, 1}
 	lv.searching = true
 
-	lv.SetRun("002", "test", "fix/bug", nil, false)
+	lv.SetRun("002", "test", "fix/bug", nil, nil, false)
 
 	if lv.searchQuery != "" {
 		t.Error("expected searchQuery cleared on SetRun")
@@ -347,5 +347,158 @@ func TestLogViewSetRunClearsSearch(t *testing.T) {
 	}
 	if lv.matchIndices != nil {
 		t.Error("expected matchIndices cleared on SetRun")
+	}
+}
+
+// --- Entry-based rendering tests ---
+
+func TestLogViewEntryRendering(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 30)
+	eb := process.NewEntryBuffer(100)
+	eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, "Building feature"))
+	eb.Append(process.NewLogEntry("14:32:02", "build", process.EventToolUse, "Read"))
+	eb.Append(process.NewLogEntry("14:32:03", "build", process.EventToolResult, "File contents"))
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+
+	view := lv.View()
+	if !strings.Contains(view, "Building feature") {
+		t.Error("expected text entry summary in view")
+	}
+	if !strings.Contains(view, "Tool: Read") {
+		t.Error("expected tool use summary in view")
+	}
+	if !strings.Contains(view, "▸") {
+		t.Error("expected collapsed indicator ▸")
+	}
+}
+
+func TestLogViewEntryExpandCollapse(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 30)
+	eb := process.NewEntryBuffer(100)
+	eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, "Short summary\nDetailed line 1\nDetailed line 2"))
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+	lv.cursorEntry = 0
+
+	// Initially collapsed — should not contain detail
+	view := lv.View()
+	if strings.Contains(view, "Detailed line 1") {
+		t.Error("expected detail hidden when collapsed")
+	}
+
+	// Expand via Enter
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	view = lv.View()
+	if !strings.Contains(view, "Detailed line 1") {
+		t.Error("expected detail visible after expand")
+	}
+	if !strings.Contains(view, "▾") {
+		t.Error("expected expanded indicator ▾")
+	}
+
+	// Collapse via Enter again
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	view = lv.View()
+	if strings.Contains(view, "Detailed line 1") {
+		t.Error("expected detail hidden after collapse")
+	}
+}
+
+func TestLogViewEntryCursorNavigation(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 30)
+	eb := process.NewEntryBuffer(100)
+	eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, "Entry A"))
+	eb.Append(process.NewLogEntry("14:32:02", "build", process.EventText, "Entry B"))
+	eb.Append(process.NewLogEntry("14:32:03", "build", process.EventText, "Entry C"))
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+
+	// Cursor starts at last entry (follow mode)
+	if lv.cursorEntry != 2 {
+		t.Errorf("expected cursorEntry=2, got %d", lv.cursorEntry)
+	}
+
+	// Move up
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if lv.cursorEntry != 1 {
+		t.Errorf("expected cursorEntry=1 after k, got %d", lv.cursorEntry)
+	}
+
+	// Move up again
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if lv.cursorEntry != 0 {
+		t.Errorf("expected cursorEntry=0 after k, got %d", lv.cursorEntry)
+	}
+
+	// Can't go past 0
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if lv.cursorEntry != 0 {
+		t.Errorf("expected cursorEntry=0 (clamped), got %d", lv.cursorEntry)
+	}
+
+	// Move down
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if lv.cursorEntry != 1 {
+		t.Errorf("expected cursorEntry=1 after j, got %d", lv.cursorEntry)
+	}
+}
+
+func TestLogViewStreamingEntryAutoExpand(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 30)
+	eb := process.NewEntryBuffer(100)
+	eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, "Working on it\nMore detail here"))
+	buf := process.NewRingBuffer(100)
+	buf.Append("[14:32:01 build] Working on it")
+	lv.SetRun("001", "build", "main", buf, eb, true) // active=true
+
+	view := lv.View()
+	// Last entry in active run should be auto-expanded (streaming)
+	if !strings.Contains(view, "More detail here") {
+		t.Error("expected streaming entry to be auto-expanded")
+	}
+	if !strings.Contains(view, "▍") {
+		t.Error("expected streaming cursor ▍")
+	}
+}
+
+func TestLogViewEntrySearchAcrossEntries(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 30)
+	eb := process.NewEntryBuffer(100)
+	eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, "No match here"))
+	eb.Append(process.NewLogEntry("14:32:02", "build", process.EventError, "connection refused"))
+	eb.Append(process.NewLogEntry("14:32:03", "build", process.EventText, "All good"))
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+
+	lv.searchQuery = "refused"
+	lv.recomputeMatches()
+
+	if len(lv.matchIndices) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(lv.matchIndices))
+	}
+	if lv.matchIndices[0] != 1 {
+		t.Errorf("expected match at entry 1, got %d", lv.matchIndices[0])
+	}
+}
+
+func TestLogViewCtrlOExpands(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 30)
+	eb := process.NewEntryBuffer(100)
+	eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, "Summary\nDetail text"))
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+	lv.cursorEntry = 0
+
+	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	view := lv.View()
+	if !strings.Contains(view, "Detail text") {
+		t.Error("expected Ctrl+O to expand entry")
 	}
 }

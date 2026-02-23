@@ -33,6 +33,9 @@ const (
 	numPanels    = 3
 )
 
+// TickMsg is sent every second to refresh elapsed time displays.
+type TickMsg struct{}
+
 // StartRunMsg triggers the executor to create and start a new run.
 type StartRunMsg struct {
 	Prompt   string
@@ -170,7 +173,7 @@ func NewApp(cfg *config.Config) App {
 	selected := rl.SelectedRun()
 	d.SetRun(selected)
 	if selected != nil && mgr != nil {
-		lv.SetRun(selected.ID, selected.CurrentSkill, selected.Branch, mgr.Buffer(selected.ID), !selected.IsTerminal())
+		lv.SetRun(selected.ID, selected.CurrentSkill, selected.Branch, mgr.Buffer(selected.ID), mgr.EntryBuffer(selected.ID), !selected.IsTerminal())
 	}
 
 	return App{
@@ -194,7 +197,7 @@ func NewApp(cfg *config.Config) App {
 }
 
 func (a App) Init() tea.Cmd {
-	return listenForChanges(a.store.Changes())
+	return tea.Batch(listenForChanges(a.store.Changes()), tickCmd())
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -231,6 +234,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.logView, cmd = a.logView.Update(msg)
 		return a, cmd
+
+	case TickMsg:
+		return a, tickCmd()
 
 	case RunStoreUpdatedMsg:
 		var cmd tea.Cmd
@@ -587,10 +593,12 @@ func (a *App) syncSelection() tea.Cmd {
 	a.detail.SetRun(selected)
 	if selected != nil {
 		var buf *process.RingBuffer
+		var eb *process.EntryBuffer
 		if a.manager != nil {
 			buf = a.manager.Buffer(selected.ID)
+			eb = a.manager.EntryBuffer(selected.ID)
 		}
-		a.logView.SetRun(selected.ID, selected.CurrentSkill, selected.Branch, buf, !selected.IsTerminal())
+		a.logView.SetRun(selected.ID, selected.CurrentSkill, selected.Branch, buf, eb, !selected.IsTerminal())
 
 		if selected.Worktree != "" {
 			a.logView.SetDiffLoading()
@@ -602,7 +610,7 @@ func (a *App) syncSelection() tea.Cmd {
 			a.logView.SetDiffNoBranch()
 		}
 	} else {
-		a.logView.SetRun("", "", "", nil, false)
+		a.logView.SetRun("", "", "", nil, nil, false)
 		a.logView.SetDiffEmpty()
 	}
 	return nil
@@ -787,6 +795,7 @@ func (a App) handleCancel() (tea.Model, tea.Cmd) {
 		a.store.Update(selected.ID, func(r *run.Run) {
 			r.State = run.StateFailed
 			r.Error = "cancelled"
+			r.CompletedAt = time.Now()
 		})
 	}
 	return a, nil
@@ -838,6 +847,12 @@ func (a *App) autoStartDevServers() {
 			}
 		}
 	}
+}
+
+func tickCmd() tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg {
+		return TickMsg{}
+	})
 }
 
 func flashClearCmd() tea.Cmd {

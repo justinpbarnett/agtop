@@ -35,6 +35,7 @@ type LogView struct {
 	width       int
 	height      int
 	buffer      *process.RingBuffer
+	entryBuffer *process.EntryBuffer
 	runID       string
 	skill       string
 	branch      string
@@ -43,6 +44,10 @@ type LogView struct {
 	focused     bool
 	gPending    bool
 	scrollSpeed int
+
+	// Entry navigation state
+	cursorEntry     int
+	expandedEntries map[int]bool
 
 	// Tab state
 	activeTab int
@@ -85,7 +90,13 @@ func (l LogView) ActiveTab() int {
 func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
 	switch msg := msg.(type) {
 	case LogLineMsg:
-		if msg.RunID == l.runID && l.buffer != nil {
+		if msg.RunID == l.runID && (l.buffer != nil || l.entryBuffer != nil) {
+			if l.entryBuffer != nil && l.follow {
+				count := l.entryBuffer.Len()
+				if count > 0 {
+					l.cursorEntry = count - 1
+				}
+			}
 			atBottom := l.viewport.AtBottom()
 			l.viewport.SetContent(l.renderContent())
 			if atBottom || l.follow {
@@ -155,17 +166,24 @@ func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
 			return l, nil
 		case "G":
 			l.follow = true
+			if l.entryBuffer != nil {
+				count := l.entryBuffer.Len()
+				if count > 0 {
+					l.cursorEntry = count - 1
+				}
+			}
 			l.viewport.GotoBottom()
 			return l, nil
 		case "g":
 			if l.gPending {
-				// Second g — jump to top
 				l.gPending = false
 				l.follow = false
+				if l.entryBuffer != nil {
+					l.cursorEntry = 0
+				}
 				l.viewport.GotoTop()
 				return l, nil
 			}
-			// First g — start timer
 			l.gPending = true
 			l.follow = false
 			return l, tea.Tick(gTimeout, func(time.Time) tea.Msg {
@@ -181,25 +199,54 @@ func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
 		case "y":
 			l.enterCopyMode()
 			return l, nil
+		case "enter", " ":
+			if l.entryBuffer != nil {
+				l.toggleExpand(l.cursorEntry)
+				l.refreshContent()
+				return l, nil
+			}
+		case "ctrl+o":
+			if l.entryBuffer != nil {
+				l.toggleExpand(l.cursorEntry)
+				l.refreshContent()
+				return l, nil
+			}
 		case "j", "down":
 			l.follow = false
-			step := l.scrollSpeed
-			if step <= 0 {
-				step = 1
+			if l.entryBuffer != nil {
+				count := l.entryBuffer.Len()
+				if l.cursorEntry < count-1 {
+					l.cursorEntry++
+				}
+				l.refreshContent()
+				l.scrollToCursorEntry()
+			} else {
+				step := l.scrollSpeed
+				if step <= 0 {
+					step = 1
+				}
+				l.viewport.SetYOffset(l.viewport.YOffset + step)
 			}
-			l.viewport.SetYOffset(l.viewport.YOffset + step)
 			return l, nil
 		case "k", "up":
 			l.follow = false
-			step := l.scrollSpeed
-			if step <= 0 {
-				step = 1
+			if l.entryBuffer != nil {
+				if l.cursorEntry > 0 {
+					l.cursorEntry--
+				}
+				l.refreshContent()
+				l.scrollToCursorEntry()
+			} else {
+				step := l.scrollSpeed
+				if step <= 0 {
+					step = 1
+				}
+				offset := l.viewport.YOffset - step
+				if offset < 0 {
+					offset = 0
+				}
+				l.viewport.SetYOffset(offset)
 			}
-			offset := l.viewport.YOffset - step
-			if offset < 0 {
-				offset = 0
-			}
-			l.viewport.SetYOffset(offset)
 			return l, nil
 		}
 	}
@@ -282,6 +329,7 @@ func (l LogView) View() string {
 				}
 			} else {
 				keybinds = []border.Keybind{
+					{Key: "⏎", Label: " expand"},
 					{Key: "y", Label: "ank/copy"},
 					{Key: "G", Label: "bottom"},
 					{Key: "g", Label: "g top"},
@@ -365,11 +413,12 @@ func (l LogView) ConsumesKeys() bool {
 	return l.searching || l.searchQuery != "" || l.copyMode
 }
 
-func (l *LogView) SetRun(runID, skill, branch string, buf *process.RingBuffer, active bool) {
+func (l *LogView) SetRun(runID, skill, branch string, buf *process.RingBuffer, eb *process.EntryBuffer, active bool) {
 	l.runID = runID
 	l.skill = skill
 	l.branch = branch
 	l.buffer = buf
+	l.entryBuffer = eb
 	l.active = active
 	l.follow = true
 	l.searchQuery = ""
@@ -377,6 +426,14 @@ func (l *LogView) SetRun(runID, skill, branch string, buf *process.RingBuffer, a
 	l.searching = false
 	l.copyMode = false
 	l.mouseSelecting = false
+	l.cursorEntry = 0
+	l.expandedEntries = make(map[int]bool)
+	if eb != nil {
+		count := eb.Len()
+		if count > 0 {
+			l.cursorEntry = count - 1
+		}
+	}
 	l.activeTab = tabLog
 	l.updateDiffFocus()
 	l.refreshContent()
@@ -424,6 +481,9 @@ func (l *LogView) refreshContent() {
 
 // renderContentBase builds the styled log content without selection highlighting.
 func (l *LogView) renderContentBase() string {
+	if l.entryBuffer != nil {
+		return l.renderEntries()
+	}
 	var raw string
 	if l.buffer != nil {
 		lines := l.buffer.Lines()
@@ -436,6 +496,138 @@ func (l *LogView) renderContentBase() string {
 		raw = "No run selected"
 	}
 	return formatLogContent(raw, l.active, l.searchQuery, l.matchIndices, l.currentMatch)
+}
+
+// renderEntries builds styled content from the structured entry buffer.
+func (l *LogView) renderEntries() string {
+	entries := l.entryBuffer.Entries()
+	if len(entries) == 0 {
+		if l.buffer == nil {
+			return "No run selected"
+		}
+		return "Waiting for output..."
+	}
+
+	tsStyle := styles.TextDimStyle
+	skillStyle := styles.TextSecondaryStyle
+	cursorStyle := styles.LogEntryCursorStyle
+	detailStyle := styles.LogEntryDetailStyle
+
+	query := strings.ToLower(l.searchQuery)
+
+	// Build match set for highlighting
+	matchSet := make(map[int]bool, len(l.matchIndices))
+	for _, idx := range l.matchIndices {
+		matchSet[idx] = true
+	}
+	var currentMatchEntry int
+	if len(l.matchIndices) > 0 && l.currentMatch >= 0 && l.currentMatch < len(l.matchIndices) {
+		currentMatchEntry = l.matchIndices[l.currentMatch]
+	} else {
+		currentMatchEntry = -1
+	}
+
+	var lines []string
+	for i, e := range entries {
+		isCursor := i == l.cursorEntry
+		isExpanded := l.expandedEntries[i]
+		// Last entry in active run is always expanded (streaming)
+		isStreaming := l.active && i == len(entries)-1
+
+		// Build prefix: timestamp + skill
+		var prefix string
+		if e.Timestamp != "" {
+			prefix = tsStyle.Render(e.Timestamp) + " "
+		}
+		if e.Skill != "" {
+			prefix += skillStyle.Render(e.Skill) + " "
+		}
+
+		// Collapse/expand indicator
+		icon := "▸ "
+		if isExpanded || isStreaming {
+			icon = "▾ "
+		}
+
+		// Summary line
+		summary := e.Summary
+		if query != "" && matchSet[i] {
+			isCurrent := i == currentMatchEntry
+			summary = highlightMatches(summary, l.searchQuery, isCurrent)
+		}
+
+		var summaryLine string
+		if isCursor {
+			summaryLine = prefix + cursorStyle.Render(icon+summary)
+		} else {
+			summaryLine = prefix + tsStyle.Render(icon) + summary
+		}
+
+		lines = append(lines, summaryLine)
+
+		// Expanded detail
+		if isExpanded || isStreaming {
+			detail := e.Detail
+			if detail != "" && detail != e.Summary {
+				detailLines := strings.Split(detail, "\n")
+				for _, dl := range detailLines {
+					rendered := "    " + detailStyle.Render(dl)
+					if query != "" && strings.Contains(strings.ToLower(dl), query) {
+						isCurrent := i == currentMatchEntry
+						rendered = "    " + highlightMatches(dl, l.searchQuery, isCurrent)
+					}
+					lines = append(lines, rendered)
+				}
+			}
+			if isStreaming {
+				lines[len(lines)-1] += " ▍"
+			}
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// toggleExpand toggles the expanded state of entry at the given index.
+func (l *LogView) toggleExpand(idx int) {
+	if l.expandedEntries == nil {
+		l.expandedEntries = make(map[int]bool)
+	}
+	if l.expandedEntries[idx] {
+		delete(l.expandedEntries, idx)
+	} else {
+		l.expandedEntries[idx] = true
+	}
+}
+
+// scrollToCursorEntry adjusts viewport offset to keep the cursor entry visible.
+func (l *LogView) scrollToCursorEntry() {
+	// Compute the line offset of the cursor entry within rendered content
+	content := l.viewport.View()
+	if content == "" {
+		return
+	}
+	// Use a simpler approach: count rendered lines for entries before cursor
+	entries := l.entryBuffer.Entries()
+	if len(entries) == 0 {
+		return
+	}
+	lineOffset := 0
+	for i := 0; i < l.cursorEntry && i < len(entries); i++ {
+		lineOffset++ // summary line
+		if l.expandedEntries[i] || (l.active && i == len(entries)-1) {
+			e := entries[i]
+			if e.Detail != "" && e.Detail != e.Summary {
+				lineOffset += strings.Count(e.Detail, "\n") + 1
+			}
+		}
+	}
+	// Ensure the cursor entry's summary line is visible
+	if lineOffset < l.viewport.YOffset {
+		l.viewport.SetYOffset(lineOffset)
+	} else if lineOffset >= l.viewport.YOffset+l.viewport.Height {
+		l.viewport.SetYOffset(lineOffset - l.viewport.Height + 1)
+	}
 }
 
 // renderContent builds the styled log content, including search and selection highlights.
@@ -460,6 +652,18 @@ func (l *LogView) recomputeMatches() {
 		return
 	}
 	query := strings.ToLower(l.searchQuery)
+
+	if l.entryBuffer != nil {
+		entries := l.entryBuffer.Entries()
+		for i, e := range entries {
+			if strings.Contains(strings.ToLower(e.Summary), query) ||
+				strings.Contains(strings.ToLower(e.Detail), query) {
+				l.matchIndices = append(l.matchIndices, i)
+			}
+		}
+		return
+	}
+
 	var lines []string
 	if l.buffer != nil {
 		lines = l.buffer.Lines()
@@ -491,9 +695,25 @@ func (l *LogView) jumpToMatch() {
 	if len(l.matchIndices) == 0 {
 		return
 	}
-	lineIdx := l.matchIndices[l.currentMatch]
+	idx := l.matchIndices[l.currentMatch]
 	l.follow = false
-	l.viewport.SetYOffset(lineIdx)
+
+	if l.entryBuffer != nil {
+		l.cursorEntry = idx
+		// Auto-expand if match is in the detail
+		e := l.entryBuffer.Get(idx)
+		if e != nil {
+			query := strings.ToLower(l.searchQuery)
+			if !strings.Contains(strings.ToLower(e.Summary), query) {
+				l.expandedEntries[idx] = true
+			}
+		}
+		l.refreshContent()
+		l.scrollToCursorEntry()
+		return
+	}
+
+	l.viewport.SetYOffset(idx)
 	l.refreshContent()
 }
 
