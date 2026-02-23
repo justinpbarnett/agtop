@@ -1,95 +1,95 @@
 package config
 
 type Config struct {
-	Project      ProjectConfig              `yaml:"project"`
-	Runtime      RuntimeConfig              `yaml:"runtime"`
-	Workflows    map[string]WorkflowConfig  `yaml:"workflows"`
-	Skills       map[string]SkillConfig     `yaml:"skills"`
-	Safety       SafetyConfig               `yaml:"safety"`
-	Limits       LimitsConfig               `yaml:"limits"`
-	Merge        MergeConfig                `yaml:"merge"`
-	UI           UIConfig                   `yaml:"ui"`
-	Integrations IntegrationsConfig         `yaml:"integrations"`
+	Project      ProjectConfig              `toml:"project"`
+	Runtime      RuntimeConfig              `toml:"runtime"`
+	Workflows    map[string]WorkflowConfig  `toml:"workflows"`
+	Skills       map[string]SkillConfig     `toml:"skills"`
+	Safety       SafetyConfig               `toml:"safety"`
+	Limits       LimitsConfig               `toml:"limits"`
+	Merge        MergeConfig                `toml:"merge"`
+	UI           UIConfig                   `toml:"ui"`
+	Integrations IntegrationsConfig         `toml:"integrations"`
 }
 
 type IntegrationsConfig struct {
-	Jira *JiraConfig `yaml:"jira,omitempty"`
+	Jira *JiraConfig `toml:"jira,omitempty"`
 }
 
 type JiraConfig struct {
-	BaseURL    string `yaml:"base_url"`
-	ProjectKey string `yaml:"project_key"`
-	AuthEnv    string `yaml:"auth_env"`
-	UserEnv    string `yaml:"user_env"`
+	BaseURL    string `toml:"base_url"`
+	ProjectKey string `toml:"project_key"`
+	AuthEnv    string `toml:"auth_env"`
+	UserEnv    string `toml:"user_env"`
 }
 
 type ProjectConfig struct {
-	Name        string          `yaml:"name"`
-	Root        string          `yaml:"root"`
-	TestCommand string          `yaml:"test_command"`
-	DevServer   DevServerConfig `yaml:"dev_server"`
+	Name        string          `toml:"name"`
+	Root        string          `toml:"root"`
+	TestCommand string          `toml:"test_command"`
+	DevServer   DevServerConfig `toml:"dev_server"`
 }
 
 type DevServerConfig struct {
-	Command      string `yaml:"command"`
-	PortStrategy string `yaml:"port_strategy"`
-	BasePort     int    `yaml:"base_port"`
+	Command      string `toml:"command"`
+	PortStrategy string `toml:"port_strategy"`
+	BasePort     int    `toml:"base_port"`
 }
 
 type RuntimeConfig struct {
-	Default  string            `yaml:"default"`
-	Claude   ClaudeConfig      `yaml:"claude"`
-	OpenCode OpenCodeConfig    `yaml:"opencode"`
+	Default  string            `toml:"default"`
+	Claude   ClaudeConfig      `toml:"claude"`
+	OpenCode OpenCodeConfig    `toml:"opencode"`
 }
 
 type ClaudeConfig struct {
-	Model          string   `yaml:"model"`
-	PermissionMode string   `yaml:"permission_mode"`
-	MaxTurns       int      `yaml:"max_turns"`
-	AllowedTools   []string `yaml:"allowed_tools"`
+	Model          string   `toml:"model"`
+	PermissionMode string   `toml:"permission_mode"`
+	MaxTurns       int      `toml:"max_turns"`
+	AllowedTools   []string `toml:"allowed_tools"`
 }
 
 type OpenCodeConfig struct {
-	Model string `yaml:"model"`
-	Agent string `yaml:"agent"`
+	Model string `toml:"model"`
+	Agent string `toml:"agent"`
 }
 
 type WorkflowConfig struct {
-	Skills []string `yaml:"skills"`
+	Skills []string `toml:"skills"`
 }
 
 type SkillConfig struct {
-	Model        string   `yaml:"model"`
-	Timeout      int      `yaml:"timeout"`
-	Parallel     bool     `yaml:"parallel"`
-	AllowedTools []string `yaml:"allowed_tools"`
+	Model        string   `toml:"model"`
+	Timeout      int      `toml:"timeout"`
+	Parallel     bool     `toml:"parallel"`
+	AllowedTools []string `toml:"allowed_tools"`
 }
 
 type SafetyConfig struct {
-	BlockedPatterns []string `yaml:"blocked_patterns"`
-	AllowOverrides  *bool    `yaml:"allow_overrides"`
+	BlockedPatterns []string `toml:"blocked_patterns"`
+	AllowOverrides  *bool    `toml:"allow_overrides"`
 }
 
 type LimitsConfig struct {
-	MaxTokensPerRun     int     `yaml:"max_tokens_per_run"`
-	MaxCostPerRun       float64 `yaml:"max_cost_per_run"`
-	MaxConcurrentRuns   int     `yaml:"max_concurrent_runs"`
-	RateLimitBackoff    int     `yaml:"rate_limit_backoff"`
-	RateLimitMaxRetries int     `yaml:"rate_limit_max_retries"`
+	MaxTokensPerRun     int     `toml:"max_tokens_per_run"`
+	MaxCostPerRun       float64 `toml:"max_cost_per_run"`
+	MaxConcurrentRuns   int     `toml:"max_concurrent_runs"`
+	RateLimitBackoff    int     `toml:"rate_limit_backoff"`
+	RateLimitMaxRetries int     `toml:"rate_limit_max_retries"`
 }
 
 type MergeConfig struct {
-	TargetBranch  string `yaml:"target_branch"`
-	AutoMerge     bool   `yaml:"auto_merge"`
-	MergeStrategy string `yaml:"merge_strategy"`
-	FixAttempts   int    `yaml:"fix_attempts"`
-	PollInterval  int    `yaml:"poll_interval"`
-	PollTimeout   int    `yaml:"poll_timeout"`
+	TargetBranch  string `toml:"target_branch"`
+	AutoMerge     bool   `toml:"auto_merge"`
+	MergeStrategy string `toml:"merge_strategy"`
+	FixAttempts   int    `toml:"fix_attempts"`
+	PollInterval  int    `toml:"poll_interval"`
+	PollTimeout   int    `toml:"poll_timeout"`
 }
 
 type UIConfig struct {
-	Theme          string `yaml:"theme"`
-	ShowTokenCount *bool  `yaml:"show_token_count"`
-	ShowCost       *bool  `yaml:"show_cost"`
-	LogScrollSpeed int    `yaml:"log_scroll_speed"`
+	Theme          string `toml:"theme"`
+	ShowTokenCount *bool  `toml:"show_token_count"`
+	ShowCost       *bool  `toml:"show_cost"`
+	LogScrollSpeed int    `toml:"log_scroll_speed"`
 }

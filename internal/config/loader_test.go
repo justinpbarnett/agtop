@@ -18,8 +18,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Runtime.Default != "claude" {
 		t.Errorf("expected runtime default %q, got %q", "claude", cfg.Runtime.Default)
 	}
-	if cfg.Runtime.Claude.Model != "sonnet" {
-		t.Errorf("expected claude model %q, got %q", "sonnet", cfg.Runtime.Claude.Model)
+	if cfg.Runtime.Claude.Model != "opus" {
+		t.Errorf("expected claude model %q, got %q", "opus", cfg.Runtime.Claude.Model)
 	}
 	if cfg.Limits.MaxCostPerRun != 5.00 {
 		t.Errorf("expected max cost 5.00, got %f", cfg.Limits.MaxCostPerRun)
@@ -42,16 +42,18 @@ func TestLoadFromFile(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
 
-	yaml := `
-project:
-  name: test-project
-  test_command: "go test ./..."
-runtime:
-  default: opencode
-limits:
-  max_cost_per_run: 10.00
+	tomlData := `
+[project]
+name = "test-project"
+test_command = "go test ./..."
+
+[runtime]
+default = "opencode"
+
+[limits]
+max_cost_per_run = 10.00
 `
-	os.WriteFile(filepath.Join(tmp, "agtop.yaml"), []byte(yaml), 0644)
+	os.WriteFile(filepath.Join(tmp, "agtop.toml"), []byte(tomlData), 0644)
 
 	cfg, err := LoadFrom(tmp)
 	if err != nil {
@@ -208,7 +210,7 @@ func TestMergeBoolPtrNilPreservesDefault(t *testing.T) {
 func TestLoadEmptyFile(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
-	os.WriteFile(filepath.Join(tmp, "agtop.yaml"), []byte("---\n"), 0644)
+	os.WriteFile(filepath.Join(tmp, "agtop.toml"), []byte(""), 0644)
 
 	cfg, err := LoadFrom(tmp)
 	if err != nil {
@@ -220,15 +222,16 @@ func TestLoadEmptyFile(t *testing.T) {
 	}
 }
 
-func TestLoadBoolFromYAML(t *testing.T) {
+func TestLoadBoolFromTOML(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
-	os.WriteFile(filepath.Join(tmp, "agtop.yaml"), []byte(`
-ui:
-  show_token_count: false
-  show_cost: false
-safety:
-  allow_overrides: true
+	os.WriteFile(filepath.Join(tmp, "agtop.toml"), []byte(`
+[ui]
+show_token_count = false
+show_cost = false
+
+[safety]
+allow_overrides = true
 `), 0644)
 
 	cfg, err := LoadFrom(tmp)
@@ -237,13 +240,13 @@ safety:
 	}
 
 	if cfg.UI.ShowTokenCount == nil || *cfg.UI.ShowTokenCount != false {
-		t.Error("expected show_token_count: false from YAML to override default true")
+		t.Error("expected show_token_count: false from TOML to override default true")
 	}
 	if cfg.UI.ShowCost == nil || *cfg.UI.ShowCost != false {
-		t.Error("expected show_cost: false from YAML to override default true")
+		t.Error("expected show_cost: false from TOML to override default true")
 	}
 	if cfg.Safety.AllowOverrides == nil || *cfg.Safety.AllowOverrides != true {
-		t.Error("expected allow_overrides: true from YAML to override default false")
+		t.Error("expected allow_overrides: true from TOML to override default false")
 	}
 }
 
@@ -253,17 +256,17 @@ func TestDiscoveryChain(t *testing.T) {
 
 	projectDir := filepath.Join(tmp, "project")
 	os.MkdirAll(projectDir, 0755)
-	os.WriteFile(filepath.Join(projectDir, "agtop.yaml"), []byte(`
-project:
-  name: project-level
+	os.WriteFile(filepath.Join(projectDir, "agtop.toml"), []byte(`
+[project]
+name = "project-level"
 `), 0644)
 
 	homeDir := filepath.Join(tmp, "home")
 	configDir := filepath.Join(homeDir, ".config", "agtop")
 	os.MkdirAll(configDir, 0755)
-	os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(`
-project:
-  name: user-level
+	os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(`
+[project]
+name = "user-level"
 `), 0644)
 
 	t.Setenv("HOME", homeDir)
@@ -385,15 +388,14 @@ func TestMergeJiraConfig(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
 
-	yaml := `
-integrations:
-  jira:
-    base_url: "https://company.atlassian.net"
-    project_key: "PROJ"
-    auth_env: "JIRA_TOKEN"
-    user_env: "JIRA_EMAIL"
+	tomlData := `
+[integrations.jira]
+base_url = "https://company.atlassian.net"
+project_key = "PROJ"
+auth_env = "JIRA_TOKEN"
+user_env = "JIRA_EMAIL"
 `
-	os.WriteFile(filepath.Join(tmp, "agtop.yaml"), []byte(yaml), 0644)
+	os.WriteFile(filepath.Join(tmp, "agtop.toml"), []byte(tomlData), 0644)
 
 	cfg, err := LoadFrom(tmp)
 	if err != nil {
@@ -437,13 +439,13 @@ func TestLocalConfigExists(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(orig) })
 
 	if LocalConfigExists() {
-		t.Error("expected false when no agtop.yaml exists")
+		t.Error("expected false when no agtop.toml exists")
 	}
 
-	os.WriteFile(filepath.Join(tmp, "agtop.yaml"), []byte("project:\n  name: test\n"), 0644)
+	os.WriteFile(filepath.Join(tmp, "agtop.toml"), []byte("[project]\nname = \"test\"\n"), 0644)
 
 	if !LocalConfigExists() {
-		t.Error("expected true when agtop.yaml exists")
+		t.Error("expected true when agtop.toml exists")
 	}
 }
 
@@ -465,16 +467,16 @@ func TestLoadMergeConfig(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
 
-	yaml := `
-merge:
-  target_branch: develop
-  auto_merge: true
-  merge_strategy: rebase
-  fix_attempts: 5
-  poll_interval: 15
-  poll_timeout: 300
+	tomlData := `
+[merge]
+target_branch = "develop"
+auto_merge = true
+merge_strategy = "rebase"
+fix_attempts = 5
+poll_interval = 15
+poll_timeout = 300
 `
-	os.WriteFile(filepath.Join(tmp, "agtop.yaml"), []byte(yaml), 0644)
+	os.WriteFile(filepath.Join(tmp, "agtop.toml"), []byte(tomlData), 0644)
 
 	cfg, err := LoadFrom(tmp)
 	if err != nil {

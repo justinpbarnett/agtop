@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"gopkg.in/yaml.v3"
+	"github.com/BurntSushi/toml"
 )
 
 // Load discovers a config file, merges it with defaults, applies environment
@@ -46,33 +46,33 @@ func LoadFrom(dir string) (*Config, error) {
 	return &cfg, nil
 }
 
-// LocalConfigExists reports whether an agtop.yaml file exists in the current
+// LocalConfigExists reports whether an agtop.toml file exists in the current
 // working directory. This checks only the local project config — a user-level
-// config at ~/.config/agtop/config.yaml does not count.
+// config at ~/.config/agtop/config.toml does not count.
 func LocalConfigExists() bool {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return false
 	}
-	_, err = os.Stat(filepath.Join(cwd, "agtop.yaml"))
+	_, err = os.Stat(filepath.Join(cwd, "agtop.toml"))
 	return err == nil
 }
 
 // discoverConfigPath searches the discovery chain and returns the first config
 // file that exists. Returns empty string if none found (defaults-only mode).
 func discoverConfigPath(dir string) (string, error) {
-	// 1. ./agtop.yaml (relative to project dir)
-	local := filepath.Join(dir, "agtop.yaml")
+	// 1. ./agtop.toml (relative to project dir)
+	local := filepath.Join(dir, "agtop.toml")
 	if _, err := os.Stat(local); err == nil {
 		return local, nil
 	}
 
-	// 2. ~/.config/agtop/config.yaml
+	// 2. ~/.config/agtop/config.toml
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", nil // can't resolve home, skip
 	}
-	user := filepath.Join(home, ".config", "agtop", "config.yaml")
+	user := filepath.Join(home, ".config", "agtop", "config.toml")
 	if _, err := os.Stat(user); err == nil {
 		return user, nil
 	}
@@ -80,16 +80,11 @@ func discoverConfigPath(dir string) (string, error) {
 	return "", nil
 }
 
-// loadFromFile reads and unmarshals a YAML config file.
+// loadFromFile reads and unmarshals a TOML config file.
 func loadFromFile(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading file: %w", err)
-	}
-
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing YAML: %w", err)
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing TOML: %w", err)
 	}
 
 	return &cfg, nil

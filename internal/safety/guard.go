@@ -28,7 +28,7 @@ if [ -z "$COMMAND" ]; then
   exit 0  # No command field — not a Bash tool call, allow
 fi
 
-# Blocked patterns (from agtop.yaml safety.blocked_patterns)
+# Blocked patterns (from agtop.toml safety.blocked_patterns)
 {{- range .Patterns}}
 if [[ "$COMMAND" =~ {{.}} ]]; then
   echo "BLOCKED by agtop safety: pattern '{{.}}' matched" >&2

@@ -1,0 +1,109 @@
+# agtop.toml — project-level configuration
+
+[project]
+name = "my-project"
+root = "."
+test_command = "npm test"
+
+[project.dev_server]
+command = "npm run dev"
+port_strategy = "hash"   # hash | sequential | fixed
+base_port = 3100
+
+[runtime]
+default = "claude"       # claude | opencode
+
+[runtime.claude]
+model = "opus"                  # Default model for skills
+permission_mode = "acceptEdits" # acceptEdits | acceptAll | manual
+max_turns = 50
+allowed_tools = ["Read", "Write", "Edit", "MultiEdit", "Bash", "Grep", "Glob"]
+
+[runtime.opencode]
+model = "anthropic/claude-sonnet-4-6"
+agent = "build"
+
+[workflows.auto]
+skills = ["route"]
+
+[workflows.build]
+skills = ["build", "test"]
+
+[workflows.plan-build]
+skills = ["spec", "build", "test"]
+
+[workflows.sdlc]
+skills = ["spec", "decompose", "build", "test", "review", "document"]
+
+[workflows.quick-fix]
+skills = ["build", "test", "commit"]
+
+[skills.route]
+model = "haiku"
+timeout = 60
+
+[skills.spec]
+model = "opus"
+
+[skills.decompose]
+model = "opus"
+
+[skills.build]
+model = "sonnet"
+timeout = 300
+parallel = true
+
+[skills.test]
+model = "sonnet"
+timeout = 120
+
+[skills.review]
+model = "opus"
+
+[skills.document]
+model = "haiku"
+
+[skills.commit]
+model = "haiku"
+timeout = 30
+
+[skills.pr]
+model = "haiku"
+timeout = 30
+
+[merge]
+target_branch = "main"     # branch to merge into (default: repo default branch)
+auto_merge = false         # enable accept-to-merge pipeline (default: false)
+merge_strategy = "squash"  # squash | merge | rebase (default: squash)
+fix_attempts = 3           # max CI fix attempts before giving up (default: 3)
+poll_interval = 30         # seconds between check status polls (default: 30)
+poll_timeout = 600         # max seconds to wait for checks (default: 600)
+
+[safety]
+blocked_patterns = [
+  'rm\s+-[rf]+\s+/',
+  'git\s+push.*--force',
+  'DROP\s+TABLE',
+  '(curl|wget).*\|\s*(sh|bash)',
+  'chmod\s+777',
+  ':(){.*};',              # Fork bomb
+]
+allow_overrides = false
+
+[limits]
+max_tokens_per_run = 500000
+max_cost_per_run = 5.00
+max_concurrent_runs = 5
+rate_limit_backoff = 60    # Seconds
+
+[ui]
+theme = "default"
+show_token_count = true
+show_cost = true
+log_scroll_speed = 5
+
+# [integrations.jira]
+# base_url = "https://yourcompany.atlassian.net"
+# project_key = "PROJ"
+# auth_env = "JIRA_API_TOKEN"      # env var containing your API token
+# user_env = "JIRA_USER_EMAIL"     # env var containing your Atlassian email

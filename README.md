@@ -18,7 +18,7 @@ Running AI coding agents in the background means losing visibility into what the
 - **Safety guardrails** — Blocked command patterns, tool restrictions, and hook-based filtering
 - **Session persistence** — Run state saved to disk and recovered on restart
 - **Dev server management** — Auto-detection and port allocation for dev servers
-- **YAML configuration** — Project, runtime, workflow, and UI settings with sensible defaults
+- **TOML configuration** — Project, runtime, workflow, and UI settings with sensible defaults
 
 ## Getting Started
 
@@ -59,46 +59,55 @@ agtop
 | `agtop cleanup`       | Remove stale sessions and orphaned worktrees           |
 | `agtop cleanup --dry-run` | Preview cleanup without deleting anything          |
 
-`agtop init` creates `.agtop/hooks/` with a safety guard script, wires it into `.claude/settings.json` as a PreToolUse hook, and copies `agtop.example.yaml` to `agtop.yaml` if one doesn't exist.
+`agtop init` creates `.agtop/hooks/` with a safety guard script, wires it into `.claude/settings.json` as a PreToolUse hook, and copies `agtop.example.toml` to `agtop.toml` if one doesn't exist.
 
 ### Configuration
 
 agtop looks for configuration in this order:
 
-1. `./agtop.yaml` (project root)
-2. `~/.config/agtop/config.yaml` (user config)
+1. `./agtop.toml` (project root)
+2. `~/.config/agtop/config.toml` (user config)
 3. Built-in defaults
 
-See [`agtop.example.yaml`](agtop.example.yaml) for all available options.
+See [`agtop.example.toml`](agtop.example.toml) for all available options.
 
-```yaml
-project:
-  name: my-project
-  test_command: "npm test"
-  dev_server:
-    command: "npm run dev"
-    port_strategy: hash   # hash | sequential | fixed
-    base_port: 3100
+```toml
+[project]
+name = "my-project"
+test_command = "npm test"
 
-runtime:
-  default: claude         # claude | opencode
-  claude:
-    model: sonnet
-    permission_mode: acceptEdits
-    max_turns: 50
-  opencode:
-    model: anthropic/claude-sonnet-4-5
-    agent: build
+[project.dev_server]
+command = "npm run dev"
+port_strategy = "hash"   # hash | sequential | fixed
+base_port = 3100
 
-workflows:
-  build: { skills: [route, build, test] }
-  plan-build: { skills: [route, spec, build, test] }
-  sdlc: { skills: [route, spec, decompose, build, test, review, document] }
-  quick-fix: { skills: [build, test, commit] }
+[runtime]
+default = "claude"       # claude | opencode
 
-limits:
-  max_cost_per_run: 5.00
-  max_concurrent_runs: 5
+[runtime.claude]
+model = "opus"
+permission_mode = "acceptEdits"
+max_turns = 50
+
+[runtime.opencode]
+model = "anthropic/claude-sonnet-4-5"
+agent = "build"
+
+[workflows.build]
+skills = ["build", "test"]
+
+[workflows.plan-build]
+skills = ["spec", "build", "test"]
+
+[workflows.sdlc]
+skills = ["spec", "decompose", "build", "test", "review", "document"]
+
+[workflows.quick-fix]
+skills = ["build", "test", "commit"]
+
+[limits]
+max_cost_per_run = 5.00
+max_concurrent_runs = 5
 ```
 
 ### Key Bindings
