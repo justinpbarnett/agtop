@@ -1,0 +1,37 @@
+version: 2
+
+builds:
+  - main: ./cmd/agtop
+    binary: agtop
+    ldflags:
+      - -s -w -X github.com/justinpbarnett/agtop/internal/ui/panels.Version={{.Version}}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - format: tar.gz
+    format_overrides:
+      - goos: darwin
+        format: zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+release:
+  github:
+    owner: justinpbarnett
+    name: agtop
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
