@@ -48,6 +48,7 @@ type LogView struct {
 	// Entry navigation state
 	cursorEntry     int
 	expandedEntries map[int]bool
+	lastEvicted     int
 
 	// Tab state
 	activeTab int
@@ -91,6 +92,7 @@ func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
 	switch msg := msg.(type) {
 	case LogLineMsg:
 		if msg.RunID == l.runID && (l.buffer != nil || l.entryBuffer != nil) {
+			l.adjustForEvictions()
 			if l.entryBuffer != nil && l.follow {
 				count := l.entryBuffer.Len()
 				if count > 0 {
@@ -428,7 +430,9 @@ func (l *LogView) SetRun(runID, skill, branch string, buf *process.RingBuffer, e
 	l.mouseSelecting = false
 	l.cursorEntry = 0
 	l.expandedEntries = make(map[int]bool)
+	l.lastEvicted = 0
 	if eb != nil {
+		l.lastEvicted = eb.TotalEvicted()
 		count := eb.Len()
 		if count > 0 {
 			l.cursorEntry = count - 1
@@ -598,6 +602,34 @@ func (l *LogView) toggleExpand(idx int) {
 	} else {
 		l.expandedEntries[idx] = true
 	}
+}
+
+// adjustForEvictions shifts cursorEntry and expandedEntries when the
+// EntryBuffer wraps and evicts old entries, preventing index drift.
+func (l *LogView) adjustForEvictions() {
+	if l.entryBuffer == nil {
+		return
+	}
+	evicted := l.entryBuffer.TotalEvicted()
+	delta := evicted - l.lastEvicted
+	if delta <= 0 {
+		return
+	}
+	l.lastEvicted = evicted
+
+	l.cursorEntry -= delta
+	if l.cursorEntry < 0 {
+		l.cursorEntry = 0
+	}
+
+	shifted := make(map[int]bool, len(l.expandedEntries))
+	for idx := range l.expandedEntries {
+		newIdx := idx - delta
+		if newIdx >= 0 {
+			shifted[newIdx] = true
+		}
+	}
+	l.expandedEntries = shifted
 }
 
 // scrollToCursorEntry adjusts viewport offset to keep the cursor entry visible.

@@ -123,6 +123,7 @@ type EntryBuffer struct {
 	capacity int
 	head     int
 	count    int
+	evicted  int // total entries evicted due to capacity wrap
 }
 
 // NewEntryBuffer creates an EntryBuffer with the given capacity.
@@ -143,6 +144,8 @@ func (eb *EntryBuffer) Append(entry *LogEntry) {
 	eb.head = (eb.head + 1) % eb.capacity
 	if eb.count < eb.capacity {
 		eb.count++
+	} else {
+		eb.evicted++
 	}
 	eb.mu.Unlock()
 }
@@ -180,6 +183,13 @@ func (eb *EntryBuffer) Len() int {
 	eb.mu.RLock()
 	defer eb.mu.RUnlock()
 	return eb.count
+}
+
+// TotalEvicted returns the total number of entries evicted due to capacity wrap.
+func (eb *EntryBuffer) TotalEvicted() int {
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+	return eb.evicted
 }
 
 // Get returns the entry at the given logical index (0 = oldest).

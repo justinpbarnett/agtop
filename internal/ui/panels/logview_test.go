@@ -1,6 +1,7 @@
 package panels
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -500,5 +501,73 @@ func TestLogViewCtrlOExpands(t *testing.T) {
 	view := lv.View()
 	if !strings.Contains(view, "Detail text") {
 		t.Error("expected Ctrl+O to expand entry")
+	}
+}
+
+func TestLogViewEvictionAdjustsCursorAndExpanded(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 30)
+	eb := process.NewEntryBuffer(5) // small capacity
+	for i := 0; i < 5; i++ {
+		eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, fmt.Sprintf("Entry %d", i)))
+	}
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+
+	// Manually set cursor to entry 3 and expand entry 2
+	lv.cursorEntry = 3
+	lv.expandedEntries = map[int]bool{2: true}
+	lv.follow = false
+
+	// Append 2 more entries, evicting 2 old entries
+	eb.Append(process.NewLogEntry("14:32:02", "build", process.EventText, "Entry 5"))
+	eb.Append(process.NewLogEntry("14:32:03", "build", process.EventText, "Entry 6"))
+
+	// Simulate receiving a LogLineMsg which triggers adjustForEvictions
+	lv, _ = lv.Update(LogLineMsg{RunID: "001"})
+
+	// cursorEntry should shift from 3 to 1 (3-2=1)
+	if lv.cursorEntry != 1 {
+		t.Errorf("expected cursorEntry=1 after 2 evictions, got %d", lv.cursorEntry)
+	}
+
+	// expandedEntries[2] should shift to [0]
+	if !lv.expandedEntries[0] {
+		t.Error("expected expanded entry to shift from index 2 to index 0")
+	}
+	if lv.expandedEntries[2] {
+		t.Error("expected old expanded index 2 to be removed")
+	}
+}
+
+func TestLogViewEvictionClampsToZero(t *testing.T) {
+	lv := NewLogView()
+	lv.SetSize(80, 30)
+	eb := process.NewEntryBuffer(3)
+	for i := 0; i < 3; i++ {
+		eb.Append(process.NewLogEntry("14:32:01", "build", process.EventText, fmt.Sprintf("Entry %d", i)))
+	}
+	buf := process.NewRingBuffer(100)
+	lv.SetRun("001", "build", "main", buf, eb, false)
+
+	// Cursor at entry 1, expand entry 0
+	lv.cursorEntry = 1
+	lv.expandedEntries = map[int]bool{0: true}
+	lv.follow = false
+
+	// Evict 3 entries (more than cursor position)
+	eb.Append(process.NewLogEntry("14:32:02", "build", process.EventText, "Entry 3"))
+	eb.Append(process.NewLogEntry("14:32:03", "build", process.EventText, "Entry 4"))
+	eb.Append(process.NewLogEntry("14:32:04", "build", process.EventText, "Entry 5"))
+
+	lv, _ = lv.Update(LogLineMsg{RunID: "001"})
+
+	// cursorEntry should clamp to 0 (1-3 = -2 -> 0)
+	if lv.cursorEntry != 0 {
+		t.Errorf("expected cursorEntry clamped to 0, got %d", lv.cursorEntry)
+	}
+	// expandedEntries[0] should be evicted (0-3 = -3, dropped)
+	if len(lv.expandedEntries) != 0 {
+		t.Errorf("expected all expanded entries evicted, got %d", len(lv.expandedEntries))
 	}
 }
