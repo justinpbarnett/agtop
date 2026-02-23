@@ -25,10 +25,12 @@ const (
 )
 
 type SessionFile struct {
-	Version int       `json:"version"`
-	Run     Run       `json:"run"`
-	LogTail []string  `json:"log_tail"`
-	SavedAt time.Time `json:"saved_at"`
+	Version       int       `json:"version"`
+	Run           Run       `json:"run"`
+	LogTail       []string  `json:"log_tail"`
+	StdoutLogPath string    `json:"stdout_log_path,omitempty"`
+	StderrLogPath string    `json:"stderr_log_path,omitempty"`
+	SavedAt       time.Time `json:"saved_at"`
 }
 
 type Persistence struct {
@@ -70,7 +72,7 @@ func (p *Persistence) SessionsDir() string {
 	return p.sessionsDir
 }
 
-func (p *Persistence) Save(r Run, logTail []string) error {
+func (p *Persistence) Save(r Run, logTail []string, stdoutLogPath, stderrLogPath string) error {
 	if r.ID == "" {
 		return nil
 	}
@@ -80,10 +82,12 @@ func (p *Persistence) Save(r Run, logTail []string) error {
 	}
 
 	sf := SessionFile{
-		Version: sessionVersion,
-		Run:     r,
-		LogTail: logTail,
-		SavedAt: time.Now(),
+		Version:       sessionVersion,
+		Run:           r,
+		LogTail:       logTail,
+		StdoutLogPath: stdoutLogPath,
+		StderrLogPath: stderrLogPath,
+		SavedAt:       time.Now(),
 	}
 
 	data, err := json.MarshalIndent(sf, "", "  ")
@@ -166,7 +170,9 @@ func (p *Persistence) Remove(runID string) error {
 }
 
 // BindStore subscribes to store changes and auto-saves runs with debouncing.
-func (p *Persistence) BindStore(store *Store, getLogTail func(runID string) []string) {
+// getLogTail returns recent log lines for a run.
+// getLogPaths returns the stdout/stderr log file paths for a run (may be nil for backward compat).
+func (p *Persistence) BindStore(store *Store, getLogTail func(runID string) []string, getLogPaths func(runID string) (string, string)) {
 	store.Subscribe(func() {
 		runs := store.List()
 		for _, r := range runs {
@@ -198,7 +204,12 @@ func (p *Persistence) BindStore(store *Store, getLogTail func(runID string) []st
 				logTail = getLogTail(r.ID)
 			}
 
-			if err := p.Save(r, logTail); err != nil {
+			var stdoutPath, stderrPath string
+			if getLogPaths != nil {
+				stdoutPath, stderrPath = getLogPaths(r.ID)
+			}
+
+			if err := p.Save(r, logTail, stdoutPath, stderrPath); err != nil {
 				log.Printf("warning: save session %s: %v", r.ID, err)
 			}
 		}
@@ -207,10 +218,14 @@ func (p *Persistence) BindStore(store *Store, getLogTail func(runID string) []st
 
 // RehydrateCallbacks holds optional callbacks invoked during rehydration.
 type RehydrateCallbacks struct {
-	// InjectBuffer restores log lines for a rehydrated run.
+	// InjectBuffer restores log lines for a rehydrated run (backward compat — no log files).
 	InjectBuffer func(runID string, lines []string)
 	// RecordCost replays a skill cost entry into the cost tracker.
 	RecordCost func(runID string, sc SkillCost)
+	// Reconnect tails log files for a live process. Called instead of InjectBuffer when log files exist.
+	Reconnect func(runID string, pid int, stdoutPath, stderrPath string)
+	// ReplayLogFile reads log files for a dead/terminal process. Called instead of InjectBuffer when log files exist.
+	ReplayLogFile func(runID string, stdoutPath, stderrPath string)
 }
 
 // SkillCost is re-exported here to avoid a circular import in the callback
@@ -234,21 +249,40 @@ func (p *Persistence) Rehydrate(store *Store, cb RehydrateCallbacks) (int, []str
 
 	for _, sf := range sessions {
 		r := sf.Run
+		hasLogFiles := sf.StdoutLogPath != "" && sf.StderrLogPath != ""
 
 		if !r.IsTerminal() {
 			if r.PID > 0 && IsProcessAlive(r.PID) {
-				watchIDs = append(watchIDs, r.ID)
+				if hasLogFiles && cb.Reconnect != nil {
+					// Live process with log files: reconnect via file tailing
+					store.Add(&r)
+					cb.Reconnect(r.ID, r.PID, sf.StdoutLogPath, sf.StderrLogPath)
+				} else {
+					// Live process without log files: legacy PID watcher
+					store.Add(&r)
+					watchIDs = append(watchIDs, r.ID)
+					if cb.InjectBuffer != nil && len(sf.LogTail) > 0 {
+						cb.InjectBuffer(r.ID, sf.LogTail)
+					}
+				}
 			} else {
 				r.State = StateFailed
 				r.Error = "process no longer running (agtop restarted)"
 				r.PID = 0
+				store.Add(&r)
+				if hasLogFiles && cb.ReplayLogFile != nil {
+					cb.ReplayLogFile(r.ID, sf.StdoutLogPath, sf.StderrLogPath)
+				} else if cb.InjectBuffer != nil && len(sf.LogTail) > 0 {
+					cb.InjectBuffer(r.ID, sf.LogTail)
+				}
 			}
-		}
-
-		store.Add(&r)
-
-		if cb.InjectBuffer != nil && len(sf.LogTail) > 0 {
-			cb.InjectBuffer(r.ID, sf.LogTail)
+		} else {
+			store.Add(&r)
+			if hasLogFiles && cb.ReplayLogFile != nil {
+				cb.ReplayLogFile(r.ID, sf.StdoutLogPath, sf.StderrLogPath)
+			} else if cb.InjectBuffer != nil && len(sf.LogTail) > 0 {
+				cb.InjectBuffer(r.ID, sf.LogTail)
+			}
 		}
 
 		if cb.RecordCost != nil {

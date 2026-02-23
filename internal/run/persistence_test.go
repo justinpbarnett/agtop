@@ -53,7 +53,7 @@ func TestPersistenceSaveAndLoad(t *testing.T) {
 
 	logTail := []string{"line 1", "line 2", "line 3"}
 
-	if err := p.Save(r, logTail); err != nil {
+	if err := p.Save(r, logTail, "", ""); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -114,7 +114,7 @@ func TestPersistenceSaveAtomic(t *testing.T) {
 	p := tempPersistence(t)
 
 	r := Run{ID: "001", State: StateRunning, CreatedAt: time.Now()}
-	if err := p.Save(r, nil); err != nil {
+	if err := p.Save(r, nil, "", ""); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -145,7 +145,7 @@ func TestPersistenceLoadSkipsCorruptFiles(t *testing.T) {
 
 	// Write a valid session
 	r := Run{ID: "001", State: StateCompleted, CreatedAt: time.Now()}
-	if err := p.Save(r, nil); err != nil {
+	if err := p.Save(r, nil, "", ""); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -211,7 +211,7 @@ func TestPersistenceRehydrateTerminalRuns(t *testing.T) {
 			Cost:      0.50,
 			CreatedAt: now,
 		}
-		if err := p.Save(r, nil); err != nil {
+		if err := p.Save(r, nil, "", ""); err != nil {
 			t.Fatalf("Save %s: %v", state, err)
 		}
 	}
@@ -250,7 +250,7 @@ func TestPersistenceRehydrateDeadProcess(t *testing.T) {
 		PID:       999999999,
 		CreatedAt: time.Now(),
 	}
-	if err := p.Save(r, nil); err != nil {
+	if err := p.Save(r, nil, "", ""); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -287,7 +287,7 @@ func TestPersistenceRehydrateNonTerminalZeroPID(t *testing.T) {
 		PID:       0,
 		CreatedAt: time.Now(),
 	}
-	if err := p.Save(r, nil); err != nil {
+	if err := p.Save(r, nil, "", ""); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -306,7 +306,7 @@ func TestPersistenceRehydrateRestoresNextID(t *testing.T) {
 	now := time.Now()
 	for _, id := range []string{"003", "007", "012"} {
 		r := Run{ID: id, State: StateCompleted, CreatedAt: now}
-		if err := p.Save(r, nil); err != nil {
+		if err := p.Save(r, nil, "", ""); err != nil {
 			t.Fatalf("Save %s: %v", id, err)
 		}
 	}
@@ -330,7 +330,7 @@ func TestPersistenceRehydrateRestoresLogTail(t *testing.T) {
 	}
 
 	r := Run{ID: "001", State: StateCompleted, CreatedAt: time.Now()}
-	if err := p.Save(r, lines); err != nil {
+	if err := p.Save(r, lines, "", ""); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -355,7 +355,7 @@ func TestPersistenceRemove(t *testing.T) {
 	p := tempPersistence(t)
 
 	r := Run{ID: "001", State: StateCompleted, CreatedAt: time.Now()}
-	if err := p.Save(r, nil); err != nil {
+	if err := p.Save(r, nil, "", ""); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -405,7 +405,7 @@ func TestPersistenceSessionFileVersion(t *testing.T) {
 	p := tempPersistence(t)
 
 	r := Run{ID: "001", State: StateCompleted, CreatedAt: time.Now()}
-	if err := p.Save(r, nil); err != nil {
+	if err := p.Save(r, nil, "", ""); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -427,7 +427,7 @@ func TestPersistenceLogTailTruncation(t *testing.T) {
 	}
 
 	r := Run{ID: "001", State: StateCompleted, CreatedAt: time.Now()}
-	if err := p.Save(r, lines); err != nil {
+	if err := p.Save(r, lines, "", ""); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -445,9 +445,9 @@ func TestPersistenceLoadSortsByCreatedAt(t *testing.T) {
 
 	now := time.Now()
 	// Save in non-chronological order
-	p.Save(Run{ID: "002", State: StateCompleted, CreatedAt: now.Add(-10 * time.Minute)}, nil)
-	p.Save(Run{ID: "001", State: StateCompleted, CreatedAt: now.Add(-30 * time.Minute)}, nil)
-	p.Save(Run{ID: "003", State: StateCompleted, CreatedAt: now.Add(-5 * time.Minute)}, nil)
+	p.Save(Run{ID: "002", State: StateCompleted, CreatedAt: now.Add(-10 * time.Minute)}, nil, "", "")
+	p.Save(Run{ID: "001", State: StateCompleted, CreatedAt: now.Add(-30 * time.Minute)}, nil, "", "")
+	p.Save(Run{ID: "003", State: StateCompleted, CreatedAt: now.Add(-5 * time.Minute)}, nil, "", "")
 
 	sessions, err := p.Load()
 	if err != nil {
@@ -492,7 +492,7 @@ func TestPersistenceEmptyDirectory(t *testing.T) {
 func TestPersistenceSaveEmptyID(t *testing.T) {
 	p := tempPersistence(t)
 
-	err := p.Save(Run{ID: ""}, nil)
+	err := p.Save(Run{ID: ""}, nil, "", "")
 	if err != nil {
 		t.Errorf("Save with empty ID should return nil, got: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestPersistenceLoadSkipsTmpFiles(t *testing.T) {
 	p := tempPersistence(t)
 
 	// Write a valid session
-	p.Save(Run{ID: "001", State: StateCompleted, CreatedAt: time.Now()}, nil)
+	p.Save(Run{ID: "001", State: StateCompleted, CreatedAt: time.Now()}, nil, "", "")
 
 	// Write a .tmp file that looks like a session
 	tmpPath := filepath.Join(p.sessionsDir, "002.json.tmp")
@@ -535,7 +535,7 @@ func TestPersistenceRehydrateRestoresCostTracker(t *testing.T) {
 			{SkillName: "build", TotalTokens: 8000, CostUSD: 0.35, CompletedAt: now},
 		},
 	}
-	if err := p.Save(r, nil); err != nil {
+	if err := p.Save(r, nil, "", ""); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 

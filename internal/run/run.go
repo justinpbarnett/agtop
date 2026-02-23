@@ -74,7 +74,7 @@ func (r *Run) StatusIcon() string {
 
 func (r *Run) IsTerminal() bool {
 	switch r.State {
-	case StateCompleted, StateAccepted, StateRejected, StateFailed:
+	case StateCompleted, StateAccepted, StateRejected, StateFailed, StateReviewing, StateMerging:
 		return true
 	}
 	return false

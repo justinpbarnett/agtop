@@ -35,39 +35,50 @@ func (o *OpenCodeRuntime) BuildArgs(prompt string, opts RunOptions) []string {
 	return args
 }
 
-func (o *OpenCodeRuntime) Start(ctx context.Context, prompt string, opts RunOptions) (*Process, error) {
+func (o *OpenCodeRuntime) Start(_ context.Context, prompt string, opts RunOptions) (*Process, error) {
 	args := o.BuildArgs(prompt, opts)
-	cmd := exec.CommandContext(ctx, o.opencodePath, args...)
+	cmd := exec.Command(o.opencodePath, args...)
 	if opts.WorkDir != "" {
 		cmd.Dir = opts.WorkDir
 	}
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdout pipe: %w", err)
+	proc := &Process{Cmd: cmd}
+
+	if opts.StdoutFile != nil {
+		cmd.Stdout = opts.StdoutFile
+		proc.StdoutPath = opts.StdoutFile.Name()
+	} else {
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, fmt.Errorf("stdout pipe: %w", err)
+		}
+		proc.Stdout = stdout
 	}
 
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stderr pipe: %w", err)
+	if opts.StderrFile != nil {
+		cmd.Stderr = opts.StderrFile
+		proc.StderrPath = opts.StderrFile.Name()
+	} else {
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			return nil, fmt.Errorf("stderr pipe: %w", err)
+		}
+		proc.Stderr = stderr
 	}
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start: %w", err)
 	}
 
+	proc.PID = cmd.Process.Pid
+
 	doneCh := make(chan error, 1)
 	go func() {
 		doneCh <- cmd.Wait()
 	}()
+	proc.Done = doneCh
 
-	return &Process{
-		PID:    cmd.Process.Pid,
-		Cmd:    cmd,
-		Stdout: stdout,
-		Stderr: stderr,
-		Done:   doneCh,
-	}, nil
+	return proc, nil
 }
 
 func (o *OpenCodeRuntime) Stop(proc *Process) error {

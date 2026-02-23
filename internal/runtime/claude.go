@@ -43,39 +43,52 @@ func (c *ClaudeRuntime) BuildArgs(prompt string, opts RunOptions) []string {
 	return args
 }
 
-func (c *ClaudeRuntime) Start(ctx context.Context, prompt string, opts RunOptions) (*Process, error) {
+func (c *ClaudeRuntime) Start(_ context.Context, prompt string, opts RunOptions) (*Process, error) {
 	args := c.BuildArgs(prompt, opts)
-	cmd := exec.CommandContext(ctx, c.claudePath, args...)
+	// Use exec.Command (not CommandContext) so the subprocess survives parent exit.
+	// Lifecycle is managed via explicit signals in Stop/Pause/Resume.
+	cmd := exec.Command(c.claudePath, args...)
 	if opts.WorkDir != "" {
 		cmd.Dir = opts.WorkDir
 	}
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdout pipe: %w", err)
+	proc := &Process{Cmd: cmd}
+
+	if opts.StdoutFile != nil {
+		cmd.Stdout = opts.StdoutFile
+		proc.StdoutPath = opts.StdoutFile.Name()
+	} else {
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, fmt.Errorf("stdout pipe: %w", err)
+		}
+		proc.Stdout = stdout
 	}
 
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stderr pipe: %w", err)
+	if opts.StderrFile != nil {
+		cmd.Stderr = opts.StderrFile
+		proc.StderrPath = opts.StderrFile.Name()
+	} else {
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			return nil, fmt.Errorf("stderr pipe: %w", err)
+		}
+		proc.Stderr = stderr
 	}
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start: %w", err)
 	}
 
+	proc.PID = cmd.Process.Pid
+
 	doneCh := make(chan error, 1)
 	go func() {
 		doneCh <- cmd.Wait()
 	}()
+	proc.Done = doneCh
 
-	return &Process{
-		PID:    cmd.Process.Pid,
-		Cmd:    cmd,
-		Stdout: stdout,
-		Stderr: stderr,
-		Done:   doneCh,
-	}, nil
+	return proc, nil
 }
 
 func (c *ClaudeRuntime) Stop(proc *Process) error {

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"io"
+	"os"
 	"os/exec"
 )
 
@@ -20,12 +21,16 @@ type RunOptions struct {
 	MaxTurns       int
 	PermissionMode string
 	Agent          string
+	StdoutFile     *os.File // If set, redirect process stdout to this file instead of a pipe
+	StderrFile     *os.File // If set, redirect process stderr to this file instead of a pipe
 }
 
 type Process struct {
-	PID    int
-	Cmd    *exec.Cmd
-	Stdout io.ReadCloser
-	Stderr io.ReadCloser
-	Done   <-chan error
+	PID        int
+	Cmd        *exec.Cmd
+	Stdout     io.ReadCloser
+	Stderr     io.ReadCloser
+	Done       <-chan error
+	StdoutPath string // Log file path (set when using file-based output)
+	StderrPath string // Log file path (set when using file-based output)
 }
