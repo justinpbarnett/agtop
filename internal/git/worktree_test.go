@@ -121,6 +121,113 @@ func TestWorktreeList(t *testing.T) {
 	}
 }
 
+func TestWorktreeMerge(t *testing.T) {
+	repo := initTestRepo(t)
+	wm := NewWorktreeManager(repo)
+
+	wtPath, _, err := wm.Create("020")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Commit a file in the worktree branch
+	if err := os.WriteFile(filepath.Join(wtPath, "hello.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", "hello.txt"},
+		{"git", "commit", "-m", "add hello"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = wtPath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s: %v", args, out, err)
+		}
+	}
+
+	// Merge back into main
+	if err := wm.Merge("020"); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	// Verify file exists in main repo
+	if _, err := os.Stat(filepath.Join(repo, "hello.txt")); os.IsNotExist(err) {
+		t.Error("hello.txt not found in main repo after merge")
+	}
+}
+
+func TestWorktreeMergeConflict(t *testing.T) {
+	repo := initTestRepo(t)
+	wm := NewWorktreeManager(repo)
+
+	// Create a file in main
+	if err := os.WriteFile(filepath.Join(repo, "conflict.txt"), []byte("main content"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", "conflict.txt"},
+		{"git", "commit", "-m", "add conflict.txt in main"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s: %v", args, out, err)
+		}
+	}
+
+	wtPath, _, err := wm.Create("021")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Make diverging change in worktree
+	if err := os.WriteFile(filepath.Join(wtPath, "conflict.txt"), []byte("worktree content"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", "conflict.txt"},
+		{"git", "commit", "-m", "change conflict.txt in worktree"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = wtPath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s: %v", args, out, err)
+		}
+	}
+
+	// Make diverging change in main
+	if err := os.WriteFile(filepath.Join(repo, "conflict.txt"), []byte("different main content"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", "conflict.txt"},
+		{"git", "commit", "-m", "change conflict.txt in main"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s: %v", args, out, err)
+		}
+	}
+
+	// Merge should fail
+	if err := wm.Merge("021"); err == nil {
+		t.Fatal("Merge should have failed due to conflict")
+	}
+
+	// Verify repo is clean (merge was aborted) — exclude untracked files
+	// since the .agtop worktree directory is expected
+	cmd := exec.Command("git", "status", "--porcelain", "-uno")
+	cmd.Dir = repo
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if len(out) > 0 {
+		t.Errorf("repo not clean after aborted merge: %s", out)
+	}
+}
+
 func TestWorktreeExists(t *testing.T) {
 	repo := initTestRepo(t)
 	wm := NewWorktreeManager(repo)

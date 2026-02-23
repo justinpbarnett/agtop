@@ -67,6 +67,23 @@ func (w *WorktreeManager) Remove(runID string) error {
 	return nil
 }
 
+func (w *WorktreeManager) Merge(runID string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	branch := "agtop/" + runID
+	cmd := exec.Command("git", "merge", branch)
+	cmd.Dir = w.repoRoot
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		abort := exec.Command("git", "merge", "--abort")
+		abort.Dir = w.repoRoot
+		_ = abort.Run()
+		return fmt.Errorf("merge %s: %s: %w", branch, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
 func (w *WorktreeManager) List() ([]WorktreeInfo, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
