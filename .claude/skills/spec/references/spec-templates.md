@@ -16,11 +16,13 @@ task_id: `{task_id}`
 prompt: `{prompt}`
 ```
 
+## Output Templates by Type
+
+Use the template that matches the `type` field in the task spec metadata. Every implementation spec starts with the metadata block carried forward from the task spec, then follows the type-specific structure below.
+
 ---
 
-## Comprehensive Spec — `feat`
-
-Use for new features. Most detailed template with user stories, phased implementation, and testing strategy.
+### `feat` — Feature Implementation
 
 ```md
 # Feature: <feature name>
@@ -28,12 +30,12 @@ Use for new features. Most detailed template with user stories, phased implement
 ## Metadata
 
 type: `feat`
-task_id: `{task_id}`
-prompt: `{prompt}`
+task_id: `<from task spec>`
+prompt: `<from task spec>`
 
 ## Feature Description
 
-<describe the feature in detail, including its purpose and value to users>
+<synthesize the problem and desired outcome from the task spec into a clear feature description>
 
 ## User Story
 
@@ -41,19 +43,9 @@ As a <type of user>
 I want to <action/goal>
 So that <benefit/value>
 
-## Problem Statement
-
-<clearly define the specific problem or opportunity this feature addresses>
-
-## Solution Statement
-
-<describe the proposed solution approach and how it solves the problem>
-
 ## Relevant Files
 
-Use these files to implement the feature:
-
-<list files relevant to the feature with bullet points explaining why>
+<list existing files relevant to the feature with bullet points explaining why>
 
 ### New Files
 
@@ -63,15 +55,15 @@ Use these files to implement the feature:
 
 ### Phase 1: Foundation
 
-<describe the foundational work needed before implementing the main feature>
+<foundational work — schemas, migrations, base classes>
 
 ### Phase 2: Core Implementation
 
-<describe the main implementation work for the feature>
+<main feature logic>
 
 ### Phase 3: Integration
 
-<describe how the feature will integrate with existing functionality>
+<wiring into existing functionality — routes, UI, events>
 
 ## Step by Step Tasks
 
@@ -79,7 +71,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 ### 1. <First Task Name>
 
-- <specific action>
+- <specific action with file path and function name>
 - <specific action>
 
 ### 2. <Second Task Name>
@@ -87,38 +79,36 @@ IMPORTANT: Execute every step in order, top to bottom.
 - <specific action>
 - <specific action>
 
-<continue with additional tasks as needed>
-
 ## Testing Strategy
 
 ### Unit Tests
 
-<describe unit tests needed for the feature>
+<specific test files to create, cases to cover>
 
 ### Edge Cases
 
-<list edge cases that need to be tested>
+<edge cases derived from acceptance criteria and constraints>
 
-## Acceptance Criteria
+## Risk Assessment
 
-<list specific, measurable criteria that must be met for the feature to be considered complete>
+<what existing functionality could break, migration concerns, rollback strategy>
 
 ## Validation Commands
 
-Execute these commands to validate the feature is complete:
+<project's actual check/lint/test commands to verify completion>
 
-<list specific commands to validate the work — use the project's actual check/lint/test commands>
+## Open Questions (Unresolved)
 
-## Notes
+<questions from the task spec that could not be answered from the codebase — these require a human decision before implementation - include a recommended suggestion for each>
 
-<optional additional context, future considerations, or dependencies>
+## Sub-Tasks
+
+<if decomposition is needed, list sub-tasks in execution order with scope boundaries — otherwise write "Single task — no decomposition needed.">
 ```
 
 ---
 
-## Diagnostic Spec — `fix`
-
-Use for bug fixes. Focuses on reproduction, root cause analysis, and regression prevention.
+### `fix` — Bug Fix
 
 ```md
 # Fix: <bug name>
@@ -126,38 +116,32 @@ Use for bug fixes. Focuses on reproduction, root cause analysis, and regression 
 ## Metadata
 
 type: `fix`
-task_id: `{task_id}`
-prompt: `{prompt}`
+task_id: `<from task spec>`
+prompt: `<from task spec>`
 
 ## Bug Description
 
-<describe the bug — what happens vs. what should happen>
+<what happens vs. what should happen>
 
 ## Reproduction Steps
 
-1. <step to reproduce>
-2. <step to reproduce>
-3. <observe: describe the incorrect behavior>
+1. <step>
+2. <step>
+3. <observe: incorrect behavior>
 
-**Expected behavior:** <what should happen instead>
+**Expected behavior:** <what should happen>
 
 ## Root Cause Analysis
 
-<explain why the bug occurs — trace through the code path and identify the exact failure point>
+<trace through the code path — identify the exact failure point with file paths and line numbers>
 
 ## Relevant Files
 
-Use these files to fix the bug:
-
 <list files relevant to the fix with bullet points explaining why>
-
-### New Files
-
-<list new files if needed, otherwise remove this section>
 
 ## Fix Strategy
 
-<describe the targeted approach to fix the bug without introducing side effects>
+<targeted approach to fix without introducing side effects>
 
 ## Step by Step Tasks
 
@@ -165,44 +149,35 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 ### 1. <First Task Name>
 
+- <specific action with file path and function name>
 - <specific action>
-- <specific action>
-
-### 2. <Second Task Name>
-
-- <specific action>
-- <specific action>
-
-<continue with additional tasks as needed>
 
 ## Regression Testing
 
 ### Tests to Add
 
-<describe new tests that verify the fix and prevent regression>
+<new tests that verify the fix and prevent regression>
 
 ### Existing Tests to Verify
 
-<list existing tests that should still pass after the fix>
+<existing tests that must still pass>
+
+## Risk Assessment
+
+<what could break, related areas of concern>
 
 ## Validation Commands
 
-Execute these commands to validate the fix is complete:
+<project's actual check/lint/test commands>
 
-<list specific commands to validate the work — use the project's actual check/lint/test commands>
+## Open Questions (Unresolved)
 
-## Notes
-
-<optional additional context — related bugs, areas of concern, follow-up work>
+<unresolved questions requiring human decision with a suggested recommendation>
 ```
 
 ---
 
-## Architectural Spec — `refactor`, `perf`
-
-Use for refactoring and performance improvements. Emphasizes current vs. target state and measurable outcomes.
-
-### For `refactor`:
+### `refactor` — Refactoring
 
 ```md
 # Refactor: <refactor name>
@@ -210,34 +185,32 @@ Use for refactoring and performance improvements. Emphasizes current vs. target 
 ## Metadata
 
 type: `refactor`
-task_id: `{task_id}`
-prompt: `{prompt}`
+task_id: `<from task spec>`
+prompt: `<from task spec>`
 
 ## Refactor Description
 
-<describe what is being refactored and why the current approach is problematic>
+<what is being refactored and why the current approach is problematic>
 
 ## Current State
 
-<describe the current code architecture, patterns, or structure being refactored>
+<current code architecture, patterns, or structure — with file paths>
 
 ## Target State
 
-<describe what the code should look like after refactoring — the desired architecture, patterns, or structure>
+<desired architecture, patterns, or structure after refactoring>
 
 ## Relevant Files
 
-Use these files to implement the refactor:
-
-<list files relevant to the refactor with bullet points explaining why>
+<list files with bullet points explaining why>
 
 ### New Files
 
-<list new files if needed, otherwise remove this section>
+<new files if needed>
 
 ## Migration Strategy
 
-<describe how to move from current state to target state — especially if the change is incremental or requires backwards compatibility>
+<how to move from current to target state — backwards compatibility, incremental steps>
 
 ## Step by Step Tasks
 
@@ -248,29 +221,30 @@ IMPORTANT: Execute every step in order, top to bottom.
 - <specific action>
 - <specific action>
 
-### 2. <Second Task Name>
-
-- <specific action>
-- <specific action>
-
-<continue with additional tasks as needed>
-
 ## Testing Strategy
 
-<describe how to verify that behavior is unchanged after refactoring — existing tests that must still pass, new tests if coverage gaps exist>
+<how to verify behavior is unchanged — existing tests that must pass, new tests for coverage gaps>
+
+## Risk Assessment
+
+<what could break, deployment concerns>
 
 ## Validation Commands
 
-Execute these commands to validate the refactor is complete:
+<project's actual check/lint/test commands>
 
-<list specific commands to validate the work — use the project's actual check/lint/test commands>
+## Open Questions (Unresolved)
 
-## Notes
+<unresolved questions requiring human decision with a suggested recommendation>
 
-<optional additional context — risks, follow-up refactors, deprecation timeline>
+## Sub-Tasks
+
+<decomposition if needed>
 ```
 
-### For `perf`:
+---
+
+### `perf` — Performance Optimization
 
 ```md
 # Perf: <optimization name>
@@ -278,40 +252,30 @@ Execute these commands to validate the refactor is complete:
 ## Metadata
 
 type: `perf`
-task_id: `{task_id}`
-prompt: `{prompt}`
+task_id: `<from task spec>`
+prompt: `<from task spec>`
 
 ## Performance Issue Description
 
-<describe the performance problem — what is slow, what impact does it have>
+<what is slow and what impact it has>
 
 ## Baseline Metrics
 
-<describe current performance measurements or how to measure them>
-
-- <metric>: <current value or how to obtain it>
-- <metric>: <current value or how to obtain it>
+- <metric>: <current value or how to measure>
+- <metric>: <current value or how to measure>
 
 ## Target Metrics
-
-<describe the performance goals>
 
 - <metric>: <target value>
 - <metric>: <target value>
 
 ## Relevant Files
 
-Use these files to implement the optimization:
-
-<list files relevant to the optimization with bullet points explaining why>
-
-### New Files
-
-<list new files if needed, otherwise remove this section>
+<list files with bullet points explaining why>
 
 ## Optimization Strategy
 
-<describe the approach — what changes will improve performance and why>
+<what changes will improve performance and why>
 
 ## Step by Step Tasks
 
@@ -322,56 +286,47 @@ IMPORTANT: Execute every step in order, top to bottom.
 - <specific action>
 - <specific action>
 
-### 2. <Second Task Name>
-
-- <specific action>
-- <specific action>
-
-<continue with additional tasks as needed>
-
 ## Benchmarking Plan
 
-<describe how to measure the improvement — specific commands, tools, or test scenarios>
+<how to measure improvement — specific commands, tools, test scenarios>
+
+## Risk Assessment
+
+<tradeoffs — memory vs speed, complexity vs performance, what could regress>
 
 ## Validation Commands
 
-Execute these commands to validate the optimization is complete:
+<project's actual check/lint/test commands>
 
-<list specific commands to validate the work — use the project's actual check/lint/test commands>
+## Open Questions (Unresolved)
 
-## Notes
-
-<optional additional context — tradeoffs, memory vs speed, follow-up optimizations>
+<unresolved questions requiring human decision with a suggested recommendation>
 ```
 
 ---
 
-## Lightweight Spec — `chore`, `docs`, `test`, `build`, `ci`
-
-Use for maintenance tasks, documentation, tests, build changes, and CI updates. Simple and direct.
+### `chore`, `docs`, `test`, `build`, `ci` — Lightweight Tasks
 
 ```md
 # <Type>: <task name>
 
 ## Metadata
 
-type: `{type}`
-task_id: `{task_id}`
-prompt: `{prompt}`
+type: `<type>`
+task_id: `<from task spec>`
+prompt: `<from task spec>`
 
 ## Description
 
-<describe the task in detail based on the prompt>
+<synthesize the task from the spec — what needs to happen and why>
 
 ## Relevant Files
 
-Use these files to complete the task:
-
-<list files relevant to the task with bullet points explaining why>
+<list files with bullet points explaining why>
 
 ### New Files
 
-<list new files if needed, otherwise remove this section>
+<new files if needed>
 
 ## Step by Step Tasks
 
@@ -382,20 +337,11 @@ IMPORTANT: Execute every step in order, top to bottom.
 - <specific action>
 - <specific action>
 
-### 2. <Second Task Name>
-
-- <specific action>
-- <specific action>
-
-<continue with additional tasks as needed>
-
 ## Validation Commands
 
-Execute these commands to validate the task is complete:
-
-<list specific commands to validate the work — use the project's actual check/lint/test commands>
+<project's actual check/lint/test commands>
 
 ## Notes
 
-<optional additional context or considerations>
+<additional context or considerations>
 ```
