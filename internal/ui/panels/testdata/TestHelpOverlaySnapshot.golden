@@ -1,0 +1,23 @@
+╭─ Keybinds ───────────────────────────────╮
+│Navigation                                │
+│  j/k  Move up/down                       │
+│  G/gg  Jump to bottom/top                │
+│  h/l  Switch panels (top row)            │
+│  Tab  Cycle panel focus                  │
+│                                          │
+│Actions                                   │
+│  n  New run                              │
+│  y  Yank / copy                          │
+│  p  Pause                                │
+│  r  Resume / Retry                       │
+│  c  Cancel                               │
+│  d  Delete run                           │
+│  a  Accept                               │
+│  x  Reject                               │
+│  D  Dev server toggle                    │
+│                                          │
+│Global                                    │
+│  /  Filter runs                          │
+│  ?  Toggle this help                     │
+│  q  Quit                                 │
+╰─ [?] close  [Esc] close ─────────────────╯

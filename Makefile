@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X github.com/justinpbarnett/agtop/internal/ui/panels.Version=$(VERSION)"
 
-.PHONY: build run install lint clean
+.PHONY: build run install lint clean update-golden
 
 build:
 	go build $(LDFLAGS) -o bin/agtop ./cmd/agtop
@@ -17,3 +17,6 @@ lint:
 
 clean:
 	rm -rf bin/
+
+update-golden:
+	go test ./internal/ui/... -update
