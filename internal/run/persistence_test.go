@@ -216,12 +216,12 @@ func TestPersistenceRehydrateTerminalRuns(t *testing.T) {
 		}
 	}
 
-	count, _, err := p.Rehydrate(store, RehydrateCallbacks{})
+	result, err := p.Rehydrate(store, RehydrateCallbacks{})
 	if err != nil {
 		t.Fatalf("Rehydrate: %v", err)
 	}
-	if count != 4 {
-		t.Errorf("expected 4 rehydrated, got %d", count)
+	if result.Count != 4 {
+		t.Errorf("expected 4 rehydrated, got %d", result.Count)
 	}
 	if store.Count() != 4 {
 		t.Errorf("expected 4 in store, got %d", store.Count())
@@ -254,12 +254,12 @@ func TestPersistenceRehydrateDeadProcess(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	count, _, err := p.Rehydrate(store, RehydrateCallbacks{})
+	result, err := p.Rehydrate(store, RehydrateCallbacks{})
 	if err != nil {
 		t.Fatalf("Rehydrate: %v", err)
 	}
-	if count != 1 {
-		t.Errorf("expected 1, got %d", count)
+	if result.Count != 1 {
+		t.Errorf("expected 1, got %d", result.Count)
 	}
 
 	got, ok := store.Get("001")
@@ -480,12 +480,12 @@ func TestPersistenceEmptyDirectory(t *testing.T) {
 	}
 
 	store := NewStore()
-	count, _, err := p.Rehydrate(store, RehydrateCallbacks{})
+	result, err := p.Rehydrate(store, RehydrateCallbacks{})
 	if err != nil {
 		t.Fatalf("Rehydrate: %v", err)
 	}
-	if count != 0 {
-		t.Errorf("expected 0 rehydrated, got %d", count)
+	if result.Count != 0 {
+		t.Errorf("expected 0 rehydrated, got %d", result.Count)
 	}
 }
 
@@ -557,6 +557,84 @@ func TestPersistenceRehydrateRestoresCostTracker(t *testing.T) {
 	}
 	if recorded[1].SkillName != "build" {
 		t.Errorf("expected second skill 'build', got %s", recorded[1].SkillName)
+	}
+}
+
+func TestPersistenceFinalSave(t *testing.T) {
+	p := tempPersistence(t)
+	store := NewStore()
+
+	now := time.Now()
+	// Add a running run (should be saved)
+	store.Add(&Run{State: StateRunning, PID: 12345, CreatedAt: now})
+	// Add a completed run (should be skipped — terminal)
+	store.Add(&Run{State: StateCompleted, CreatedAt: now})
+	// Add a paused run (should be saved — non-terminal)
+	store.Add(&Run{State: StatePaused, PID: 67890, CreatedAt: now})
+
+	p.FinalSave(store, func(runID string) (string, string) {
+		return "/tmp/stdout-" + runID + ".log", "/tmp/stderr-" + runID + ".log"
+	})
+
+	sessions, err := p.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Only running (001) and paused (003) should be saved; completed (002) is terminal
+	if len(sessions) != 2 {
+		t.Fatalf("expected 2 sessions from FinalSave, got %d", len(sessions))
+	}
+
+	ids := map[string]bool{}
+	for _, sf := range sessions {
+		ids[sf.Run.ID] = true
+	}
+	if !ids["001"] {
+		t.Error("expected running run 001 to be saved")
+	}
+	if !ids["003"] {
+		t.Error("expected paused run 003 to be saved")
+	}
+	if ids["002"] {
+		t.Error("completed run 002 should not have been saved by FinalSave")
+	}
+}
+
+func TestPersistenceRoundTripPreservesPID(t *testing.T) {
+	p := tempPersistence(t)
+
+	r := Run{
+		ID:        "001",
+		State:     StateRunning,
+		PID:       54321,
+		Workflow:  "auto",
+		CreatedAt: time.Now(),
+	}
+	if err := p.Save(r, nil, "/tmp/stdout.log", "/tmp/stderr.log"); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	sessions, err := p.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+
+	sf := sessions[0]
+	if sf.Run.PID != 54321 {
+		t.Errorf("PID: got %d, want 54321", sf.Run.PID)
+	}
+	if sf.Run.State != StateRunning {
+		t.Errorf("State: got %s, want %s", sf.Run.State, StateRunning)
+	}
+	if sf.StdoutLogPath != "/tmp/stdout.log" {
+		t.Errorf("StdoutLogPath: got %s, want /tmp/stdout.log", sf.StdoutLogPath)
+	}
+	if sf.StderrLogPath != "/tmp/stderr.log" {
+		t.Errorf("StderrLogPath: got %s, want /tmp/stderr.log", sf.StderrLogPath)
 	}
 }
 

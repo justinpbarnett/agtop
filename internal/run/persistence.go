@@ -216,6 +216,28 @@ func (p *Persistence) BindStore(store *Store, getLogTail func(runID string) []st
 	})
 }
 
+// FinalSave synchronously saves all non-terminal runs, bypassing debounce.
+// Called during TUI shutdown to ensure PIDs and state are preserved on disk.
+func (p *Persistence) FinalSave(store *Store, getLogPaths func(runID string) (string, string)) {
+	for _, r := range store.List() {
+		if strings.Contains(r.ID, ":") {
+			continue
+		}
+		if r.IsTerminal() {
+			continue
+		}
+
+		var stdoutPath, stderrPath string
+		if getLogPaths != nil {
+			stdoutPath, stderrPath = getLogPaths(r.ID)
+		}
+
+		if err := p.Save(r, nil, stdoutPath, stderrPath); err != nil {
+			log.Printf("warning: final save %s: %v", r.ID, err)
+		}
+	}
+}
+
 // RehydrateCallbacks holds optional callbacks invoked during rehydration.
 type RehydrateCallbacks struct {
 	// InjectBuffer restores log lines for a rehydrated run (backward compat — no log files).
@@ -232,19 +254,26 @@ type RehydrateCallbacks struct {
 // signature. Callers pass cost.SkillCost values; see the adapter in app.go.
 type SkillCost = cost.SkillCost
 
+// RehydrateResult holds the outcome of rehydration.
+type RehydrateResult struct {
+	Count          int
+	WatchIDs       []string // runs using legacy PID watching (no log files)
+	ReconnectedIDs []string // runs reconnected via log file tailing
+}
+
 // Rehydrate loads session files and restores them into the store.
-// Returns the number of rehydrated runs and the IDs of runs with live PIDs.
-func (p *Persistence) Rehydrate(store *Store, cb RehydrateCallbacks) (int, []string, error) {
+// Returns a RehydrateResult with counts and IDs.
+func (p *Persistence) Rehydrate(store *Store, cb RehydrateCallbacks) (RehydrateResult, error) {
 	sessions, err := p.Load()
 	if err != nil {
-		return 0, nil, err
+		return RehydrateResult{}, err
 	}
 
 	if len(sessions) == 0 {
-		return 0, nil, nil
+		return RehydrateResult{}, nil
 	}
 
-	var watchIDs []string
+	var result RehydrateResult
 	maxID := 0
 
 	for _, sf := range sessions {
@@ -257,10 +286,11 @@ func (p *Persistence) Rehydrate(store *Store, cb RehydrateCallbacks) (int, []str
 					// Live process with log files: reconnect via file tailing
 					store.Add(&r)
 					cb.Reconnect(r.ID, r.PID, sf.StdoutLogPath, sf.StderrLogPath)
+					result.ReconnectedIDs = append(result.ReconnectedIDs, r.ID)
 				} else {
 					// Live process without log files: legacy PID watcher
 					store.Add(&r)
-					watchIDs = append(watchIDs, r.ID)
+					result.WatchIDs = append(result.WatchIDs, r.ID)
 					if cb.InjectBuffer != nil && len(sf.LogTail) > 0 {
 						cb.InjectBuffer(r.ID, sf.LogTail)
 					}
@@ -310,25 +340,26 @@ func (p *Persistence) Rehydrate(store *Store, cb RehydrateCallbacks) (int, []str
 	}
 	p.mu.Unlock()
 
-	return len(sessions), watchIDs, nil
+	result.Count = len(sessions)
+	return result, nil
 }
 
 // RehydrateWithWatcher loads sessions and starts a PID watcher for live processes.
-// Returns the count of rehydrated runs and a cancel function for the watcher.
-func (p *Persistence) RehydrateWithWatcher(store *Store, cb RehydrateCallbacks) (int, context.CancelFunc, error) {
-	count, watchIDs, err := p.Rehydrate(store, cb)
+// Returns RehydrateResult and a cancel function for the watcher.
+func (p *Persistence) RehydrateWithWatcher(store *Store, cb RehydrateCallbacks) (RehydrateResult, context.CancelFunc, error) {
+	result, err := p.Rehydrate(store, cb)
 	if err != nil {
-		return 0, func() {}, err
+		return RehydrateResult{}, func() {}, err
 	}
 
 	var cancel context.CancelFunc
-	if len(watchIDs) > 0 {
-		cancel = WatchPIDs(watchIDs, store, 5*time.Second)
+	if len(result.WatchIDs) > 0 {
+		cancel = WatchPIDs(result.WatchIDs, store, 5*time.Second)
 	} else {
 		cancel = func() {}
 	}
 
-	return count, cancel, nil
+	return result, cancel, nil
 }
 
 // WatchPIDs monitors a set of run IDs whose PIDs were alive at rehydration time.

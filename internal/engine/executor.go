@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -17,13 +18,15 @@ import (
 )
 
 type Executor struct {
-	store    *run.Store
-	manager  *process.Manager
-	registry *Registry
-	cfg      *config.Config
-	limiter  *cost.LimitChecker
-	mu       sync.Mutex
-	active   map[string]context.CancelFunc
+	store        *run.Store
+	manager      *process.Manager
+	registry     *Registry
+	cfg          *config.Config
+	limiter      *cost.LimitChecker
+	mu           sync.Mutex
+	active       map[string]context.CancelFunc
+	wg           sync.WaitGroup
+	shuttingDown bool
 }
 
 func NewExecutor(store *run.Store, manager *process.Manager, registry *Registry, cfg *config.Config) *Executor {
@@ -61,6 +64,7 @@ func (e *Executor) Execute(runID string, workflowName string, userPrompt string)
 		r.SkillTotal = len(skills)
 		r.Workflow = workflowName
 		r.State = run.StateRunning
+		r.StartedAt = time.Now()
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -69,7 +73,9 @@ func (e *Executor) Execute(runID string, workflowName string, userPrompt string)
 	e.active[runID] = cancel
 	e.mu.Unlock()
 
+	e.wg.Add(1)
 	go func() {
+		defer e.wg.Done()
 		defer func() {
 			e.mu.Lock()
 			delete(e.active, runID)
@@ -88,6 +94,36 @@ func (e *Executor) Cancel(runID string) {
 	if ok {
 		cancel()
 	}
+}
+
+// Shutdown gracefully stops all active workflow goroutines. It sets a flag
+// so that executeWorkflow exits without marking runs as failed, then cancels
+// all contexts and waits for goroutines to drain (with a timeout).
+func (e *Executor) Shutdown() {
+	e.mu.Lock()
+	e.shuttingDown = true
+	for _, cancel := range e.active {
+		cancel()
+	}
+	e.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		e.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		log.Printf("warning: executor shutdown timed out after 3s")
+	}
+}
+
+func (e *Executor) isShuttingDown() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.shuttingDown
 }
 
 // Resume restarts a failed or paused run from its last incomplete skill.
@@ -124,6 +160,9 @@ func (e *Executor) Resume(runID string, userPrompt string) error {
 	e.store.Update(runID, func(r *run.Run) {
 		r.State = run.StateRunning
 		r.Error = ""
+		if r.StartedAt.IsZero() {
+			r.StartedAt = time.Now()
+		}
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -132,7 +171,9 @@ func (e *Executor) Resume(runID string, userPrompt string) error {
 	e.active[runID] = cancel
 	e.mu.Unlock()
 
+	e.wg.Add(1)
 	go func() {
+		defer e.wg.Done()
 		defer func() {
 			e.mu.Lock()
 			delete(e.active, runID)
@@ -143,6 +184,55 @@ func (e *Executor) Resume(runID string, userPrompt string) error {
 	}()
 
 	return nil
+}
+
+// ResumeReconnected restarts workflow execution for a run that was reconnected
+// after a TUI restart. Unlike Resume(), it does not change run state — the run
+// is already running with a live process attached via Reconnect().
+func (e *Executor) ResumeReconnected(runID string, userPrompt string) {
+	r, ok := e.store.Get(runID)
+	if !ok {
+		return
+	}
+
+	var skills []string
+	if r.Workflow == "auto" {
+		skills = []string{"route"}
+	} else {
+		var err error
+		skills, err = ResolveWorkflow(e.cfg, r.Workflow)
+		if err != nil {
+			return
+		}
+	}
+
+	// Start from the current skill (SkillIndex is 1-based)
+	startIdx := r.SkillIndex - 1
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if startIdx >= len(skills) {
+		startIdx = 0
+	}
+	remainingSkills := skills[startIdx:]
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	e.mu.Lock()
+	e.active[runID] = cancel
+	e.mu.Unlock()
+
+	e.wg.Add(1)
+	go func() {
+		defer e.wg.Done()
+		defer func() {
+			e.mu.Lock()
+			delete(e.active, runID)
+			e.mu.Unlock()
+		}()
+
+		e.executeWorkflow(ctx, runID, remainingSkills, userPrompt)
+	}()
 }
 
 // FollowUp sends a follow-up prompt to a completed run, reusing its worktree.
@@ -168,7 +258,9 @@ func (e *Executor) FollowUp(runID, followUpPrompt string) error {
 	e.active[runID] = cancel
 	e.mu.Unlock()
 
+	e.wg.Add(1)
 	go func() {
+		defer e.wg.Done()
 		defer func() {
 			e.mu.Lock()
 			delete(e.active, runID)
@@ -210,6 +302,9 @@ func (e *Executor) executeFollowUp(ctx context.Context, runID string, followUpPr
 
 	_, err := e.runSkill(ctx, runID, prompt, opts, skill.Timeout)
 	if err != nil {
+		if errors.Is(err, process.ErrDisconnected) || e.isShuttingDown() {
+			return
+		}
 		e.store.Update(runID, func(r *run.Run) {
 			r.State = run.StateFailed
 			r.Error = fmt.Sprintf("follow-up failed: %v", err)
@@ -236,6 +331,10 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 		// Check if cancelled
 		select {
 		case <-ctx.Done():
+			// If TUI is shutting down, leave state as-is for reconnection
+			if e.isShuttingDown() {
+				return
+			}
 			e.store.Update(runID, func(r *run.Run) {
 				r.State = run.StateFailed
 				r.Error = "cancelled"
@@ -284,6 +383,10 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 		// Execute skill
 		result, err := e.runSkill(ctx, runID, prompt, opts, skill.Timeout)
 		if err != nil {
+			// If TUI is shutting down, leave state as-is for reconnection
+			if errors.Is(err, process.ErrDisconnected) || e.isShuttingDown() {
+				return
+			}
 			e.store.Update(runID, func(r *run.Run) {
 				r.State = run.StateFailed
 				r.Error = fmt.Sprintf("skill %s failed: %v", skillName, err)
@@ -398,6 +501,11 @@ func (e *Executor) runSkill(ctx context.Context, runID string, prompt string, op
 			return result, nil
 		}
 
+		// If disconnecting, propagate without marking as failure
+		if errors.Is(result.Err, process.ErrDisconnected) {
+			return result, result.Err
+		}
+
 		// Check if the error is a rate limit and we can retry
 		if attempt < maxRetries && e.limiter.IsRateLimit(result.Err.Error()) {
 			buf := e.manager.Buffer(runID)
@@ -427,6 +535,9 @@ func (e *Executor) waitIfPaused(ctx context.Context, runID string) bool {
 		}
 		select {
 		case <-ctx.Done():
+			if e.isShuttingDown() {
+				return false
+			}
 			e.store.Update(runID, func(r *run.Run) {
 				r.State = run.StateFailed
 				r.Error = "cancelled"

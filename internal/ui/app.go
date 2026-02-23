@@ -157,13 +157,24 @@ func NewApp(cfg *config.Config) App {
 			cb.Reconnect = mgr.Reconnect
 			cb.ReplayLogFile = mgr.ReplayLogFile
 		}
-		count, cancel, rehydrateErr := persist.RehydrateWithWatcher(store, cb)
+		rehydrateResult, cancel, rehydrateErr := persist.RehydrateWithWatcher(store, cb)
 		if rehydrateErr != nil {
 			log.Printf("warning: rehydrate sessions: %v", rehydrateErr)
 		}
 		pidWatchCancel = cancel
-		if count > 0 {
-			log.Printf("rehydrated %d runs from session", count)
+		if rehydrateResult.Count > 0 {
+			log.Printf("rehydrated %d runs from session", rehydrateResult.Count)
+		}
+
+		// Resume workflows for reconnected runs
+		if exec != nil {
+			for _, id := range rehydrateResult.ReconnectedIDs {
+				r, ok := store.Get(id)
+				if ok && !r.IsTerminal() && r.Workflow != "" {
+					log.Printf("resuming workflow for reconnected run %s", id)
+					exec.ResumeReconnected(id, r.Prompt)
+				}
+			}
 		}
 
 		// Bind auto-save with log file path getter
@@ -265,14 +276,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case InitAcceptedMsg:
 		a.initPrompt = nil
-		a.statusBar.SetFlash("Running agtop init...")
+		a.statusBar.SetFlashWithLevel("Running agtop init...", panels.FlashInfo)
 		return a, tea.Batch(runInitCmd(), flashClearCmd())
 
 	case InitResultMsg:
 		if msg.Err != nil {
-			a.statusBar.SetFlash(fmt.Sprintf("Init failed: %v", msg.Err))
+			a.statusBar.SetFlashWithLevel(fmt.Sprintf("Init failed: %v", msg.Err), panels.FlashError)
 		} else {
-			a.statusBar.SetFlash("agtop init complete")
+			a.statusBar.SetFlashWithLevel("agtop init complete", panels.FlashSuccess)
 		}
 		return a, flashClearCmd()
 
@@ -361,14 +372,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SubmitFollowUpMsg:
 		if a.executor != nil {
 			if err := a.executor.FollowUp(msg.RunID, msg.Prompt); err != nil {
-				a.statusBar.SetFlash(fmt.Sprintf("follow-up: %v", err))
+				a.statusBar.SetFlashWithLevel(fmt.Sprintf("follow-up: %v", err), panels.FlashError)
 				return a, flashClearCmd()
 			}
 		}
 		return a, nil
 
 	case process.CostThresholdMsg:
-		a.statusBar.SetFlash(msg.Reason)
+		a.statusBar.SetFlashWithLevel(msg.Reason, panels.FlashWarning)
 		return a, flashClearCmd()
 
 	case ClearFlashMsg:
@@ -378,9 +389,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case YankMsg:
 		if msg.Text != "" {
 			if err := clipboard.Write(msg.Text); err != nil {
-				a.statusBar.SetFlash(fmt.Sprintf("Copy failed: %v", err))
+				a.statusBar.SetFlashWithLevel(fmt.Sprintf("Copy failed: %v", err), panels.FlashError)
 			} else {
-				a.statusBar.SetFlash("Copied to clipboard")
+				a.statusBar.SetFlashWithLevel("Copied to clipboard", panels.FlashSuccess)
 			}
 			return a, flashClearCmd()
 		}
@@ -603,12 +614,30 @@ func (a App) Executor() *engine.Executor {
 	return a.executor
 }
 
-// cleanup disconnects from running processes (without killing them),
-// stops dev servers, and cancels PID watchers. Called on TUI exit.
+// cleanup gracefully shuts down the executor and disconnects from running
+// processes (without killing them), then saves state and stops dev servers.
 func (a App) cleanup() {
+	// 1. Shut down executor — cancels workflow goroutines, waits for drain
+	if a.executor != nil {
+		a.executor.Shutdown()
+	}
+
+	// 2. Set disconnecting flag so consume* goroutines preserve PID/state
+	if a.manager != nil {
+		a.manager.SetDisconnecting()
+	}
+
+	// 3. Cancel FollowReader contexts
 	if a.manager != nil {
 		a.manager.DisconnectAll()
 	}
+
+	// 4. Final synchronous save of all non-terminal runs with PIDs intact
+	if a.persistence != nil && a.manager != nil {
+		a.persistence.FinalSave(a.store, a.manager.LogFilePaths)
+	}
+
+	// 5. Stop dev servers and PID watchers
 	a.devServers.StopAll()
 	if a.pidWatchCancel != nil {
 		a.pidWatchCancel()
@@ -651,9 +680,9 @@ func (a App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			text := a.logView.FinalizeMouseSelection(relX, relY)
 			if text != "" {
 				if err := clipboard.Write(text); err != nil {
-					a.statusBar.SetFlash(fmt.Sprintf("Copy failed: %v", err))
+					a.statusBar.SetFlashWithLevel(fmt.Sprintf("Copy failed: %v", err), panels.FlashError)
 				} else {
-					a.statusBar.SetFlash("Copied to clipboard")
+					a.statusBar.SetFlashWithLevel("Copied to clipboard", panels.FlashSuccess)
 				}
 				return a, flashClearCmd()
 			}
@@ -763,14 +792,14 @@ func (a *App) updateFocusState() {
 func (a App) handleAccept() (tea.Model, tea.Cmd) {
 	selected := a.runList.SelectedRun()
 	if selected == nil {
-		a.statusBar.SetFlash("No run selected")
+		a.statusBar.SetFlashWithLevel("No run selected", panels.FlashWarning)
 		return a, flashClearCmd()
 	}
 
 	// Allow re-accept of failed merge pipelines
 	if selected.State != run.StateCompleted && selected.State != run.StateReviewing &&
 		!(selected.State == run.StateFailed && selected.MergeStatus != "") {
-		a.statusBar.SetFlash(fmt.Sprintf("Cannot accept: run is %s", selected.State))
+		a.statusBar.SetFlashWithLevel(fmt.Sprintf("Cannot accept: run is %s", selected.State), panels.FlashError)
 		return a, flashClearCmd()
 	}
 
@@ -785,51 +814,44 @@ func (a App) handleAccept() (tea.Model, tea.Cmd) {
 			r.MergeStatus = "starting"
 			r.Error = ""
 		})
-		worktrees := a.worktrees
-		store := a.store
 		go func() {
 			ctx := context.Background()
 			a.pipeline.Run(ctx, runID)
-			// Cleanup worktree after pipeline completes (success or failure)
-			r, ok := store.Get(runID)
+			r, ok := a.store.Get(runID)
 			if ok && r.State == run.StateAccepted {
-				_ = worktrees.Remove(runID)
-				store.Update(runID, func(r *run.Run) { r.Worktree = "" })
+				a.cleanupRun(runID)
 			}
 		}()
-		a.statusBar.SetFlash("Merge pipeline started")
+		a.statusBar.SetFlashWithLevel("Merge pipeline started", panels.FlashSuccess)
 		return a, flashClearCmd()
 	}
 
 	// Legacy flow: merge locally then clean up
 	a.store.Update(runID, func(r *run.Run) { r.State = run.StateAccepted })
 
-	worktrees := a.worktrees
-	store := a.store
 	go func() {
-		if err := worktrees.Merge(runID); err != nil {
-			store.Update(runID, func(r *run.Run) {
+		if err := a.worktrees.Merge(runID); err != nil {
+			a.store.Update(runID, func(r *run.Run) {
 				r.State = run.StateFailed
 				r.Error = fmt.Sprintf("merge failed: %v", err)
 			})
 			return
 		}
-		_ = worktrees.Remove(runID)
-		store.Update(runID, func(r *run.Run) { r.Worktree = "" })
+		a.cleanupRun(runID)
 	}()
 
-	a.statusBar.SetFlash("Merging into current branch...")
+	a.statusBar.SetFlashWithLevel("Merging and cleaning up...", panels.FlashSuccess)
 	return a, flashClearCmd()
 }
 
 func (a App) handleReject() (tea.Model, tea.Cmd) {
 	selected := a.runList.SelectedRun()
 	if selected == nil {
-		a.statusBar.SetFlash("No run selected")
+		a.statusBar.SetFlashWithLevel("No run selected", panels.FlashWarning)
 		return a, flashClearCmd()
 	}
 	if selected.State != run.StateCompleted && selected.State != run.StateReviewing {
-		a.statusBar.SetFlash(fmt.Sprintf("Cannot reject: run is %s", selected.State))
+		a.statusBar.SetFlashWithLevel(fmt.Sprintf("Cannot reject: run is %s", selected.State), panels.FlashError)
 		return a, flashClearCmd()
 	}
 
@@ -853,11 +875,11 @@ func (a App) handleReject() (tea.Model, tea.Cmd) {
 func (a App) handleDevServerToggle() (tea.Model, tea.Cmd) {
 	selected := a.runList.SelectedRun()
 	if selected == nil {
-		a.statusBar.SetFlash("No run selected")
+		a.statusBar.SetFlashWithLevel("No run selected", panels.FlashWarning)
 		return a, flashClearCmd()
 	}
 	if selected.State != run.StateCompleted && selected.State != run.StateReviewing {
-		a.statusBar.SetFlash(fmt.Sprintf("Dev server: run is %s", selected.State))
+		a.statusBar.SetFlashWithLevel(fmt.Sprintf("Dev server: run is %s", selected.State), panels.FlashWarning)
 		return a, flashClearCmd()
 	}
 
@@ -872,7 +894,7 @@ func (a App) handleDevServerToggle() (tea.Model, tea.Cmd) {
 	} else if selected.Worktree != "" {
 		port, err := a.devServers.Start(runID, selected.Worktree)
 		if err != nil {
-			a.statusBar.SetFlash(fmt.Sprintf("dev server: %v", err))
+			a.statusBar.SetFlashWithLevel(fmt.Sprintf("dev server: %v", err), panels.FlashError)
 			return a, flashClearCmd()
 		} else if port > 0 {
 			url := fmt.Sprintf("http://localhost:%d", port)
@@ -880,7 +902,7 @@ func (a App) handleDevServerToggle() (tea.Model, tea.Cmd) {
 				r.DevServerPort = port
 				r.DevServerURL = url
 			})
-			a.statusBar.SetFlash(fmt.Sprintf("Dev server: %s", url))
+			a.statusBar.SetFlashWithLevel(fmt.Sprintf("Dev server: %s", url), panels.FlashSuccess)
 			return a, flashClearCmd()
 		}
 	}
@@ -891,7 +913,7 @@ func (a App) handleDevServerToggle() (tea.Model, tea.Cmd) {
 func (a App) handleTogglePause() (tea.Model, tea.Cmd) {
 	selected := a.runList.SelectedRun()
 	if selected == nil {
-		a.statusBar.SetFlash("No run selected")
+		a.statusBar.SetFlashWithLevel("No run selected", panels.FlashWarning)
 		return a, flashClearCmd()
 	}
 
@@ -901,7 +923,7 @@ func (a App) handleTogglePause() (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if err := a.manager.Pause(selected.ID); err != nil {
-			a.statusBar.SetFlash(fmt.Sprintf("Pause: %v", err))
+			a.statusBar.SetFlashWithLevel(fmt.Sprintf("Pause: %v", err), panels.FlashError)
 			return a, flashClearCmd()
 		}
 		return a, nil
@@ -909,7 +931,7 @@ func (a App) handleTogglePause() (tea.Model, tea.Cmd) {
 	case run.StatePaused:
 		if a.manager != nil {
 			if err := a.manager.Resume(selected.ID); err != nil {
-				a.statusBar.SetFlash(fmt.Sprintf("Resume: %v", err))
+				a.statusBar.SetFlashWithLevel(fmt.Sprintf("Resume: %v", err), panels.FlashError)
 				return a, flashClearCmd()
 			}
 			return a, nil
@@ -919,7 +941,7 @@ func (a App) handleTogglePause() (tea.Model, tea.Cmd) {
 	case run.StateFailed:
 		if a.executor != nil {
 			if err := a.executor.Resume(selected.ID, selected.Prompt); err != nil {
-				a.statusBar.SetFlash(fmt.Sprintf("Resume: %v", err))
+				a.statusBar.SetFlashWithLevel(fmt.Sprintf("Resume: %v", err), panels.FlashError)
 				return a, flashClearCmd()
 			}
 			return a, nil
@@ -927,7 +949,7 @@ func (a App) handleTogglePause() (tea.Model, tea.Cmd) {
 		return a, nil
 
 	default:
-		a.statusBar.SetFlash(fmt.Sprintf("Cannot pause/resume: run is %s", selected.State))
+		a.statusBar.SetFlashWithLevel(fmt.Sprintf("Cannot pause/resume: run is %s", selected.State), panels.FlashError)
 		return a, flashClearCmd()
 	}
 }
@@ -935,11 +957,11 @@ func (a App) handleTogglePause() (tea.Model, tea.Cmd) {
 func (a App) handleRestart() (tea.Model, tea.Cmd) {
 	selected := a.runList.SelectedRun()
 	if selected == nil {
-		a.statusBar.SetFlash("No run selected")
+		a.statusBar.SetFlashWithLevel("No run selected", panels.FlashWarning)
 		return a, flashClearCmd()
 	}
 	if !selected.IsTerminal() && selected.State != run.StateReviewing {
-		a.statusBar.SetFlash(fmt.Sprintf("Cannot restart: run is %s", selected.State))
+		a.statusBar.SetFlashWithLevel(fmt.Sprintf("Cannot restart: run is %s", selected.State), panels.FlashError)
 		return a, flashClearCmd()
 	}
 	if a.executor == nil {
@@ -961,14 +983,14 @@ func (a App) handleRestart() (tea.Model, tea.Cmd) {
 func (a App) handleCancel() (tea.Model, tea.Cmd) {
 	selected := a.runList.SelectedRun()
 	if selected == nil {
-		a.statusBar.SetFlash("No run selected")
+		a.statusBar.SetFlashWithLevel("No run selected", panels.FlashWarning)
 		return a, flashClearCmd()
 	}
 	if a.manager == nil {
 		return a, nil
 	}
 	if selected.State != run.StateRunning && selected.State != run.StatePaused && selected.State != run.StateQueued {
-		a.statusBar.SetFlash(fmt.Sprintf("Cannot cancel: run is %s", selected.State))
+		a.statusBar.SetFlashWithLevel(fmt.Sprintf("Cannot cancel: run is %s", selected.State), panels.FlashError)
 		return a, flashClearCmd()
 	}
 
@@ -989,17 +1011,23 @@ func (a App) handleCancel() (tea.Model, tea.Cmd) {
 func (a App) handleDelete() (tea.Model, tea.Cmd) {
 	selected := a.runList.SelectedRun()
 	if selected == nil {
-		a.statusBar.SetFlash("No run selected")
+		a.statusBar.SetFlashWithLevel("No run selected", panels.FlashWarning)
 		return a, flashClearCmd()
 	}
 	if !selected.IsTerminal() {
-		a.statusBar.SetFlash("Cannot delete: run is still active")
+		a.statusBar.SetFlashWithLevel("Cannot delete: run is still active", panels.FlashError)
 		return a, flashClearCmd()
 	}
 
-	runID := selected.ID
+	a.cleanupRun(selected.ID)
 
-	// Get log file paths before removing buffers (which closes handles)
+	a.statusBar.SetFlashWithLevel(fmt.Sprintf("Deleted run %s", selected.ID), panels.FlashSuccess)
+	return a, flashClearCmd()
+}
+
+// cleanupRun removes a run and all its associated resources: buffers, dev server,
+// store entry, worktree, session file, and log files. Safe to call from goroutines.
+func (a App) cleanupRun(runID string) {
 	var stdoutLog, stderrLog string
 	if a.manager != nil {
 		stdoutLog, stderrLog = a.manager.LogFilePaths(runID)
@@ -1016,19 +1044,16 @@ func (a App) handleDelete() (tea.Model, tea.Cmd) {
 		}
 		process.RemoveLogFiles(stdoutLog, stderrLog)
 	}()
-
-	a.statusBar.SetFlash(fmt.Sprintf("Deleted run %s", runID))
-	return a, flashClearCmd()
 }
 
 func (a App) handleFollowUp() (tea.Model, tea.Cmd) {
 	selected := a.runList.SelectedRun()
 	if selected == nil {
-		a.statusBar.SetFlash("No run selected")
+		a.statusBar.SetFlashWithLevel("No run selected", panels.FlashWarning)
 		return a, flashClearCmd()
 	}
 	if selected.State != run.StateCompleted && selected.State != run.StateReviewing {
-		a.statusBar.SetFlash(fmt.Sprintf("Cannot follow up: run is %s", selected.State))
+		a.statusBar.SetFlashWithLevel(fmt.Sprintf("Cannot follow up: run is %s", selected.State), panels.FlashError)
 		return a, flashClearCmd()
 	}
 

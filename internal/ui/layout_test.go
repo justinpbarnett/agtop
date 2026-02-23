@@ -8,7 +8,7 @@ import (
 )
 
 func TestPanelWidthsInFullLayout(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a = sendWindowSize(a, 120, 40)
 
 	// Render each panel individually and check widths

@@ -3,10 +3,13 @@ package process
 import (
 	"context"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/justinpbarnett/agtop/internal/config"
+	"github.com/justinpbarnett/agtop/internal/cost"
 	"github.com/justinpbarnett/agtop/internal/run"
 	"github.com/justinpbarnett/agtop/internal/runtime"
 )
@@ -101,6 +104,50 @@ func TestStartSkillDoesNotSetTerminalState(t *testing.T) {
 	}
 }
 
+func TestStartSkillDisconnectPreservesPID(t *testing.T) {
+	doneCh := make(chan error, 1)
+	rt := makeSkillMockRuntime("done", doneCh)
+	mgr, store := testManager(rt)
+
+	store.Add(&run.Run{State: run.StateRunning, CurrentSkill: "build"})
+	runID := "001"
+
+	ch, err := mgr.StartSkill(runID, "test prompt", runtime.RunOptions{})
+	if err != nil {
+		t.Fatalf("start skill: %v", err)
+	}
+
+	// Mark manager as disconnecting BEFORE process exits
+	mgr.SetDisconnecting()
+
+	// Signal process exit
+	doneCh <- nil
+
+	select {
+	case result := <-ch:
+		if result.Err != ErrDisconnected {
+			t.Errorf("expected ErrDisconnected, got %v", result.Err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for result")
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	r, ok := store.Get(runID)
+	if !ok {
+		t.Fatal("run not found in store")
+	}
+	// PID should NOT be zeroed when disconnecting
+	if r.PID == 0 {
+		t.Error("PID should NOT be zeroed when disconnecting")
+	}
+	// State should still be running (not failed/completed)
+	if r.State != run.StateRunning {
+		t.Errorf("expected state Running (preserved), got %s", r.State)
+	}
+}
+
 func TestStartSkillCapturesResultText(t *testing.T) {
 	doneCh := make(chan error, 1)
 	expectedText := "The feature has been implemented successfully"
@@ -126,4 +173,87 @@ func TestStartSkillCapturesResultText(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for result")
 	}
+}
+
+// TestStartSkillWithLogFilesCompletes verifies that StartSkill completes when
+// using log files (FollowReader) instead of pipes. Before the fix, the
+// FollowReader would poll on EOF forever after the process exited, causing
+// a deadlock in consumeSkillEvents.
+func TestStartSkillWithLogFilesCompletes(t *testing.T) {
+	sessionsDir := t.TempDir()
+
+	resultText := "build"
+	doneCh := make(chan error, 1)
+
+	// Mock runtime that writes events to the StdoutFile (log file) when provided.
+	rt := &mockRuntime{
+		startFn: func(_ context.Context, _ string, opts runtime.RunOptions) (*runtime.Process, error) {
+			var stdout io.ReadCloser
+			if opts.StdoutFile != nil {
+				// Write events to the log file, as the real runtime would
+				opts.StdoutFile.Write([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"Routing..."}]}}` + "\n"))
+				opts.StdoutFile.Write([]byte(`{"type":"result","result":"` + resultText + `","usage":{"input_tokens":42,"output_tokens":100},"total_cost_usd":0.03}` + "\n"))
+				opts.StdoutFile.Sync()
+				// No pipe stdout — FollowReader will read the file
+				stdout = io.NopCloser(strings.NewReader(""))
+			} else {
+				t.Fatal("expected StdoutFile to be set when sessionsDir is configured")
+				return nil, nil
+			}
+
+			var stderr io.ReadCloser
+			if opts.StderrFile != nil {
+				stderr = io.NopCloser(strings.NewReader(""))
+			} else {
+				stderr = io.NopCloser(strings.NewReader(""))
+			}
+
+			return &runtime.Process{
+				PID:    99999,
+				Stdout: stdout,
+				Stderr: stderr,
+				Done:   doneCh,
+			}, nil
+		},
+	}
+
+	store := run.NewStore()
+	cfg := &config.LimitsConfig{MaxConcurrentRuns: 5}
+	tracker := cost.NewTracker()
+	limiter := &cost.LimitChecker{}
+	mgr := NewManager(store, rt, "claude", sessionsDir, cfg, tracker, limiter, nil)
+
+	store.Add(&run.Run{State: run.StateRunning, CurrentSkill: "route"})
+
+	ch, err := mgr.StartSkill("001", "test prompt", runtime.RunOptions{})
+	if err != nil {
+		t.Fatalf("start skill: %v", err)
+	}
+
+	// Simulate process exit shortly after writing output
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		doneCh <- nil
+	}()
+
+	select {
+	case result := <-ch:
+		if result.Err != nil {
+			t.Errorf("expected no error, got %v", result.Err)
+		}
+		if result.ResultText != resultText {
+			t.Errorf("expected result text %q, got %q", resultText, result.ResultText)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for result — FollowReader deadlock not fixed")
+	}
+
+	// Verify cleanup
+	time.Sleep(100 * time.Millisecond)
+	if mgr.ActiveCount() != 0 {
+		t.Errorf("expected 0 active processes after completion, got %d", mgr.ActiveCount())
+	}
+
+	// Clean up log files
+	os.RemoveAll(sessionsDir)
 }

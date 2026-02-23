@@ -34,6 +34,11 @@ type CostThresholdMsg struct {
 	Reason string
 }
 
+// ErrDisconnected is returned when a process event loop exits because the TUI
+// is shutting down (DisconnectAll was called). The executor uses this to
+// distinguish a graceful disconnect from a real process failure.
+var ErrDisconnected = fmt.Errorf("disconnected: TUI shutting down")
+
 // SkillResult captures the outcome of a single skill subprocess execution.
 type SkillResult struct {
 	ResultText string // Final result text from the stream-json "result" event
@@ -48,20 +53,21 @@ type ManagedProcess struct {
 }
 
 type Manager struct {
-	store        *run.Store
-	rt           runtime.Runtime
-	runtimeName  string
-	sessionsDir  string
-	cfg          *config.LimitsConfig
-	tracker      *cost.Tracker
-	limiter      *cost.LimitChecker
-	safety       *safety.PatternMatcher
-	mu           sync.Mutex
-	processes    map[string]*ManagedProcess
-	buffers      map[string]*RingBuffer
-	entryBuffers map[string]*EntryBuffer
-	logFiles     map[string]*LogFiles
-	program      *tea.Program
+	store         *run.Store
+	rt            runtime.Runtime
+	runtimeName   string
+	sessionsDir   string
+	cfg           *config.LimitsConfig
+	tracker       *cost.Tracker
+	limiter       *cost.LimitChecker
+	safety        *safety.PatternMatcher
+	mu            sync.Mutex
+	disconnecting bool
+	processes     map[string]*ManagedProcess
+	buffers       map[string]*RingBuffer
+	entryBuffers  map[string]*EntryBuffer
+	logFiles      map[string]*LogFiles
+	program       *tea.Program
 }
 
 func NewManager(store *run.Store, rt runtime.Runtime, runtimeName string, sessionsDir string, cfg *config.LimitsConfig, tracker *cost.Tracker, limiter *cost.LimitChecker, safetyMatcher *safety.PatternMatcher) *Manager {
@@ -338,6 +344,11 @@ func (m *Manager) Reconnect(runID string, pid int, stdoutPath string, stderrPath
 	if err != nil {
 		log.Printf("warning: reconnect %s: open stdout: %v", runID, err)
 		cancel()
+		m.store.Update(runID, func(r *run.Run) {
+			r.State = run.StateFailed
+			r.Error = fmt.Sprintf("reconnect failed: open stdout log: %v", err)
+			r.PID = 0
+		})
 		return
 	}
 	stderrF, err := os.Open(stderrPath)
@@ -345,6 +356,11 @@ func (m *Manager) Reconnect(runID string, pid int, stdoutPath string, stderrPath
 		log.Printf("warning: reconnect %s: open stderr: %v", runID, err)
 		stdoutF.Close()
 		cancel()
+		m.store.Update(runID, func(r *run.Run) {
+			r.State = run.StateFailed
+			r.Error = fmt.Sprintf("reconnect failed: open stderr log: %v", err)
+			r.PID = 0
+		})
 		return
 	}
 
@@ -439,6 +455,21 @@ func (m *Manager) ReplayLogFile(runID string, stdoutPath string, stderrPath stri
 	m.buffers[runID] = buf
 	m.entryBuffers[runID] = eb
 	m.mu.Unlock()
+}
+
+// SetDisconnecting marks the manager as shutting down. When set,
+// consumeSkillEvents and consumeEvents will not zero PIDs or update
+// run state, preserving the run for reconnection on next startup.
+func (m *Manager) SetDisconnecting() {
+	m.mu.Lock()
+	m.disconnecting = true
+	m.mu.Unlock()
+}
+
+func (m *Manager) isDisconnecting() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.disconnecting
 }
 
 // DisconnectAll cancels all FollowReader contexts and closes log file handles
@@ -555,6 +586,16 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 
 	var resultText string
 
+	// When the process exits, cancel the FollowReader context so the
+	// stream parser drains and the event loop below unblocks.
+	var exitErr error
+	exitDone := make(chan struct{})
+	go func() {
+		exitErr = <-done
+		close(exitDone)
+		mp.cancel()
+	}()
+
 	skillName := func() string {
 		r, ok := m.store.Get(runID)
 		if !ok {
@@ -602,14 +643,14 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 		}
 	}
 
-	var exitErr error
-	select {
-	case exitErr = <-done:
-	default:
-		exitErr = <-done
-	}
+	<-exitDone
 
-	mp.cancel() // stop FollowReaders
+	// If the TUI is shutting down, preserve PID and process entry so the
+	// session file saves the live state for reconnection on restart.
+	if m.isDisconnecting() {
+		resultCh <- SkillResult{ResultText: resultText, Err: ErrDisconnected}
+		return
+	}
 
 	m.store.Update(runID, func(r *run.Run) {
 		r.PID = 0
@@ -623,6 +664,16 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 }
 
 func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffer, eb *EntryBuffer, stdout io.Reader, stderr io.Reader, done <-chan error) {
+	// When the process exits, cancel the FollowReader context so the
+	// stream parser drains and the event loop below unblocks.
+	var exitErr error
+	exitDone := make(chan struct{})
+	go func() {
+		exitErr = <-done
+		close(exitDone)
+		mp.cancel()
+	}()
+
 	skillName := func() string {
 		r, ok := m.store.Get(runID)
 		if !ok {
@@ -666,15 +717,13 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 		}
 	}
 
-	// Wait for process to exit
-	var exitErr error
-	select {
-	case exitErr = <-done:
-	default:
-		exitErr = <-done
-	}
+	<-exitDone
 
-	mp.cancel() // stop FollowReaders
+	// If the TUI is shutting down, preserve PID and process entry so the
+	// session file saves the live state for reconnection on restart.
+	if m.isDisconnecting() {
+		return
+	}
 
 	// Update run state based on exit
 	m.store.Update(runID, func(r *run.Run) {

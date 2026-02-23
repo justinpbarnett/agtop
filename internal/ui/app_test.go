@@ -9,8 +9,10 @@ import (
 	"github.com/justinpbarnett/agtop/internal/run"
 )
 
-func newTestApp() App {
+func newTestApp(t *testing.T) App {
+	t.Helper()
 	cfg := config.DefaultConfig()
+	cfg.Project.Root = t.TempDir() // isolate from real session data
 	a := NewApp(&cfg)
 	a.initPrompt = nil // dismiss init prompt for tests
 	return a
@@ -32,7 +34,7 @@ func sendWindowSize(a App, w, h int) App {
 }
 
 func TestAppInitialState(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	if a.ready {
 		t.Error("expected ready to be false initially")
 	}
@@ -45,7 +47,7 @@ func TestAppInitialState(t *testing.T) {
 }
 
 func TestAppWindowResize(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a = sendWindowSize(a, 120, 40)
 
 	if !a.ready {
@@ -60,7 +62,7 @@ func TestAppWindowResize(t *testing.T) {
 }
 
 func TestAppFocusCycle(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a = sendWindowSize(a, 120, 40)
 
 	if a.focusedPanel != 0 {
@@ -84,7 +86,7 @@ func TestAppFocusCycle(t *testing.T) {
 }
 
 func TestAppSpatialNavigation(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a = sendWindowSize(a, 120, 40)
 
 	// Start at run list (0), l should go to log view (1)
@@ -107,7 +109,7 @@ func TestAppSpatialNavigation(t *testing.T) {
 }
 
 func TestAppHelpToggle(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a = sendWindowSize(a, 120, 40)
 
 	a = sendKey(a, "?")
@@ -129,7 +131,7 @@ func TestAppHelpToggle(t *testing.T) {
 }
 
 func TestAppHelpCloseEsc(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a = sendWindowSize(a, 120, 40)
 
 	a = sendKey(a, "?")
@@ -150,7 +152,7 @@ func TestAppHelpCloseEsc(t *testing.T) {
 }
 
 func TestAppQuit(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	_, cmd := a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if cmd == nil {
 		t.Fatal("expected quit command")
@@ -162,7 +164,7 @@ func TestAppQuit(t *testing.T) {
 }
 
 func TestAppViewNotReady(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	view := a.View()
 	if !strings.Contains(view, "Loading") {
 		t.Error("expected loading message before WindowSizeMsg")
@@ -170,7 +172,7 @@ func TestAppViewNotReady(t *testing.T) {
 }
 
 func TestAppViewReady(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a = sendWindowSize(a, 120, 40)
 	view := a.View()
 
@@ -180,7 +182,7 @@ func TestAppViewReady(t *testing.T) {
 }
 
 func TestAppViewTooSmall(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a = sendWindowSize(a, 70, 20)
 	view := a.View()
 	if !strings.Contains(view, "too small") || !strings.Contains(view, "Terminal") {
@@ -189,7 +191,7 @@ func TestAppViewTooSmall(t *testing.T) {
 }
 
 func TestAppThreePanelLayout(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a = sendWindowSize(a, 120, 40)
 	view := a.View()
 
@@ -206,7 +208,7 @@ func TestAppThreePanelLayout(t *testing.T) {
 }
 
 func TestAppStoreUpdate(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a = sendWindowSize(a, 120, 40)
 
 	a.store.Update("001", func(r *run.Run) {
@@ -226,7 +228,7 @@ func TestAppStoreUpdate(t *testing.T) {
 }
 
 func TestAppKeyRoutingToRunList(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a = sendWindowSize(a, 120, 40)
 
 	// Focus is on run list (panel 0), j should work within panel
@@ -238,7 +240,7 @@ func TestAppKeyRoutingToRunList(t *testing.T) {
 }
 
 func TestAppDeleteTerminalRun(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a = sendWindowSize(a, 120, 40)
 
 	countBefore := a.store.Count()
@@ -259,7 +261,7 @@ func TestAppDeleteTerminalRun(t *testing.T) {
 }
 
 func TestAppDeleteNonTerminalRunNoOp(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a = sendWindowSize(a, 120, 40)
 
 	a.store.Add(&run.Run{State: run.StateRunning, Prompt: "active run"})
@@ -275,10 +277,49 @@ func TestAppDeleteNonTerminalRunNoOp(t *testing.T) {
 }
 
 func TestAppDeleteNoSelection(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	// Don't add any runs — but rehydration may have added some.
 	// Pressing d on whatever is selected (if anything) should not panic.
 	a = sendWindowSize(a, 120, 40)
 	a = sendKey(a, "d")
 	// Just verify no panic occurred
+}
+
+func TestCleanupRunRemovesFromStore(t *testing.T) {
+	a := newTestApp(t)
+	countBefore := a.store.Count()
+	id := a.store.Add(&run.Run{State: run.StateCompleted, Prompt: "done"})
+
+	if a.store.Count() != countBefore+1 {
+		t.Fatalf("expected %d runs, got %d", countBefore+1, a.store.Count())
+	}
+
+	a.cleanupRun(id)
+
+	if a.store.Count() != countBefore {
+		t.Errorf("expected %d runs after cleanup, got %d", countBefore, a.store.Count())
+	}
+}
+
+func TestCleanupRunNilSubsystems(t *testing.T) {
+	// Verify cleanupRun does not panic when manager and persistence are nil.
+	a := newTestApp(t)
+	a.manager = nil
+	a.persistence = nil
+
+	countBefore := a.store.Count()
+	id := a.store.Add(&run.Run{State: run.StateAccepted, Prompt: "merged"})
+
+	// Should not panic
+	a.cleanupRun(id)
+
+	if a.store.Count() != countBefore {
+		t.Errorf("expected %d runs after cleanup, got %d", countBefore, a.store.Count())
+	}
+}
+
+func TestCleanupRunNonExistentID(t *testing.T) {
+	// Calling cleanupRun with an ID not in the store should not panic.
+	a := newTestApp(t)
+	a.cleanupRun("nonexistent")
 }

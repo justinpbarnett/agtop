@@ -546,3 +546,47 @@ func TestManagerRemoveBufferNonExistent(t *testing.T) {
 	// Should not panic
 	mgr.RemoveBuffer("nonexistent")
 }
+
+func TestManagerDisconnectPreservesRunState(t *testing.T) {
+	doneCh := make(chan error, 1)
+	rt := &mockRuntime{
+		startFn: func(ctx context.Context, prompt string, opts runtime.RunOptions) (*runtime.Process, error) {
+			return &runtime.Process{
+				PID:    42,
+				Cmd:    nil,
+				Stdout: io.NopCloser(strings.NewReader("")),
+				Stderr: io.NopCloser(strings.NewReader("")),
+				Done:   doneCh,
+			}, nil
+		},
+	}
+
+	mgr, store := testManager(rt)
+	store.Add(&run.Run{State: run.StateQueued, CurrentSkill: "build"})
+
+	err := mgr.Start("001", "test", runtime.RunOptions{})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// Set disconnecting before process exits
+	mgr.SetDisconnecting()
+
+	// Signal process exit
+	doneCh <- nil
+	time.Sleep(200 * time.Millisecond)
+
+	r, ok := store.Get("001")
+	if !ok {
+		t.Fatal("run not found")
+	}
+	// State should NOT be terminal when disconnecting
+	if r.State == run.StateCompleted || r.State == run.StateFailed {
+		t.Errorf("expected non-terminal state when disconnecting, got %s", r.State)
+	}
+	// PID should be preserved
+	if r.PID == 0 {
+		t.Error("PID should NOT be zeroed when disconnecting")
+	}
+}

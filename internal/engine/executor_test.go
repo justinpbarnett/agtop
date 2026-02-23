@@ -1,11 +1,20 @@
 package engine
 
 import (
+	"context"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/justinpbarnett/agtop/internal/config"
+	"github.com/justinpbarnett/agtop/internal/cost"
+	"github.com/justinpbarnett/agtop/internal/process"
+	"github.com/justinpbarnett/agtop/internal/run"
+	"github.com/justinpbarnett/agtop/internal/runtime"
 )
 
 func executorTestConfig() *config.Config {
@@ -342,5 +351,192 @@ func TestIsNonModifyingSkillFalse(t *testing.T) {
 		if isNonModifyingSkill(name) {
 			t.Errorf("isNonModifyingSkill(%q) = true, want false", name)
 		}
+	}
+}
+
+// --- Executor integration tests ---
+
+// executorMockRuntime implements runtime.Runtime for executor tests.
+type executorMockRuntime struct {
+	startFn func(ctx context.Context, prompt string, opts runtime.RunOptions) (*runtime.Process, error)
+	stopFn  func(proc *runtime.Process) error
+}
+
+func (m *executorMockRuntime) Start(ctx context.Context, prompt string, opts runtime.RunOptions) (*runtime.Process, error) {
+	if m.startFn != nil {
+		return m.startFn(ctx, prompt, opts)
+	}
+	return nil, nil
+}
+func (m *executorMockRuntime) Stop(proc *runtime.Process) error {
+	if m.stopFn != nil {
+		return m.stopFn(proc)
+	}
+	return nil
+}
+func (m *executorMockRuntime) Pause(_ *runtime.Process) error  { return nil }
+func (m *executorMockRuntime) Resume(_ *runtime.Process) error { return nil }
+
+func newTestExecutor(rt runtime.Runtime) (*Executor, *run.Store) {
+	store := run.NewStore()
+	cfg := executorTestConfig()
+	tracker := cost.NewTracker()
+	limiter := &cost.LimitChecker{}
+	mgr := process.NewManager(store, rt, "claude", "", &config.LimitsConfig{MaxConcurrentRuns: 5}, tracker, limiter, nil)
+
+	reg := NewRegistry(cfg)
+	reg.skills["build"] = &Skill{Name: "build"}
+	reg.skills["test"] = &Skill{Name: "test"}
+	reg.skills["spec"] = &Skill{Name: "spec"}
+	reg.skills["commit"] = &Skill{Name: "commit"}
+
+	exec := NewExecutor(store, mgr, reg, cfg)
+	return exec, store
+}
+
+// blockingRuntime returns a mock runtime whose Start() blocks stdout until
+// the returned cancel function is called. Each call to Start creates fresh pipes.
+func blockingRuntime() (*executorMockRuntime, func()) {
+	var mu sync.Mutex
+	var cancels []func()
+
+	rt := &executorMockRuntime{
+		startFn: func(ctx context.Context, _ string, _ runtime.RunOptions) (*runtime.Process, error) {
+			pr, pw := io.Pipe()
+			doneCh := make(chan error, 1)
+
+			go func() {
+				// Write one event so the stream parser starts
+				pw.Write([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"Working..."}]}}` + "\n"))
+				// Block until context cancels
+				<-ctx.Done()
+				pw.Close()
+				doneCh <- nil
+			}()
+
+			mu.Lock()
+			cancels = append(cancels, func() { pw.Close(); doneCh <- nil })
+			mu.Unlock()
+
+			return &runtime.Process{
+				PID:    12345,
+				Stdout: pr,
+				Stderr: io.NopCloser(strings.NewReader("")),
+				Done:   doneCh,
+			}, nil
+		},
+	}
+
+	cleanup := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range cancels {
+			c()
+		}
+	}
+	return rt, cleanup
+}
+
+// completingRuntime returns a mock runtime whose Start() immediately writes
+// a result event and completes. Tracks skill invocations via the returned slice.
+func completingRuntime() (*executorMockRuntime, *[]string) {
+	var mu sync.Mutex
+	invocations := &[]string{}
+
+	rt := &executorMockRuntime{
+		startFn: func(_ context.Context, prompt string, _ runtime.RunOptions) (*runtime.Process, error) {
+			mu.Lock()
+			*invocations = append(*invocations, prompt)
+			mu.Unlock()
+
+			pr, pw := io.Pipe()
+			doneCh := make(chan error, 1)
+
+			go func() {
+				pw.Write([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"Done"}]}}` + "\n"))
+				pw.Write([]byte(`{"type":"result","result":"ok","usage":{"input_tokens":10,"output_tokens":5},"total_cost_usd":0.001}` + "\n"))
+				pw.Close()
+				doneCh <- nil
+			}()
+
+			return &runtime.Process{
+				PID:    12345,
+				Stdout: pr,
+				Stderr: io.NopCloser(strings.NewReader("")),
+				Done:   doneCh,
+			}, nil
+		},
+	}
+	return rt, invocations
+}
+
+func TestExecutorShutdownPreservesRunState(t *testing.T) {
+	rt, cleanup := blockingRuntime()
+	defer cleanup()
+	exec, store := newTestExecutor(rt)
+
+	store.Add(&run.Run{State: run.StateQueued})
+	exec.Execute("001", "build", "test prompt")
+
+	// Wait for run to reach running state
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		r, _ := store.Get("001")
+		if r.State == run.StateRunning {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	r, _ := store.Get("001")
+	if r.State != run.StateRunning {
+		t.Fatalf("expected StateRunning before shutdown, got %s", r.State)
+	}
+
+	// Shutdown should cancel workflows but preserve run state
+	exec.Shutdown()
+
+	r, _ = store.Get("001")
+	if r.State != run.StateRunning {
+		t.Errorf("expected StateRunning after shutdown, got %s", r.State)
+	}
+}
+
+func TestExecutorResumeReconnectedSkillIndex(t *testing.T) {
+	rt, invocations := completingRuntime()
+	exec, store := newTestExecutor(rt)
+	_ = rt
+
+	// Simulate a reconnected run at SkillIndex=2 in "plan-build" workflow
+	// plan-build = ["spec", "build", "test"]; SkillIndex 2 means the 2nd
+	// skill ("build") was in progress, so resume should start from "build".
+	store.Add(&run.Run{
+		State:      run.StateRunning,
+		Workflow:   "plan-build",
+		SkillIndex: 2,
+		SkillTotal: 3,
+		Prompt:     "implement feature",
+	})
+
+	exec.ResumeReconnected("001", "implement feature")
+
+	// Wait for workflow to complete
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		r, _ := store.Get("001")
+		if r.IsTerminal() {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	r, _ := store.Get("001")
+	if r.State != run.StateCompleted {
+		t.Errorf("expected StateCompleted, got %s (error: %s)", r.State, r.Error)
+	}
+
+	// Should have executed "build", "test", and auto-commit after "build"
+	// (3 skill invocations: build, commit, test)
+	if len(*invocations) < 2 {
+		t.Errorf("expected at least 2 skill invocations (build + test), got %d", len(*invocations))
 	}
 }
