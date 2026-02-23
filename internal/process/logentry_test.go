@@ -454,6 +454,67 @@ func TestWordWrapZeroWidth(t *testing.T) {
 	}
 }
 
+func TestInterpretRawEventSystemInit(t *testing.T) {
+	raw := `{"type":"system","subtype":"init","model":"claude-haiku-4-5-20251001","permissionMode":"acceptEdits","tools":["Task","Bash","Read","Edit","Write"],"claude_code_version":"2.1.50"}`
+	e := InterpretRawEvent("14:32:01", "build", raw)
+	if !strings.Contains(e.Summary, "Session init") {
+		t.Errorf("expected 'Session init' in summary, got %q", e.Summary)
+	}
+	if !strings.Contains(e.Summary, "claude-haiku-4-5-20251001") {
+		t.Errorf("expected model in summary, got %q", e.Summary)
+	}
+	if !strings.Contains(e.Summary, "acceptEdits") {
+		t.Errorf("expected permissionMode in summary, got %q", e.Summary)
+	}
+	if !strings.Contains(e.Summary, "5 tools") {
+		t.Errorf("expected tool count in summary, got %q", e.Summary)
+	}
+	if !strings.Contains(e.Summary, "v2.1.50") {
+		t.Errorf("expected version in summary, got %q", e.Summary)
+	}
+	// Detail should be formatted JSON
+	if !strings.Contains(e.Detail, "\n") {
+		t.Error("expected multi-line formatted JSON in detail")
+	}
+}
+
+func TestInterpretRawEventUnknownJSON(t *testing.T) {
+	raw := `{"type":"something_new","data":"hello"}`
+	e := InterpretRawEvent("14:32:01", "", raw)
+	if e.Summary != "[something_new]" {
+		t.Errorf("expected [something_new], got %q", e.Summary)
+	}
+	if !strings.Contains(e.Detail, "\n") {
+		t.Error("expected formatted JSON in detail")
+	}
+}
+
+func TestInterpretRawEventUnknownJSONWithSubtype(t *testing.T) {
+	raw := `{"type":"foo","subtype":"bar"}`
+	e := InterpretRawEvent("14:32:01", "", raw)
+	if e.Summary != "[foo/bar]" {
+		t.Errorf("expected [foo/bar], got %q", e.Summary)
+	}
+}
+
+func TestInterpretRawEventPlainText(t *testing.T) {
+	e := InterpretRawEvent("14:32:01", "build", "just plain text")
+	if e.Summary != "just plain text" {
+		t.Errorf("expected plain text summary, got %q", e.Summary)
+	}
+	if e.Type != EventRaw {
+		t.Errorf("expected EventRaw, got %v", e.Type)
+	}
+}
+
+func TestInterpretRawEventSystemUnknownSubtype(t *testing.T) {
+	raw := `{"type":"system","subtype":"shutdown"}`
+	e := InterpretRawEvent("14:32:01", "", raw)
+	if e.Summary != "[system/shutdown]" {
+		t.Errorf("expected [system/shutdown], got %q", e.Summary)
+	}
+}
+
 func TestEntryBufferTotalEvicted(t *testing.T) {
 	eb := NewEntryBuffer(3)
 	if eb.TotalEvicted() != 0 {

@@ -190,6 +190,84 @@ func WordWrap(s string, width int) string {
 	return strings.Join(result, "\n")
 }
 
+// InterpretRawEvent creates a LogEntry with a human-readable summary for
+// known JSON event types (system, etc.). For non-JSON text or unknown
+// types, falls back to the default raw summary. The detail is always
+// the pretty-printed JSON so the user can expand to see the full payload.
+func InterpretRawEvent(ts, skill, text string) *LogEntry {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || (trimmed[0] != '{' && trimmed[0] != '[') {
+		return NewLogEntry(ts, skill, EventRaw, text)
+	}
+
+	var header struct {
+		Type    string `json:"type"`
+		Subtype string `json:"subtype,omitempty"`
+	}
+	if json.Unmarshal([]byte(trimmed), &header) != nil || header.Type == "" {
+		return NewLogEntry(ts, skill, EventRaw, text)
+	}
+
+	summary := interpretJSONSummary(trimmed, header.Type, header.Subtype)
+	return &LogEntry{
+		Timestamp: ts,
+		Skill:     skill,
+		Type:      EventRaw,
+		Summary:   summary,
+		Detail:    FormatJSON(trimmed),
+		Complete:  true,
+	}
+}
+
+func interpretJSONSummary(raw, eventType, subtype string) string {
+	switch eventType {
+	case "system":
+		return interpretSystemSummary(raw, subtype)
+	default:
+		label := eventType
+		if subtype != "" {
+			label += "/" + subtype
+		}
+		return "[" + label + "]"
+	}
+}
+
+func interpretSystemSummary(raw, subtype string) string {
+	switch subtype {
+	case "init":
+		var init struct {
+			Model          string   `json:"model"`
+			PermissionMode string   `json:"permissionMode"`
+			Tools          []string `json:"tools"`
+			Version        string   `json:"claude_code_version"`
+		}
+		if json.Unmarshal([]byte(raw), &init) == nil {
+			var parts []string
+			if init.Version != "" {
+				parts = append(parts, "v"+init.Version)
+			}
+			if init.Model != "" {
+				parts = append(parts, init.Model)
+			}
+			if init.PermissionMode != "" {
+				parts = append(parts, init.PermissionMode)
+			}
+			if len(init.Tools) > 0 {
+				parts = append(parts, fmt.Sprintf("%d tools", len(init.Tools)))
+			}
+			if len(parts) > 0 {
+				return "Session init — " + strings.Join(parts, " · ")
+			}
+		}
+		return "[system/init]"
+	default:
+		if subtype != "" {
+			return "[system/" + subtype + "]"
+		}
+		return "[system]"
+	}
+}
+
 // EntryBuffer is a thread-safe circular buffer of LogEntry pointers.
 type EntryBuffer struct {
 	mu       sync.RWMutex

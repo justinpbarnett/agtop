@@ -408,7 +408,7 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 			} else {
 				logLine = fmt.Sprintf("[%s] %s", ts, event.Text)
 			}
-			entry = NewLogEntry(ts, skill, EventRaw, event.Text)
+			entry = InterpretRawEvent(ts, skill, event.Text)
 		}
 
 		if logLine != "" {
@@ -548,7 +548,7 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 			} else {
 				logLine = fmt.Sprintf("[%s] %s", ts, event.Text)
 			}
-			entry = NewLogEntry(ts, skill, EventRaw, event.Text)
+			entry = InterpretRawEvent(ts, skill, event.Text)
 		}
 
 		if logLine != "" {
