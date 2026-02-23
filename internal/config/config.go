@@ -80,12 +80,13 @@ type LimitsConfig struct {
 }
 
 type MergeConfig struct {
-	TargetBranch  string `toml:"target_branch"`
-	AutoMerge     bool   `toml:"auto_merge"`
-	MergeStrategy string `toml:"merge_strategy"`
-	FixAttempts   int    `toml:"fix_attempts"`
-	PollInterval  int    `toml:"poll_interval"`
-	PollTimeout   int    `toml:"poll_timeout"`
+	TargetBranch        string `toml:"target_branch"`
+	AutoMerge           bool   `toml:"auto_merge"`
+	MergeStrategy       string `toml:"merge_strategy"`
+	FixAttempts         int    `toml:"fix_attempts"`
+	PollInterval        int    `toml:"poll_interval"`
+	PollTimeout         int    `toml:"poll_timeout"`
+	GoldenUpdateCommand string `toml:"golden_update_command"`
 }
 
 type UIConfig struct {

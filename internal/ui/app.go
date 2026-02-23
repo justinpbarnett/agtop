@@ -829,8 +829,12 @@ func (a App) handleAccept() (tea.Model, tea.Cmd) {
 	// Legacy flow: merge locally then clean up
 	a.store.Update(runID, func(r *run.Run) { r.State = run.StateAccepted })
 
+	goldenCmd := a.config.Merge.GoldenUpdateCommand
 	go func() {
-		if err := a.worktrees.Merge(runID); err != nil {
+		_, err := a.worktrees.MergeWithOptions(runID, gitpkg.MergeOptions{
+			GoldenUpdateCommand: goldenCmd,
+		})
+		if err != nil {
 			a.store.Update(runID, func(r *run.Run) {
 				r.State = run.StateFailed
 				r.Error = fmt.Sprintf("merge failed: %v", err)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/justinpbarnett/agtop/internal/config"
+	gitpkg "github.com/justinpbarnett/agtop/internal/git"
 	"github.com/justinpbarnett/agtop/internal/run"
 )
 
@@ -212,9 +213,43 @@ func (p *Pipeline) resolveConflicts(ctx context.Context, runID, worktree string)
 			continue
 		}
 
-		conflictedFiles := strings.TrimSpace(string(out))
+		// Auto-resolve golden test snapshot files (binary — agents can't resolve them)
+		files := strings.Split(strings.TrimSpace(string(out)), "\n")
+		var nonGolden []string
+		for _, f := range files {
+			if gitpkg.IsGoldenFile(f) {
+				checkout := exec.Command("git", "checkout", "--theirs", f)
+				checkout.Dir = worktree
+				if err := checkout.Run(); err != nil {
+					nonGolden = append(nonGolden, f)
+					continue
+				}
+				add := exec.Command("git", "add", f)
+				add.Dir = worktree
+				if err := add.Run(); err != nil {
+					nonGolden = append(nonGolden, f)
+					continue
+				}
+			} else {
+				nonGolden = append(nonGolden, f)
+			}
+		}
 
-		// Invoke the build skill to resolve conflicts
+		// If only golden files conflicted, continue rebase without invoking agent
+		if len(nonGolden) == 0 {
+			cont := exec.Command("git", "rebase", "--continue")
+			cont.Dir = worktree
+			cont.Env = append(cont.Environ(), "GIT_EDITOR=true")
+			if err := cont.Run(); err == nil {
+				p.runGoldenUpdate(worktree)
+				return nil
+			}
+			continue
+		}
+
+		conflictedFiles := strings.Join(nonGolden, "\n")
+
+		// Invoke the build skill to resolve remaining (non-golden) conflicts
 		skill, opts, ok := p.executor.registry.SkillForRun("build")
 		if !ok {
 			return fmt.Errorf("build skill not found for conflict resolution")
@@ -253,6 +288,41 @@ func (p *Pipeline) resolveConflicts(ctx context.Context, runID, worktree string)
 	}
 
 	return fmt.Errorf("could not resolve conflicts after 3 attempts")
+}
+
+// runGoldenUpdate runs the configured golden update command in the given directory
+// after a golden-only conflict resolution. If it produces changes, they are committed.
+func (p *Pipeline) runGoldenUpdate(worktree string) {
+	if p.cfg.GoldenUpdateCommand == "" {
+		return
+	}
+
+	cmd := exec.Command("sh", "-c", p.cfg.GoldenUpdateCommand)
+	cmd.Dir = worktree
+	if _, err := cmd.CombinedOutput(); err != nil {
+		log.Printf("warning: golden update command failed: %v", err)
+		return
+	}
+
+	status := exec.Command("git", "status", "--porcelain")
+	status.Dir = worktree
+	out, err := status.Output()
+	if err != nil || strings.TrimSpace(string(out)) == "" {
+		return
+	}
+
+	add := exec.Command("git", "add", "-A")
+	add.Dir = worktree
+	if err := add.Run(); err != nil {
+		log.Printf("warning: git add after golden update: %v", err)
+		return
+	}
+
+	commit := exec.Command("git", "commit", "-m", "chore: regenerate golden test files")
+	commit.Dir = worktree
+	if err := commit.Run(); err != nil {
+		log.Printf("warning: commit after golden update: %v", err)
+	}
 }
 
 func (p *Pipeline) push(worktree, branch string) error {

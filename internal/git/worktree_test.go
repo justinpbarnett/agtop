@@ -1,6 +1,7 @@
 package git
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -225,6 +226,257 @@ func TestWorktreeMergeConflict(t *testing.T) {
 	}
 	if len(out) > 0 {
 		t.Errorf("repo not clean after aborted merge: %s", out)
+	}
+}
+
+func TestWorktreeMergeGoldenFileConflict(t *testing.T) {
+	repo := initTestRepo(t)
+	wm := NewWorktreeManager(repo)
+
+	// Create a golden file in testdata/ on main
+	goldenDir := filepath.Join(repo, "internal", "ui", "testdata")
+	if err := os.MkdirAll(goldenDir, 0o755); err != nil {
+		t.Fatalf("mkdir testdata: %v", err)
+	}
+	goldenFile := filepath.Join(goldenDir, "TestSnapshot.golden")
+	if err := os.WriteFile(goldenFile, []byte("main golden content"), 0o644); err != nil {
+		t.Fatalf("write golden: %v", err)
+	}
+	gitCommit(t, repo, "add golden file")
+
+	// Create worktree and diverge the golden file
+	wtPath, _, err := wm.Create("030")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	wtGoldenFile := filepath.Join(wtPath, "internal", "ui", "testdata", "TestSnapshot.golden")
+	if err := os.WriteFile(wtGoldenFile, []byte("worktree golden content"), 0o644); err != nil {
+		t.Fatalf("write worktree golden: %v", err)
+	}
+	gitCommit(t, wtPath, "update golden in worktree")
+
+	// Diverge golden file on main too
+	if err := os.WriteFile(goldenFile, []byte("different main golden content"), 0o644); err != nil {
+		t.Fatalf("write main golden: %v", err)
+	}
+	gitCommit(t, repo, "update golden in main")
+
+	// Merge should succeed — golden file conflict auto-resolved
+	result, err := wm.MergeWithOptions("030", MergeOptions{})
+	if err != nil {
+		t.Fatalf("MergeWithOptions should succeed for golden-only conflict: %v", err)
+	}
+
+	if len(result.GoldenFilesResolved) == 0 {
+		t.Error("expected GoldenFilesResolved to be non-empty")
+	}
+
+	// Verify the branch version was taken
+	content, err := os.ReadFile(goldenFile)
+	if err != nil {
+		t.Fatalf("read golden after merge: %v", err)
+	}
+	if string(content) != "worktree golden content" {
+		t.Errorf("golden content = %q, want %q", content, "worktree golden content")
+	}
+}
+
+func TestWorktreeMergeMixedConflict(t *testing.T) {
+	repo := initTestRepo(t)
+	wm := NewWorktreeManager(repo)
+
+	// Create both a golden file and a regular file on main
+	goldenDir := filepath.Join(repo, "internal", "ui", "testdata")
+	if err := os.MkdirAll(goldenDir, 0o755); err != nil {
+		t.Fatalf("mkdir testdata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(goldenDir, "Test.golden"), []byte("golden v1"), 0o644); err != nil {
+		t.Fatalf("write golden: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "code.go"), []byte("package main\n// v1\n"), 0o644); err != nil {
+		t.Fatalf("write code: %v", err)
+	}
+	gitCommit(t, repo, "add golden and code files")
+
+	wtPath, _, err := wm.Create("031")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Diverge both files in worktree
+	if err := os.WriteFile(filepath.Join(wtPath, "internal", "ui", "testdata", "Test.golden"), []byte("golden v2-wt"), 0o644); err != nil {
+		t.Fatalf("write worktree golden: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "code.go"), []byte("package main\n// v2-wt\n"), 0o644); err != nil {
+		t.Fatalf("write worktree code: %v", err)
+	}
+	gitCommit(t, wtPath, "update golden and code in worktree")
+
+	// Diverge both files on main
+	if err := os.WriteFile(filepath.Join(goldenDir, "Test.golden"), []byte("golden v2-main"), 0o644); err != nil {
+		t.Fatalf("write main golden: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "code.go"), []byte("package main\n// v2-main\n"), 0o644); err != nil {
+		t.Fatalf("write main code: %v", err)
+	}
+	gitCommit(t, repo, "update golden and code in main")
+
+	// Merge should fail — non-golden conflict blocks it
+	_, err = wm.MergeWithOptions("031", MergeOptions{})
+	if err == nil {
+		t.Fatal("MergeWithOptions should fail when non-golden conflicts exist")
+	}
+
+	// Verify repo is clean after abort
+	cmd := exec.Command("git", "status", "--porcelain", "-uno")
+	cmd.Dir = repo
+	out, _ := cmd.Output()
+	if len(out) > 0 {
+		t.Errorf("repo not clean after aborted merge: %s", out)
+	}
+}
+
+func TestWorktreeMergeGoldenUpdateCommand(t *testing.T) {
+	repo := initTestRepo(t)
+	wm := NewWorktreeManager(repo)
+
+	// Create a golden file on main
+	goldenDir := filepath.Join(repo, "internal", "ui", "testdata")
+	if err := os.MkdirAll(goldenDir, 0o755); err != nil {
+		t.Fatalf("mkdir testdata: %v", err)
+	}
+	goldenFile := filepath.Join(goldenDir, "Test.golden")
+	if err := os.WriteFile(goldenFile, []byte("v1"), 0o644); err != nil {
+		t.Fatalf("write golden: %v", err)
+	}
+	gitCommit(t, repo, "add golden")
+
+	wtPath, _, err := wm.Create("032")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Diverge golden in worktree
+	if err := os.WriteFile(filepath.Join(wtPath, "internal", "ui", "testdata", "Test.golden"), []byte("v2-wt"), 0o644); err != nil {
+		t.Fatalf("write wt golden: %v", err)
+	}
+	gitCommit(t, wtPath, "update golden in worktree")
+
+	// Diverge golden on main
+	if err := os.WriteFile(goldenFile, []byte("v2-main"), 0o644); err != nil {
+		t.Fatalf("write main golden: %v", err)
+	}
+	gitCommit(t, repo, "update golden in main")
+
+	// Use a golden update command that writes a known value to the golden file
+	updateCmd := fmt.Sprintf("echo -n 'regenerated' > '%s'", filepath.Join("internal", "ui", "testdata", "Test.golden"))
+
+	result, err := wm.MergeWithOptions("032", MergeOptions{GoldenUpdateCommand: updateCmd})
+	if err != nil {
+		t.Fatalf("MergeWithOptions with update command: %v", err)
+	}
+
+	if len(result.GoldenFilesResolved) == 0 {
+		t.Error("expected golden files to be resolved")
+	}
+
+	// Verify the golden update command's output was committed
+	content, err := os.ReadFile(goldenFile)
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+	if string(content) != "regenerated" {
+		t.Errorf("golden content = %q, want %q", content, "regenerated")
+	}
+
+	// Verify repo is clean (update was committed)
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = repo
+	out, _ := cmd.Output()
+	if len(out) > 0 {
+		t.Errorf("repo not clean after golden update: %s", out)
+	}
+}
+
+func TestRunGoldenUpdate(t *testing.T) {
+	repo := initTestRepo(t)
+	wm := NewWorktreeManager(repo)
+
+	// Create and commit a file
+	if err := os.WriteFile(filepath.Join(repo, "data.txt"), []byte("original"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	gitCommit(t, repo, "add data")
+
+	// RunGoldenUpdate with a command that modifies the file
+	err := wm.RunGoldenUpdate("echo -n 'updated' > data.txt")
+	if err != nil {
+		t.Fatalf("RunGoldenUpdate: %v", err)
+	}
+
+	// File should be updated and committed (amended)
+	content, err := os.ReadFile(filepath.Join(repo, "data.txt"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(content) != "updated" {
+		t.Errorf("content = %q, want %q", content, "updated")
+	}
+
+	// Repo should be clean
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = repo
+	out, _ := cmd.Output()
+	if len(out) > 0 {
+		t.Errorf("repo not clean: %s", out)
+	}
+}
+
+func TestRunGoldenUpdateNoChanges(t *testing.T) {
+	repo := initTestRepo(t)
+	wm := NewWorktreeManager(repo)
+
+	// RunGoldenUpdate with a no-op command — should not error
+	err := wm.RunGoldenUpdate("true")
+	if err != nil {
+		t.Fatalf("RunGoldenUpdate no-op: %v", err)
+	}
+}
+
+func TestIsGoldenFile(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"internal/ui/testdata/TestSnapshot.golden", true},
+		{"internal/ui/panels/testdata/TestRun.golden", true},
+		{"testdata/Test.golden", true},
+		{"foo/testdata/bar/baz.golden", true},
+		{"internal/ui/panels/runlist.go", false},
+		{"testdata/config.json", false},
+		{"foo.golden", false},
+		{"internal/testdata.go", false},
+	}
+	for _, tt := range tests {
+		if got := IsGoldenFile(tt.path); got != tt.want {
+			t.Errorf("isGoldenFile(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
+// gitCommit stages all changes and commits with the given message.
+func gitCommit(t *testing.T, dir, msg string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"git", "add", "-A"},
+		{"git", "commit", "-m", msg},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s: %v", args, out, err)
+		}
 	}
 }
 

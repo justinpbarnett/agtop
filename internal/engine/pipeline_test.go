@@ -1,6 +1,10 @@
 package engine
 
 import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -694,5 +698,203 @@ func TestPipelineFailAfterPartialProgress(t *testing.T) {
 	// PRURL should be preserved even after failure
 	if r.PRURL != "https://github.com/org/repo/pull/10" {
 		t.Errorf("expected PRURL preserved after fail, got %q", r.PRURL)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// resolveConflicts golden file auto-resolution tests
+// ---------------------------------------------------------------------------
+
+// pipelineInitTestRepo creates a bare git repo suitable for pipeline tests.
+func pipelineInitTestRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+		{"git", "commit", "--allow-empty", "-m", "init"},
+		{"git", "branch", "-M", "main"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("setup %v: %s: %v", args, out, err)
+		}
+	}
+	return dir
+}
+
+func pipelineGitCommit(t *testing.T, dir, msg string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"git", "add", "-A"},
+		{"git", "commit", "-m", msg},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s: %v", args, out, err)
+		}
+	}
+}
+
+func TestResolveConflictsGoldenOnly(t *testing.T) {
+	repo := pipelineInitTestRepo(t)
+
+	// Create a golden file on main
+	goldenDir := filepath.Join(repo, "internal", "ui", "testdata")
+	if err := os.MkdirAll(goldenDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	goldenFile := filepath.Join(goldenDir, "TestSnapshot.golden")
+	if err := os.WriteFile(goldenFile, []byte("base"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	pipelineGitCommit(t, repo, "add golden file")
+
+	// Create a feature branch and change the golden file
+	cmd := exec.Command("git", "checkout", "-b", "feat/golden")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout -b: %s: %v", out, err)
+	}
+	if err := os.WriteFile(goldenFile, []byte("feature version"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	pipelineGitCommit(t, repo, "update golden on feature branch")
+
+	// Switch back to main and change the golden file differently
+	cmd = exec.Command("git", "checkout", "main")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout main: %s: %v", out, err)
+	}
+	if err := os.WriteFile(goldenFile, []byte("main version"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	pipelineGitCommit(t, repo, "update golden on main")
+
+	// Switch to feature branch and start a rebase that will conflict
+	cmd = exec.Command("git", "checkout", "feat/golden")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout feat: %s: %v", out, err)
+	}
+	rebase := exec.Command("git", "rebase", "main")
+	rebase.Dir = repo
+	// Expect this to fail with a conflict
+	if out, err := rebase.CombinedOutput(); err == nil {
+		t.Fatalf("expected rebase conflict, but rebase succeeded: %s", out)
+	}
+
+	// Now set up a Pipeline and call resolveConflicts
+	store := run.NewStore()
+	runID := store.Add(&run.Run{
+		State:  run.StateRunning,
+		Branch: "feat/golden",
+	})
+	cfg := &config.MergeConfig{}
+	p := NewPipeline(nil, store, cfg, repo)
+
+	err := p.resolveConflicts(context.Background(), runID, repo)
+	if err != nil {
+		t.Fatalf("resolveConflicts should succeed for golden-only conflict: %v", err)
+	}
+
+	// Verify the golden file has the feature branch version (--theirs in rebase = incoming)
+	content, err := os.ReadFile(goldenFile)
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+	if string(content) != "feature version" {
+		t.Errorf("golden content = %q, want %q", content, "feature version")
+	}
+
+	// Verify repo is not in a rebase state
+	rebaseDir := filepath.Join(repo, ".git", "rebase-merge")
+	if _, err := os.Stat(rebaseDir); err == nil {
+		t.Error("repo is still in a rebase state after resolveConflicts")
+	}
+}
+
+func TestResolveConflictsGoldenOnlyWithUpdateCommand(t *testing.T) {
+	repo := pipelineInitTestRepo(t)
+
+	// Create a golden file on main
+	goldenDir := filepath.Join(repo, "internal", "ui", "testdata")
+	if err := os.MkdirAll(goldenDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	goldenFile := filepath.Join(goldenDir, "TestSnapshot.golden")
+	if err := os.WriteFile(goldenFile, []byte("base"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	pipelineGitCommit(t, repo, "add golden file")
+
+	// Create feature branch, change golden
+	cmd := exec.Command("git", "checkout", "-b", "feat/golden-update")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout -b: %s: %v", out, err)
+	}
+	if err := os.WriteFile(goldenFile, []byte("feature"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	pipelineGitCommit(t, repo, "update golden on feature")
+
+	// Diverge on main
+	cmd = exec.Command("git", "checkout", "main")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout main: %s: %v", out, err)
+	}
+	if err := os.WriteFile(goldenFile, []byte("main"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	pipelineGitCommit(t, repo, "update golden on main")
+
+	// Start conflicting rebase
+	cmd = exec.Command("git", "checkout", "feat/golden-update")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout feat: %s: %v", out, err)
+	}
+	rebase := exec.Command("git", "rebase", "main")
+	rebase.Dir = repo
+	rebase.CombinedOutput() // expect failure
+
+	// Set up pipeline with golden update command
+	store := run.NewStore()
+	relGolden := filepath.Join("internal", "ui", "testdata", "TestSnapshot.golden")
+	runID := store.Add(&run.Run{
+		State:  run.StateRunning,
+		Branch: "feat/golden-update",
+	})
+	cfg := &config.MergeConfig{
+		GoldenUpdateCommand: "echo -n regenerated > " + relGolden,
+	}
+	p := NewPipeline(nil, store, cfg, repo)
+
+	err := p.resolveConflicts(context.Background(), runID, repo)
+	if err != nil {
+		t.Fatalf("resolveConflicts: %v", err)
+	}
+
+	// Golden update should have regenerated the file and committed
+	content, err := os.ReadFile(goldenFile)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(content) != "regenerated" {
+		t.Errorf("content = %q, want %q", content, "regenerated")
+	}
+
+	// Repo should be clean
+	status := exec.Command("git", "status", "--porcelain")
+	status.Dir = repo
+	out, _ := status.Output()
+	if len(out) > 0 {
+		t.Errorf("repo not clean after golden update: %s", out)
 	}
 }
