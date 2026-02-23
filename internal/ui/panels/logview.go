@@ -561,7 +561,7 @@ func (l *LogView) renderEntries() string {
 
 		// Collapse/expand indicator — only shown when the entry has expandable detail
 		hasDetail := e.Detail != "" && e.Detail != e.Summary
-		icon := "  "
+		icon := ""
 		if hasDetail {
 			icon = "▸ "
 			if isExpanded {
