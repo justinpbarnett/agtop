@@ -11,7 +11,9 @@ import (
 
 func newTestApp() App {
 	cfg := config.DefaultConfig()
-	return NewApp(&cfg)
+	a := NewApp(&cfg)
+	a.initPrompt = nil // dismiss init prompt for tests
+	return a
 }
 
 func sendKey(a App, key string) App {

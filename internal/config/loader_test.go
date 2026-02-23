@@ -429,6 +429,24 @@ func TestMergeJiraNilPreservesDefault(t *testing.T) {
 	}
 }
 
+func TestLocalConfigExists(t *testing.T) {
+	tmp := t.TempDir()
+
+	orig, _ := os.Getwd()
+	os.Chdir(tmp)
+	t.Cleanup(func() { os.Chdir(orig) })
+
+	if LocalConfigExists() {
+		t.Error("expected false when no agtop.yaml exists")
+	}
+
+	os.WriteFile(filepath.Join(tmp, "agtop.yaml"), []byte("project:\n  name: test\n"), 0644)
+
+	if !LocalConfigExists() {
+		t.Error("expected true when agtop.yaml exists")
+	}
+}
+
 func TestLoadDefaultsJiraNil(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()

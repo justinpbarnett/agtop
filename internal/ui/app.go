@@ -36,6 +36,11 @@ const (
 // TickMsg is sent every second to refresh elapsed time displays.
 type TickMsg struct{}
 
+// InitResultMsg carries the result of running agtop init asynchronously.
+type InitResultMsg struct {
+	Err error
+}
+
 // StartRunMsg triggers the executor to create and start a new run.
 type StartRunMsg struct {
 	Prompt   string
@@ -66,6 +71,7 @@ type App struct {
 	statusBar      panels.StatusBar
 	helpOverlay    *panels.HelpOverlay
 	newRunModal    *panels.NewRunModal
+	initPrompt     *panels.InitPrompt
 	keys           KeyMap
 	ready          bool
 }
@@ -176,7 +182,7 @@ func NewApp(cfg *config.Config) App {
 		lv.SetRun(selected.ID, selected.CurrentSkill, selected.Branch, mgr.Buffer(selected.ID), mgr.EntryBuffer(selected.ID), !selected.IsTerminal())
 	}
 
-	return App{
+	app := App{
 		config:         cfg,
 		store:          store,
 		manager:        mgr,
@@ -194,6 +200,12 @@ func NewApp(cfg *config.Config) App {
 		statusBar:      panels.NewStatusBar(store),
 		keys:           DefaultKeyMap(),
 	}
+
+	if !config.LocalConfigExists() {
+		app.initPrompt = panels.NewInitPrompt()
+	}
+
+	return app
 }
 
 func (a App) Init() tea.Cmd {
@@ -216,7 +228,21 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CloseModalMsg:
 		a.helpOverlay = nil
 		a.newRunModal = nil
+		a.initPrompt = nil
 		return a, nil
+
+	case InitAcceptedMsg:
+		a.initPrompt = nil
+		a.statusBar.SetFlash("Running agtop init...")
+		return a, tea.Batch(runInitCmd(), flashClearCmd())
+
+	case InitResultMsg:
+		if msg.Err != nil {
+			a.statusBar.SetFlash(fmt.Sprintf("Init failed: %v", msg.Err))
+		} else {
+			a.statusBar.SetFlash("agtop init complete")
+		}
+		return a, flashClearCmd()
 
 	case DiffResultMsg:
 		selected := a.runList.SelectedRun()
@@ -342,6 +368,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleMouse(msg)
 
 	case tea.KeyMsg:
+		if a.initPrompt != nil {
+			var cmd tea.Cmd
+			*a.initPrompt, cmd = a.initPrompt.Update(msg)
+			return a, cmd
+		}
+
 		if a.helpOverlay != nil {
 			var cmd tea.Cmd
 			*a.helpOverlay, cmd = a.helpOverlay.Update(msg)
@@ -474,6 +506,15 @@ func (a App) View() string {
 	leftCol := lipgloss.JoinVertical(lipgloss.Left, runListView, detailView)
 	mainArea := lipgloss.JoinHorizontal(lipgloss.Top, leftCol, logViewView)
 	fullLayout := lipgloss.JoinVertical(lipgloss.Left, mainArea, statusBarView)
+
+	if a.initPrompt != nil {
+		modalView := a.initPrompt.View()
+		fullLayout = lipgloss.Place(a.width, a.height,
+			lipgloss.Center, lipgloss.Center, modalView,
+			lipgloss.WithWhitespaceChars(" "),
+			lipgloss.WithWhitespaceForeground(styles.TextDim),
+		)
+	}
 
 	if a.helpOverlay != nil {
 		modalView := a.helpOverlay.View()
@@ -846,6 +887,18 @@ func (a *App) autoStartDevServers() {
 				})
 			}
 		}
+	}
+}
+
+func runInitCmd() tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("agtop", "init")
+		cmd.Dir, _ = os.Getwd()
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return InitResultMsg{Err: fmt.Errorf("%v: %s", err, output)}
+		}
+		return InitResultMsg{}
 	}
 }
 

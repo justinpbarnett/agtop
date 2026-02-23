@@ -24,3 +24,6 @@ type SubmitNewRunMsg = panels.SubmitNewRunMsg
 
 // YankMsg is sent when text has been yanked (copied) from a panel.
 type YankMsg = panels.YankMsg
+
+// InitAcceptedMsg signals the user accepted the init prompt.
+type InitAcceptedMsg = panels.InitAcceptedMsg

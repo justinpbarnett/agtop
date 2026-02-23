@@ -33,3 +33,6 @@ type SubmitNewRunMsg struct {
 type YankMsg struct {
 	Text string
 }
+
+// InitAcceptedMsg signals the user accepted the init prompt.
+type InitAcceptedMsg struct{}

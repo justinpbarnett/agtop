@@ -46,6 +46,18 @@ func LoadFrom(dir string) (*Config, error) {
 	return &cfg, nil
 }
 
+// LocalConfigExists reports whether an agtop.yaml file exists in the current
+// working directory. This checks only the local project config — a user-level
+// config at ~/.config/agtop/config.yaml does not count.
+func LocalConfigExists() bool {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(cwd, "agtop.yaml"))
+	return err == nil
+}
+
 // discoverConfigPath searches the discovery chain and returns the first config
 // file that exists. Returns empty string if none found (defaults-only mode).
 func discoverConfigPath(dir string) (string, error) {
