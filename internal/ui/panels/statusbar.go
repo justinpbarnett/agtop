@@ -13,6 +13,9 @@ import (
 
 const flashDurationVal = 5 * time.Second
 
+// Version is set via -ldflags at build time. Falls back to "dev".
+var Version = "dev"
+
 // FlashDuration returns how long the status bar flash is shown.
 func FlashDuration() time.Duration { return flashDurationVal }
 
@@ -46,7 +49,7 @@ func (s StatusBar) View() string {
 	sep := styles.TextDimStyle.Render(" │ ")
 
 	// Build sections
-	version := styles.TextSecondaryStyle.Render("agtop v0.1.0")
+	version := styles.TextSecondaryStyle.Render("agtop " + Version)
 
 	counts := fmt.Sprintf("%s %s %s",
 		lipgloss.NewStyle().Foreground(styles.StatusRunning).Render(fmt.Sprintf("%d running", running)),
