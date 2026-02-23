@@ -6,10 +6,7 @@ description: >
   current skill sequence. Use as the first skill in workflows that need
   intelligent routing based on task complexity.
 model: haiku
-allowed-tools:
-  - Read
-  - Grep
-  - Glob
+allowed-tools: []
 ---
 
 # Purpose
@@ -22,25 +19,7 @@ Analyzes a user's task description and selects the most appropriate workflow for
 
 ## Instructions
 
-### Step 1: Understand the Task
-
-Read the user's prompt carefully. Identify:
-
-1. **Task type** — Is this a bug fix, new feature, refactor, chore, or something else?
-2. **Scope** — How many files/components are likely involved?
-3. **Complexity** — Is this a quick one-off change or a multi-step implementation?
-
-### Step 2: Quick Codebase Scan (Optional)
-
-If the prompt is ambiguous, do a quick scan:
-
-1. Check if referenced files or components exist
-2. Look at the project structure to gauge complexity
-3. Read relevant code to understand scope
-
-Keep this step fast — spend no more than 2-3 tool calls.
-
-### Step 3: Select Workflow
+### Step 1: Select Workflow
 
 Choose the best workflow based on these criteria:
 
@@ -69,9 +48,8 @@ Return **only** the workflow name as plain text on a single line. No explanation
 ## Workflow
 
 1. **Read** — Parse the user's task prompt
-2. **Scan** — Optionally check codebase for context
-3. **Decide** — Select the appropriate workflow
-4. **Output** — Print the workflow name
+2. **Decide** — Select the appropriate workflow
+3. **Output** — Print the workflow name
 
 ## Cookbook
 
