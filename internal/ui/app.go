@@ -248,7 +248,7 @@ func NewApp(cfg *config.Config) App {
 }
 
 func (a App) Init() tea.Cmd {
-	return tea.Batch(listenForChanges(a.store.Changes()), tickCmd())
+	return tea.Batch(listenForChanges(a.store.Changes()), tickCmd(), animTickCmd())
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -306,6 +306,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case TickMsg:
 		return a, tickCmd()
+
+	case panels.AnimTickMsg:
+		a.statusBar.Tick()
+		var logCmd, listCmd tea.Cmd
+		a.logView, logCmd = a.logView.Update(msg)
+		a.runList, listCmd = a.runList.Update(msg)
+		return a, tea.Batch(animTickCmd(), logCmd, listCmd)
 
 	case RunStoreUpdatedMsg:
 		var cmd tea.Cmd
@@ -1100,6 +1107,12 @@ func runInitCmd() tea.Cmd {
 func tickCmd() tea.Cmd {
 	return tea.Tick(time.Second, func(time.Time) tea.Msg {
 		return TickMsg{}
+	})
+}
+
+func animTickCmd() tea.Cmd {
+	return tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg {
+		return panels.AnimTickMsg{}
 	})
 }
 

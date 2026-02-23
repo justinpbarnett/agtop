@@ -24,6 +24,8 @@ const (
 	colCostW   = 7
 )
 
+var runSpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
 type RunList struct {
 	store        *run.Store
 	filtered     []run.Run
@@ -37,6 +39,7 @@ type RunList struct {
 	filterText   string
 	filterInput  textinput.Model
 	focused      bool
+	tickStep     int
 }
 
 func NewRunList(store *run.Store) RunList {
@@ -57,6 +60,9 @@ func (r RunList) Update(msg tea.Msg) (RunList, tea.Cmd) {
 	case RunStoreUpdatedMsg:
 		r.applyFilter()
 		r.clampSelection()
+		return r, nil
+	case AnimTickMsg:
+		r.tickStep++
 		return r, nil
 	}
 
@@ -217,11 +223,16 @@ func (r RunList) renderContent(width, height int) string {
 		tokens := text.FormatTokens(rn.Tokens)
 		cost := text.FormatCost(rn.Cost)
 
+		statusIcon := rn.StatusIcon()
+		if rn.State == run.StateRunning || rn.State == run.StateRouting {
+			statusIcon = runSpinnerFrames[r.tickStep%len(runSpinnerFrames)]
+		}
+
 		var line string
 		if i == r.selected {
 			// Plain text for selected row so background covers the entire line
 			plainLine := fmt.Sprintf("%s %*s  %-*s %*s %*s %*s",
-				text.PadRight(rn.StatusIcon(), colIconW),
+				text.PadRight(statusIcon, colIconW),
 				colIDW, rn.ID,
 				colStateW, text.Truncate(string(rn.State), colStateW),
 				colTimeW, elapsed,
@@ -232,7 +243,7 @@ func (r RunList) renderContent(width, height int) string {
 			line = styles.SelectedRowStyle.Width(width).Render(plainLine)
 		} else {
 			icon := lipgloss.NewStyle().Foreground(styles.RunStateColor(rn.State)).Render(
-				text.PadRight(rn.StatusIcon(), colIconW),
+				text.PadRight(statusIcon, colIconW),
 			)
 			costStyle := lipgloss.NewStyle().Foreground(styles.CostColor(rn.Cost))
 			line = fmt.Sprintf("%s %*s  %-*s %*s %*s %*s",

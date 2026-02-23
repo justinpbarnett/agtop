@@ -18,6 +18,9 @@ import (
 
 const gTimeout = 300 * time.Millisecond
 
+var ellipsisFrames = []string{".  ", ".. ", "..."}
+
+
 // Log view tab indices.
 const (
 	tabLog  = 0
@@ -72,6 +75,8 @@ type LogView struct {
 	mouseAnchorCol  int
 	mouseCurrentLine int
 	mouseCurrentCol  int
+
+	tickStep int
 }
 
 func NewLogView() LogView {
@@ -115,6 +120,9 @@ func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
 			l.diffView, cmd = l.diffView.Update(msg)
 			return l, cmd
 		}
+		return l, nil
+	case AnimTickMsg:
+		l.tickStep++
 		return l, nil
 	case GTimerExpiredMsg:
 		l.gPending = false
@@ -366,6 +374,9 @@ func (l LogView) View() string {
 				) + styles.TextDimStyle.Render(" (n/N navigate, / edit, Esc clear)")
 			}
 			content += "\n" + status
+		} else if l.active {
+			dots := ellipsisFrames[l.tickStep%len(ellipsisFrames)]
+			content += "\n" + styles.TextDimStyle.Render("  "+dots)
 		}
 	} else {
 		content = l.diffView.Content()
@@ -473,8 +484,8 @@ func (l *LogView) updateDiffFocus() {
 func (l *LogView) resizeViewport() {
 	innerW := l.width - 2
 	innerH := l.height - 2
-	if l.searching || l.searchQuery != "" || l.copyMode {
-		innerH-- // Reserve 1 row for search bar / status / copy mode
+	if l.searching || l.searchQuery != "" || l.copyMode || l.active {
+		innerH-- // Reserve 1 row for search bar / status / copy mode / active ellipsis
 	}
 	if innerW < 0 {
 		innerW = 0
