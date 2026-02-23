@@ -21,11 +21,12 @@ import (
 	"github.com/justinpbarnett/agtop/internal/run"
 	"github.com/justinpbarnett/agtop/internal/runtime"
 	"github.com/justinpbarnett/agtop/internal/safety"
-	"github.com/justinpbarnett/agtop/internal/ui/clipboard"
 	"github.com/justinpbarnett/agtop/internal/server"
+	"github.com/justinpbarnett/agtop/internal/ui/clipboard"
 	"github.com/justinpbarnett/agtop/internal/ui/layout"
 	"github.com/justinpbarnett/agtop/internal/ui/panels"
 	"github.com/justinpbarnett/agtop/internal/ui/styles"
+	"github.com/justinpbarnett/agtop/internal/update"
 )
 
 const (
@@ -79,6 +80,7 @@ type App struct {
 	keys            KeyMap
 	ready           bool
 	lastSyncedRunID string
+	updateRepo      string
 }
 
 func NewApp(cfg *config.Config) App {
@@ -245,11 +247,19 @@ func NewApp(cfg *config.Config) App {
 		app.initPrompt = panels.NewInitPrompt()
 	}
 
+	if cfg.Update.AutoCheck {
+		app.updateRepo = cfg.Update.Repo
+	}
+
 	return app
 }
 
 func (a App) Init() tea.Cmd {
-	return tea.Batch(listenForChanges(a.store.Changes()), tickCmd(), animTickCmd())
+	cmds := []tea.Cmd{listenForChanges(a.store.Changes()), tickCmd(), animTickCmd()}
+	if a.updateRepo != "" {
+		cmds = append(cmds, checkForUpdateCmd(a.updateRepo))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -396,6 +406,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return a, nil
+
+	case UpdateAvailableMsg:
+		a.statusBar.SetFlashWithLevel(
+			fmt.Sprintf("Update available: v%s — run \"agtop update\"", msg.Version),
+			panels.FlashInfo,
+		)
+		return a, tea.Tick(10*time.Second, func(time.Time) tea.Msg {
+			return ClearFlashMsg{}
+		})
 
 	case process.CostThresholdMsg:
 		a.statusBar.SetFlashWithLevel(msg.Reason, panels.FlashWarning)
@@ -1138,6 +1157,16 @@ func listenForChanges(ch <-chan struct{}) tea.Cmd {
 	return func() tea.Msg {
 		<-ch
 		return RunStoreUpdatedMsg{}
+	}
+}
+
+func checkForUpdateCmd(repo string) tea.Cmd {
+	return func() tea.Msg {
+		rel, err := update.CheckForUpdate(panels.Version, repo)
+		if err != nil || rel == nil {
+			return nil
+		}
+		return UpdateAvailableMsg{Version: rel.Version}
 	}
 }
 

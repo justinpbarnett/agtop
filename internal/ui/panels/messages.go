@@ -40,3 +40,8 @@ type InitAcceptedMsg struct{}
 
 // AnimTickMsg is sent at a fast interval to drive spinner/animation frames.
 type AnimTickMsg struct{}
+
+// UpdateAvailableMsg is sent when a newer version is available on GitHub.
+type UpdateAvailableMsg struct {
+	Version string
+}

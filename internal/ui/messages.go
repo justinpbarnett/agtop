@@ -30,3 +30,6 @@ type InitAcceptedMsg = panels.InitAcceptedMsg
 
 // SubmitFollowUpMsg is sent when the user confirms the follow-up modal.
 type SubmitFollowUpMsg = panels.SubmitFollowUpMsg
+
+// UpdateAvailableMsg is sent when a newer version is available.
+type UpdateAvailableMsg = panels.UpdateAvailableMsg

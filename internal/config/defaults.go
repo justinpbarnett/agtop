@@ -65,5 +65,9 @@ func DefaultConfig() Config {
 			ShowCost:       boolPtr(true),
 			LogScrollSpeed: 5,
 		},
+		Update: UpdateConfig{
+			AutoCheck: true,
+			Repo:      "justinpbarnett/agtop",
+		},
 	}
 }

@@ -9,6 +9,7 @@ type Config struct {
 	Limits       LimitsConfig               `toml:"limits"`
 	Merge        MergeConfig                `toml:"merge"`
 	UI           UIConfig                   `toml:"ui"`
+	Update       UpdateConfig               `toml:"update"`
 	Integrations IntegrationsConfig         `toml:"integrations"`
 }
 
@@ -94,4 +95,9 @@ type UIConfig struct {
 	ShowTokenCount *bool  `toml:"show_token_count"`
 	ShowCost       *bool  `toml:"show_cost"`
 	LogScrollSpeed int    `toml:"log_scroll_speed"`
+}
+
+type UpdateConfig struct {
+	AutoCheck bool   `toml:"auto_check"`
+	Repo      string `toml:"repo"`
 }

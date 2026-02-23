@@ -103,6 +103,10 @@ show_token_count = true
 show_cost = true
 log_scroll_speed = 5
 
+[update]
+auto_check = true                    # check for updates on startup
+repo = "justinpbarnett/agtop"       # GitHub owner/repo for release checks
+
 # [integrations.jira]
 # base_url = "https://yourcompany.atlassian.net"
 # project_key = "PROJ"
