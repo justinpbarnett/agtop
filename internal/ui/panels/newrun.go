@@ -32,10 +32,10 @@ var workflows = []workflowOption{
 }
 
 var models = []modelOption{
+	{key: "M-x", name: "default", model: ""},
 	{key: "M-h", name: "haiku", model: "haiku"},
 	{key: "M-o", name: "opus", model: "opus"},
 	{key: "M-n", name: "sonnet", model: "sonnet"},
-	{key: "M-x", name: "default", model: ""},
 }
 
 type NewRunModal struct {
