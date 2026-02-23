@@ -18,14 +18,14 @@ func executorTestConfig() *config.Config {
 			"empty":      {Skills: []string{}},
 		},
 		Skills: map[string]config.SkillConfig{
-			"route":     {Model: "haiku", Timeout: 60},
+			"route":     {Model: "haiku", Timeout: 300},
 			"spec":      {Model: "opus"},
 			"decompose": {Model: "opus"},
-			"build":     {Model: "sonnet", Timeout: 300},
-			"test":      {Model: "sonnet", Timeout: 120},
+			"build":     {Model: "sonnet", Timeout: 1800},
+			"test":      {Model: "sonnet", Timeout: 900},
 			"review":    {Model: "opus"},
 			"document":  {Model: "haiku"},
-			"commit":    {Model: "haiku", Timeout: 30},
+			"commit":    {Model: "haiku", Timeout: 300},
 		},
 	}
 }

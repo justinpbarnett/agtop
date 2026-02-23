@@ -14,7 +14,7 @@ func DefaultConfig() Config {
 		Runtime: RuntimeConfig{
 			Default: "claude",
 			Claude: ClaudeConfig{
-				Model:          "sonnet",
+				Model:          "opus",
 				PermissionMode: "acceptEdits",
 				MaxTurns:       50,
 				AllowedTools:   []string{"Read", "Write", "Edit", "MultiEdit", "Bash", "Grep", "Glob"},
@@ -31,15 +31,15 @@ func DefaultConfig() Config {
 			"quick-fix":  {Skills: []string{"build", "test", "commit"}},
 		},
 		Skills: map[string]SkillConfig{
-			"route":     {Model: "haiku", Timeout: 60, AllowedTools: []string{"Read", "Grep", "Glob"}},
+			"route":     {Model: "haiku", Timeout: 300, AllowedTools: []string{"Read", "Grep", "Glob"}},
 			"spec":      {Model: "opus", AllowedTools: []string{"Read", "Write", "Grep", "Glob"}},
 			"decompose": {Model: "opus", AllowedTools: []string{"Read", "Grep", "Glob"}},
-			"build":     {Model: "sonnet", Timeout: 300, Parallel: true},
-			"test":      {Model: "sonnet", Timeout: 120},
+			"build":     {Model: "sonnet", Timeout: 1800, Parallel: true},
+			"test":      {Model: "sonnet", Timeout: 900},
 			"review":    {Model: "opus", AllowedTools: []string{"Read", "Grep", "Glob"}},
 			"document":  {Model: "haiku", AllowedTools: []string{"Read", "Write", "Grep", "Glob"}},
-			"commit":    {Model: "haiku", Timeout: 30},
-			"pr":        {Model: "haiku", Timeout: 30},
+			"commit":    {Model: "haiku", Timeout: 300},
+			"pr":        {Model: "haiku", Timeout: 300},
 		},
 		Safety: SafetyConfig{
 			BlockedPatterns: []string{
