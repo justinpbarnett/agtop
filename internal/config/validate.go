@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 )
@@ -72,6 +73,30 @@ func validate(cfg *Config) error {
 	for i, pattern := range cfg.Safety.BlockedPatterns {
 		if _, err := regexp.Compile(pattern); err != nil {
 			errs = append(errs, fmt.Sprintf("safety.blocked_patterns[%d] %q is not valid regex: %v", i, pattern, err))
+		}
+	}
+
+	// JIRA integration — only validate when configured
+	if cfg.Integrations.Jira != nil {
+		j := cfg.Integrations.Jira
+		if j.BaseURL == "" {
+			errs = append(errs, "integrations.jira.base_url must be non-empty when jira is configured")
+		}
+		if j.ProjectKey == "" {
+			errs = append(errs, "integrations.jira.project_key must be non-empty when jira is configured")
+		}
+		if j.AuthEnv == "" {
+			errs = append(errs, "integrations.jira.auth_env must be non-empty when jira is configured")
+		}
+		if j.UserEnv == "" {
+			errs = append(errs, "integrations.jira.user_env must be non-empty when jira is configured")
+		}
+		// Non-fatal warnings: help users catch missing env vars early
+		if j.AuthEnv != "" && os.Getenv(j.AuthEnv) == "" {
+			fmt.Fprintf(os.Stderr, "warning: env var %s (integrations.jira.auth_env) is not set\n", j.AuthEnv)
+		}
+		if j.UserEnv != "" && os.Getenv(j.UserEnv) == "" {
+			fmt.Fprintf(os.Stderr, "warning: env var %s (integrations.jira.user_env) is not set\n", j.UserEnv)
 		}
 	}
 

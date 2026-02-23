@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -163,5 +164,105 @@ func TestValidateNegativeTokens(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "max_tokens_per_run") {
 		t.Errorf("expected error about max_tokens_per_run, got: %v", err)
+	}
+}
+
+func TestValidateJiraConfigValid(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Integrations.Jira = &JiraConfig{
+		BaseURL:    "https://company.atlassian.net",
+		ProjectKey: "PROJ",
+		AuthEnv:    "JIRA_TOKEN",
+		UserEnv:    "JIRA_EMAIL",
+	}
+
+	if err := validate(&cfg); err != nil {
+		t.Fatalf("expected valid JIRA config to pass, got: %v", err)
+	}
+}
+
+func TestValidateJiraNilPassesValidation(t *testing.T) {
+	cfg := DefaultConfig()
+	// Jira is nil by default — should pass
+	if err := validate(&cfg); err != nil {
+		t.Fatalf("expected nil JIRA config to pass, got: %v", err)
+	}
+}
+
+func TestValidateJiraEnvVarWarning(t *testing.T) {
+	// Capture stderr to verify warnings are emitted
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	cfg := DefaultConfig()
+	cfg.Integrations.Jira = &JiraConfig{
+		BaseURL:    "https://company.atlassian.net",
+		ProjectKey: "PROJ",
+		AuthEnv:    "AGTOP_TEST_JIRA_AUTH_NONEXISTENT",
+		UserEnv:    "AGTOP_TEST_JIRA_USER_NONEXISTENT",
+	}
+
+	err := validate(&cfg)
+	w.Close()
+	os.Stderr = oldStderr
+
+	if err != nil {
+		t.Fatalf("expected valid config to pass, got: %v", err)
+	}
+
+	buf := make([]byte, 4096)
+	n, _ := r.Read(buf)
+	stderr := string(buf[:n])
+
+	if !strings.Contains(stderr, "AGTOP_TEST_JIRA_AUTH_NONEXISTENT") {
+		t.Errorf("expected stderr warning about auth env var, got: %q", stderr)
+	}
+	if !strings.Contains(stderr, "AGTOP_TEST_JIRA_USER_NONEXISTENT") {
+		t.Errorf("expected stderr warning about user env var, got: %q", stderr)
+	}
+}
+
+func TestValidateJiraRequiredFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     *JiraConfig
+		wantErr string
+	}{
+		{
+			name:    "missing base_url",
+			cfg:     &JiraConfig{ProjectKey: "P", AuthEnv: "A", UserEnv: "U"},
+			wantErr: "base_url",
+		},
+		{
+			name:    "missing project_key",
+			cfg:     &JiraConfig{BaseURL: "https://x", AuthEnv: "A", UserEnv: "U"},
+			wantErr: "project_key",
+		},
+		{
+			name:    "missing auth_env",
+			cfg:     &JiraConfig{BaseURL: "https://x", ProjectKey: "P", UserEnv: "U"},
+			wantErr: "auth_env",
+		},
+		{
+			name:    "missing user_env",
+			cfg:     &JiraConfig{BaseURL: "https://x", ProjectKey: "P", AuthEnv: "A"},
+			wantErr: "user_env",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Integrations.Jira = tt.cfg
+
+			err := validate(&cfg)
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("expected error about %q, got: %v", tt.wantErr, err)
+			}
+		})
 	}
 }

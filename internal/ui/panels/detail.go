@@ -92,6 +92,10 @@ func (d Detail) renderDetails() string {
 		return keyStyle.Render(key+": ") + style.Render(val)
 	}
 
+	if r.TaskID != "" {
+		fmt.Fprintf(&b, "  %s\n", row("Task", r.TaskID))
+	}
+
 	if r.Prompt != "" {
 		prompt := r.Prompt
 		if len(prompt) > 60 {

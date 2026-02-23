@@ -1,13 +1,25 @@
 package config
 
 type Config struct {
-	Project   ProjectConfig              `yaml:"project"`
-	Runtime   RuntimeConfig              `yaml:"runtime"`
-	Workflows map[string]WorkflowConfig  `yaml:"workflows"`
-	Skills    map[string]SkillConfig     `yaml:"skills"`
-	Safety    SafetyConfig               `yaml:"safety"`
-	Limits    LimitsConfig               `yaml:"limits"`
-	UI        UIConfig                   `yaml:"ui"`
+	Project      ProjectConfig              `yaml:"project"`
+	Runtime      RuntimeConfig              `yaml:"runtime"`
+	Workflows    map[string]WorkflowConfig  `yaml:"workflows"`
+	Skills       map[string]SkillConfig     `yaml:"skills"`
+	Safety       SafetyConfig               `yaml:"safety"`
+	Limits       LimitsConfig               `yaml:"limits"`
+	UI           UIConfig                   `yaml:"ui"`
+	Integrations IntegrationsConfig         `yaml:"integrations"`
+}
+
+type IntegrationsConfig struct {
+	Jira *JiraConfig `yaml:"jira,omitempty"`
+}
+
+type JiraConfig struct {
+	BaseURL    string `yaml:"base_url"`
+	ProjectKey string `yaml:"project_key"`
+	AuthEnv    string `yaml:"auth_env"`
+	UserEnv    string `yaml:"user_env"`
 }
 
 type ProjectConfig struct {

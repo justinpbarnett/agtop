@@ -198,13 +198,18 @@ func (r RunList) renderContent(width, height int) string {
 			skillName = rn.Workflow
 		}
 
+		identifier := rn.Branch
+		if rn.TaskID != "" {
+			identifier = rn.TaskID
+		}
+
 		var line string
 		if i == r.selected {
 			// Plain text for selected row so background covers the entire line
 			plainLine := fmt.Sprintf("%s %-10s %-14s %6s %s",
 				rn.StatusIcon(),
 				text.Truncate(skillName, 10),
-				text.Truncate(rn.Branch, 14),
+				text.Truncate(identifier, 14),
 				elapsed,
 				cost,
 			)
@@ -216,7 +221,7 @@ func (r RunList) renderContent(width, height int) string {
 			line = fmt.Sprintf("%s %-10s %-14s %6s %s",
 				icon,
 				text.Truncate(skillName, 10),
-				text.Truncate(rn.Branch, 14),
+				text.Truncate(identifier, 14),
 				elapsed,
 				costStyle.Render(cost),
 			)
@@ -272,7 +277,8 @@ func (r *RunList) applyFilter() {
 			strings.Contains(strings.ToLower(rn.Branch), query) ||
 			strings.Contains(strings.ToLower(rn.Workflow), query) ||
 			strings.Contains(strings.ToLower(string(rn.State)), query) ||
-			strings.Contains(strings.ToLower(rn.CurrentSkill), query) {
+			strings.Contains(strings.ToLower(rn.CurrentSkill), query) ||
+			strings.Contains(strings.ToLower(rn.TaskID), query) {
 			filtered = append(filtered, rn)
 		}
 	}

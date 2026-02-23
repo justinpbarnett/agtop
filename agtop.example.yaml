@@ -83,3 +83,10 @@ ui:
   show_token_count: true
   show_cost: true
   log_scroll_speed: 5
+
+# integrations:
+#   jira:
+#     base_url: "https://yourcompany.atlassian.net"
+#     project_key: "PROJ"
+#     auth_env: "JIRA_API_TOKEN"    # env var containing your API token
+#     user_env: "JIRA_USER_EMAIL"   # env var containing your Atlassian email

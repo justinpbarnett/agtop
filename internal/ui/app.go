@@ -14,6 +14,7 @@ import (
 	"github.com/justinpbarnett/agtop/internal/engine"
 	"github.com/justinpbarnett/agtop/skills"
 	gitpkg "github.com/justinpbarnett/agtop/internal/git"
+	"github.com/justinpbarnett/agtop/internal/jira"
 	"github.com/justinpbarnett/agtop/internal/process"
 	"github.com/justinpbarnett/agtop/internal/run"
 	"github.com/justinpbarnett/agtop/internal/runtime"
@@ -37,6 +38,7 @@ type StartRunMsg struct {
 	Prompt   string
 	Workflow string
 	Model    string
+	TaskID   string
 }
 
 type App struct {
@@ -49,6 +51,7 @@ type App struct {
 	devServers     *server.DevServerManager
 	diffGen        *gitpkg.DiffGenerator
 	persistence    *run.Persistence
+	jiraExpander   *jira.Expander
 	pidWatchCancel func()
 	width          int
 	height         int
@@ -145,6 +148,17 @@ func NewApp(cfg *config.Config) App {
 		})
 	}
 
+	// JIRA integration: create expander if configured
+	var jiraExp *jira.Expander
+	if cfg.Integrations.Jira != nil {
+		jiraClient, jiraErr := jira.NewClientFromConfig(cfg.Integrations.Jira)
+		if jiraErr != nil {
+			log.Printf("warning: %v (JIRA expansion disabled)", jiraErr)
+		} else {
+			jiraExp = jira.NewExpander(jiraClient, cfg.Integrations.Jira.ProjectKey)
+		}
+	}
+
 	rl := panels.NewRunList(store)
 	rl.SetFocused(true)
 	lv := panels.NewLogView()
@@ -169,6 +183,7 @@ func NewApp(cfg *config.Config) App {
 		diffGen:        dg,
 		devServers:     ds,
 		persistence:    persist,
+		jiraExpander:   jiraExp,
 		pidWatchCancel: pidWatchCancel,
 		runList:        rl,
 		logView:        lv,
@@ -226,11 +241,24 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(cmds...)
 
 	case SubmitNewRunMsg:
+		expander := a.jiraExpander
 		return a, func() tea.Msg {
+			prompt := msg.Prompt
+			taskID := ""
+			if expander != nil {
+				expanded, tid, err := expander.Expand(prompt)
+				if err != nil {
+					log.Printf("warning: %v", err)
+				} else {
+					prompt = expanded
+					taskID = tid
+				}
+			}
 			return StartRunMsg{
-				Prompt:   msg.Prompt,
+				Prompt:   prompt,
 				Workflow: msg.Workflow,
 				Model:    msg.Model,
+				TaskID:   taskID,
 			}
 		}
 
@@ -239,6 +267,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			newRun := &run.Run{
 				Workflow:  msg.Workflow,
 				Prompt:    msg.Prompt,
+				TaskID:    msg.TaskID,
 				State:     run.StateQueued,
 				CreatedAt: time.Now(),
 			}
@@ -572,6 +601,9 @@ func (a *App) syncSelection() tea.Cmd {
 		} else {
 			a.logView.SetDiffNoBranch()
 		}
+	} else {
+		a.logView.SetRun("", "", "", nil, false)
+		a.logView.SetDiffEmpty()
 	}
 	return nil
 }

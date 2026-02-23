@@ -172,6 +172,11 @@ func merge(base *Config, override *Config) {
 		base.Limits.RateLimitBackoff = override.Limits.RateLimitBackoff
 	}
 
+	// Integrations — pointer overrides when non-nil
+	if override.Integrations.Jira != nil {
+		base.Integrations.Jira = override.Integrations.Jira
+	}
+
 	// UI — *bool overrides when non-nil
 	if override.UI.Theme != "" {
 		base.UI.Theme = override.UI.Theme

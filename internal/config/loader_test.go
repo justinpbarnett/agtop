@@ -380,3 +380,65 @@ func TestEnvOverridePermissionMode(t *testing.T) {
 		t.Errorf("expected permission mode %q, got %q", "acceptAll", cfg.Runtime.Claude.PermissionMode)
 	}
 }
+
+func TestMergeJiraConfig(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+
+	yaml := `
+integrations:
+  jira:
+    base_url: "https://company.atlassian.net"
+    project_key: "PROJ"
+    auth_env: "JIRA_TOKEN"
+    user_env: "JIRA_EMAIL"
+`
+	os.WriteFile(filepath.Join(tmp, "agtop.yaml"), []byte(yaml), 0644)
+
+	cfg, err := LoadFrom(tmp)
+	if err != nil {
+		t.Fatalf("LoadFrom() error: %v", err)
+	}
+
+	if cfg.Integrations.Jira == nil {
+		t.Fatal("expected Jira config to be non-nil")
+	}
+	if cfg.Integrations.Jira.BaseURL != "https://company.atlassian.net" {
+		t.Errorf("expected base_url 'https://company.atlassian.net', got %q", cfg.Integrations.Jira.BaseURL)
+	}
+	if cfg.Integrations.Jira.ProjectKey != "PROJ" {
+		t.Errorf("expected project_key 'PROJ', got %q", cfg.Integrations.Jira.ProjectKey)
+	}
+	if cfg.Integrations.Jira.AuthEnv != "JIRA_TOKEN" {
+		t.Errorf("expected auth_env 'JIRA_TOKEN', got %q", cfg.Integrations.Jira.AuthEnv)
+	}
+	if cfg.Integrations.Jira.UserEnv != "JIRA_EMAIL" {
+		t.Errorf("expected user_env 'JIRA_EMAIL', got %q", cfg.Integrations.Jira.UserEnv)
+	}
+}
+
+func TestMergeJiraNilPreservesDefault(t *testing.T) {
+	t.Parallel()
+	base := DefaultConfig()
+	override := &Config{}
+
+	merge(&base, override)
+
+	if base.Integrations.Jira != nil {
+		t.Error("expected Jira to remain nil when override doesn't set it")
+	}
+}
+
+func TestLoadDefaultsJiraNil(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+
+	cfg, err := LoadFrom(tmp)
+	if err != nil {
+		t.Fatalf("LoadFrom() error: %v", err)
+	}
+
+	if cfg.Integrations.Jira != nil {
+		t.Error("expected Jira config to be nil by default")
+	}
+}
