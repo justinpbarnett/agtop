@@ -738,11 +738,13 @@ func parseRouteResult(resultText string) string {
 	return ""
 }
 
-// stripWrapping removes backticks, quotes, and trailing punctuation that
-// LLMs commonly add around a bare workflow name.
+// stripWrapping removes backticks, quotes, markdown bold/italic markers, and
+// trailing punctuation that LLMs commonly add around a bare workflow name.
+// Two passes handle layered wrapping like **word**. (bold + period).
 func stripWrapping(s string) string {
-	s = strings.Trim(s, "`\"'")
+	s = strings.Trim(s, "`\"'*")
 	s = strings.TrimRight(s, ".,;:!?")
+	s = strings.Trim(s, "`\"'*")
 	return strings.TrimSpace(s)
 }
 

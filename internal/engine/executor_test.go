@@ -153,6 +153,12 @@ func TestParseRouteResultPlainText(t *testing.T) {
 		{"plan-build,", "plan-build"},
 		// Backticks on the last line after explanation
 		{"Based on analysis:\n`build`", "build"},
+		// Markdown bold (LLMs sometimes wrap the answer)
+		{"**build**", "build"},
+		{"**plan-build**", "plan-build"},
+		{"Based on analysis:\n**sdlc**", "sdlc"},
+		// Markdown bold with trailing punctuation
+		{"**quick-fix**.", "quick-fix"},
 	}
 
 	for _, tt := range tests {
