@@ -162,19 +162,23 @@ func TestNewRunModalEmptyPromptNoSubmit(t *testing.T) {
 }
 
 func TestNewRunModalCancel(t *testing.T) {
-	m := NewNewRunModal(120, 40)
+	for _, key := range []string{"esc", "ctrl+c"} {
+		t.Run(key, func(t *testing.T) {
+			m := NewNewRunModal(120, 40)
 
-	result, cmd := m.Update(newRunKeyMsg("esc"))
-	if result != nil {
-		t.Error("modal should be nil after cancel")
-	}
-	if cmd == nil {
-		t.Fatal("expected a command from cancel")
-	}
+			result, cmd := m.Update(newRunKeyMsg(key))
+			if result != nil {
+				t.Error("modal should be nil after cancel")
+			}
+			if cmd == nil {
+				t.Fatal("expected a command from cancel")
+			}
 
-	msg := cmd()
-	if _, ok := msg.(CloseModalMsg); !ok {
-		t.Errorf("expected CloseModalMsg, got %T", msg)
+			msg := cmd()
+			if _, ok := msg.(CloseModalMsg); !ok {
+				t.Errorf("expected CloseModalMsg, got %T", msg)
+			}
+		})
 	}
 }
 

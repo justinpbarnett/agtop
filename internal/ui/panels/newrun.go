@@ -103,7 +103,7 @@ func (m *NewRunModal) Update(msg tea.Msg) (*NewRunModal, tea.Cmd) {
 	case tea.KeyMsg:
 		m.mouseSelecting = false
 		switch msg.String() {
-		case "esc":
+		case "esc", "ctrl+c":
 			return nil, func() tea.Msg { return CloseModalMsg{} }
 		case "ctrl+s":
 			prompt := strings.TrimSpace(m.promptInput.Value())
