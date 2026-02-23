@@ -1,5 +1,5 @@
 ---
-name: document-feature
+name: document
 description: >
   Generates concise markdown documentation for implemented features by analyzing
   git diffs against the base branch and optionally referencing the original
