@@ -209,12 +209,13 @@ func InterpretRawEvent(ts, skill, text string) *LogEntry {
 	}
 
 	summary := interpretJSONSummary(trimmed, header.Type, header.Subtype)
+	detail := interpretJSONDetail(trimmed, header.Type, header.Subtype)
 	return &LogEntry{
 		Timestamp: ts,
 		Skill:     skill,
 		Type:      EventRaw,
 		Summary:   summary,
-		Detail:    FormatJSON(trimmed),
+		Detail:    detail,
 		Complete:  true,
 	}
 }
@@ -266,6 +267,102 @@ func interpretSystemSummary(raw, subtype string) string {
 		}
 		return "[system]"
 	}
+}
+
+// interpretJSONDetail returns a human-readable detail string for known
+// JSON event types, falling back to pretty-printed JSON for unknown types.
+func interpretJSONDetail(raw, eventType, subtype string) string {
+	if eventType == "system" && subtype == "init" {
+		if d := formatSystemInitDetail(raw); d != "" {
+			return d
+		}
+	}
+	return FormatJSON(raw)
+}
+
+// formatSystemInitDetail produces a structured, readable detail view for
+// system init events instead of dumping raw JSON.
+func formatSystemInitDetail(raw string) string {
+	var init struct {
+		Model          string   `json:"model"`
+		PermissionMode string   `json:"permissionMode"`
+		Tools          []string `json:"tools"`
+		Version        string   `json:"claude_code_version"`
+		SessionID      string   `json:"session_id"`
+		CWD            string   `json:"cwd"`
+		Agents         []string `json:"agents"`
+		Skills         []string `json:"skills"`
+		MCPServers     []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"mcp_servers"`
+		Plugins []struct {
+			Name string `json:"name"`
+		} `json:"plugins"`
+	}
+	if json.Unmarshal([]byte(raw), &init) != nil {
+		return ""
+	}
+
+	var lines []string
+
+	// Header: version · model · permission mode
+	var header []string
+	if init.Version != "" {
+		header = append(header, "v"+init.Version)
+	}
+	if init.Model != "" {
+		header = append(header, init.Model)
+	}
+	if init.PermissionMode != "" {
+		header = append(header, init.PermissionMode)
+	}
+	if len(header) > 0 {
+		lines = append(lines, strings.Join(header, " · "))
+	}
+
+	// Session and working directory
+	if init.SessionID != "" {
+		lines = append(lines, "Session: "+init.SessionID)
+	}
+	if init.CWD != "" {
+		lines = append(lines, "CWD: "+init.CWD)
+	}
+
+	// Lists: tools, agents, skills
+	if len(init.Tools) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, fmt.Sprintf("Tools (%d): %s", len(init.Tools), strings.Join(init.Tools, ", ")))
+	}
+	if len(init.Agents) > 0 {
+		lines = append(lines, fmt.Sprintf("Agents (%d): %s", len(init.Agents), strings.Join(init.Agents, ", ")))
+	}
+	if len(init.Skills) > 0 {
+		lines = append(lines, fmt.Sprintf("Skills (%d): %s", len(init.Skills), strings.Join(init.Skills, ", ")))
+	}
+
+	// Plugins
+	if len(init.Plugins) > 0 {
+		names := make([]string, len(init.Plugins))
+		for i, p := range init.Plugins {
+			names[i] = p.Name
+		}
+		lines = append(lines, fmt.Sprintf("Plugins (%d): %s", len(init.Plugins), strings.Join(names, ", ")))
+	}
+
+	// MCP servers (highlight status)
+	if len(init.MCPServers) > 0 {
+		var parts []string
+		for _, s := range init.MCPServers {
+			parts = append(parts, s.Name+" ("+s.Status+")")
+		}
+		lines = append(lines, "MCP: "+strings.Join(parts, ", "))
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n")
 }
 
 // EntryBuffer is a thread-safe circular buffer of LogEntry pointers.

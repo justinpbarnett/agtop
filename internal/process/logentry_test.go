@@ -472,9 +472,43 @@ func TestInterpretRawEventSystemInit(t *testing.T) {
 	if !strings.Contains(e.Summary, "v2.1.50") {
 		t.Errorf("expected version in summary, got %q", e.Summary)
 	}
-	// Detail should be formatted JSON
-	if !strings.Contains(e.Detail, "\n") {
-		t.Error("expected multi-line formatted JSON in detail")
+	// Detail should be structured human-readable format, not raw JSON
+	if !strings.Contains(e.Detail, "Tools (5):") {
+		t.Errorf("expected 'Tools (5):' in detail, got %q", e.Detail)
+	}
+	if !strings.Contains(e.Detail, "Task, Bash, Read, Edit, Write") {
+		t.Errorf("expected tool list in detail, got %q", e.Detail)
+	}
+}
+
+func TestInterpretRawEventSystemInitFull(t *testing.T) {
+	raw := `{"type":"system","subtype":"init","cwd":"/tmp/worktrees/006","session_id":"07d89954-001b","tools":["Task","Bash"],"mcp_servers":[{"name":"github","status":"failed"}],"model":"claude-sonnet-4-6","permissionMode":"acceptEdits","claude_code_version":"2.1.50","agents":["Bash","Explore"],"skills":["commit","spec"],"plugins":[{"name":"github","path":"/home/.claude/plugins/github"}]}`
+	e := InterpretRawEvent("09:06:49", "build", raw)
+
+	// Check structured detail sections
+	if !strings.Contains(e.Detail, "v2.1.50 · claude-sonnet-4-6 · acceptEdits") {
+		t.Errorf("expected header in detail, got %q", e.Detail)
+	}
+	if !strings.Contains(e.Detail, "Session: 07d89954-001b") {
+		t.Errorf("expected session ID in detail, got %q", e.Detail)
+	}
+	if !strings.Contains(e.Detail, "CWD: /tmp/worktrees/006") {
+		t.Errorf("expected CWD in detail, got %q", e.Detail)
+	}
+	if !strings.Contains(e.Detail, "Tools (2): Task, Bash") {
+		t.Errorf("expected tools in detail, got %q", e.Detail)
+	}
+	if !strings.Contains(e.Detail, "Agents (2): Bash, Explore") {
+		t.Errorf("expected agents in detail, got %q", e.Detail)
+	}
+	if !strings.Contains(e.Detail, "Skills (2): commit, spec") {
+		t.Errorf("expected skills in detail, got %q", e.Detail)
+	}
+	if !strings.Contains(e.Detail, "Plugins (1): github") {
+		t.Errorf("expected plugins in detail, got %q", e.Detail)
+	}
+	if !strings.Contains(e.Detail, "MCP: github (failed)") {
+		t.Errorf("expected MCP servers in detail, got %q", e.Detail)
 	}
 }
 
