@@ -1,12 +1,12 @@
 ╭─ [2] Details ────────────────────────╮
 │  Prompt   : Add user authentication  │
 │  Status   : running                  │
-│  Skill    : build                    │
+│  Workflow : sdlc                     │
+│  Step     : build (3/6)              │
 │  Branch   : feat/add-auth            │
 │  Model    : sonnet                   │
 │  Tokens   : 12.4k (8.2k in / 4.2k out│
 │  Cost     : $0.42                    │
-│                                      │
 │                                      │
 │                                      │
 │                                      │

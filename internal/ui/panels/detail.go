@@ -28,7 +28,7 @@ func (d Detail) Update(msg tea.Msg) (Detail, tea.Cmd) {
 		switch msg.String() {
 		case "y":
 			if d.selectedRun != nil {
-				return d, func() tea.Msg { return YankMsg{Text: d.selectedRun.ID} }
+				return d, func() tea.Msg { return YankMsg{Text: d.plainText()} }
 			}
 		}
 	}
@@ -61,6 +61,92 @@ func (d *Detail) SetSize(w, h int) {
 
 func (d *Detail) SetFocused(focused bool) {
 	d.focused = focused
+}
+
+func (d Detail) plainText() string {
+	r := d.selectedRun
+	if r == nil {
+		return ""
+	}
+
+	var b strings.Builder
+	row := func(key, val string) {
+		fmt.Fprintf(&b, "%-9s: %s\n", key, val)
+	}
+
+	if r.TaskID != "" {
+		row("Task", r.TaskID)
+	}
+	if r.Prompt != "" {
+		row("Prompt", r.Prompt)
+	}
+	for i, fp := range r.FollowUpPrompts {
+		row(fmt.Sprintf("Update %d", i+1), fp)
+	}
+
+	statusText := string(r.State)
+	if !r.StartedAt.IsZero() {
+		statusText += fmt.Sprintf(" (%s)", text.FormatElapsed(r.ElapsedTime()))
+	}
+	row("Status", statusText)
+
+	if r.Workflow != "" {
+		row("Workflow", r.Workflow)
+	}
+
+	skillName := r.CurrentSkill
+	if skillName == "" {
+		skillName = r.Workflow
+	}
+	stepText := skillName
+	if r.SkillTotal > 0 {
+		stepText = fmt.Sprintf("%s (%d/%d)", skillName, r.SkillIndex, r.SkillTotal)
+	}
+	row("Step", stepText)
+	row("Branch", r.Branch)
+
+	model := r.Model
+	if model == "" {
+		model = "—"
+	}
+	row("Model", model)
+
+	row("Tokens", fmt.Sprintf("%s (%s in / %s out)", text.FormatTokens(r.Tokens), text.FormatTokens(r.TokensIn), text.FormatTokens(r.TokensOut)))
+	row("Cost", text.FormatCost(r.Cost))
+
+	if r.Worktree != "" {
+		row("Worktree", r.Worktree)
+	}
+	if r.DevServerURL != "" {
+		row("DevServer", r.DevServerURL)
+	}
+	if r.Command != "" {
+		row("Command", r.Command)
+	}
+	if r.MergeStatus != "" {
+		row("Merge", r.MergeStatus)
+	}
+	if r.PRURL != "" {
+		row("PR", r.PRURL)
+	}
+	if r.Error != "" {
+		row("Error", r.Error)
+	}
+
+	if len(r.SkillCosts) > 0 {
+		fmt.Fprintf(&b, "\n%-12s %8s %8s\n", "Skill", "Tokens", "Cost")
+		for _, sc := range r.SkillCosts {
+			name := sc.SkillName
+			if name == "" {
+				name = "—"
+			}
+			fmt.Fprintf(&b, "%-12s %8s %s\n", text.Truncate(name, 12), text.FormatTokens(sc.TotalTokens), text.FormatCost(sc.CostUSD))
+		}
+		fmt.Fprintf(&b, "%s\n", strings.Repeat("─", 32))
+		fmt.Fprintf(&b, "%-12s %8s %s\n", "Total", text.FormatTokens(r.Tokens), text.FormatCost(r.Cost))
+	}
+
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func (d Detail) renderDetails() string {
@@ -104,8 +190,26 @@ func (d Detail) renderDetails() string {
 		fmt.Fprintf(&b, "  %s\n", row("Prompt", prompt))
 	}
 
+	for i, fp := range r.FollowUpPrompts {
+		label := fmt.Sprintf("Update %d", i+1)
+		if len(fp) > 55 {
+			fp = fp[:52] + "..."
+		}
+		fmt.Fprintf(&b, "  %s\n", row(label, fp))
+	}
+
 	fmt.Fprintf(&b, "  %s\n", styledRow("Status", statusText, stateColor))
-	fmt.Fprintf(&b, "  %s\n", row("Skill", skillName))
+
+	if r.Workflow != "" {
+		fmt.Fprintf(&b, "  %s\n", row("Workflow", r.Workflow))
+	}
+
+	stepText := skillName
+	if r.SkillTotal > 0 {
+		stepText = fmt.Sprintf("%s (%d/%d)", skillName, r.SkillIndex, r.SkillTotal)
+	}
+	fmt.Fprintf(&b, "  %s\n", row("Step", stepText))
+
 	fmt.Fprintf(&b, "  %s\n", row("Branch", r.Branch))
 
 	model := r.Model

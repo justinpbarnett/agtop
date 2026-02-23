@@ -573,7 +573,13 @@ func (l *LogView) renderEntries() string {
 		if isExpanded || isStreaming {
 			detail := e.Detail
 			if detail != "" && detail != e.Summary {
-				detailLines := strings.Split(detail, "\n")
+				// Word-wrap detail text to fit within the viewport
+				wrapWidth := l.viewport.Width - 4 // 4 for indent
+				if wrapWidth < 20 {
+					wrapWidth = 20
+				}
+				wrapped := process.WordWrap(detail, wrapWidth)
+				detailLines := strings.Split(wrapped, "\n")
 				for _, dl := range detailLines {
 					rendered := "    " + detailStyle.Render(dl)
 					if query != "" && strings.Contains(strings.ToLower(dl), query) {

@@ -70,7 +70,7 @@ func TestInitPromptView(t *testing.T) {
 	if !strings.Contains(view, "Initialize Project") {
 		t.Error("expected title 'Initialize Project'")
 	}
-	if !strings.Contains(view, "No agtop.yaml") {
+	if !strings.Contains(view, "No agtop.toml") {
 		t.Error("expected body text about missing config")
 	}
 }

@@ -18,6 +18,8 @@ func TestDetailWithRunSnapshot(t *testing.T) {
 		Workflow:     "sdlc",
 		State:        run.StateRunning,
 		CurrentSkill: "build",
+		SkillIndex:   3,
+		SkillTotal:   6,
 		Tokens:       12400,
 		TokensIn:     8200,
 		TokensOut:    4200,

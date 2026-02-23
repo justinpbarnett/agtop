@@ -24,11 +24,11 @@ func TestNewRunModalWorkflowSelection(t *testing.T) {
 		key      string
 		expected string
 	}{
-		{"ctrl+a", "auto"},
-		{"ctrl+b", "build"},
-		{"ctrl+p", "plan-build"},
-		{"ctrl+l", "sdlc"},
-		{"ctrl+q", "quick-fix"},
+		{"alt+a", "auto"},
+		{"alt+b", "build"},
+		{"alt+p", "plan-build"},
+		{"alt+l", "sdlc"},
+		{"alt+q", "quick-fix"},
 	}
 
 	for _, tt := range tests {
@@ -51,10 +51,10 @@ func TestNewRunModalModelOverride(t *testing.T) {
 		key      string
 		expected string
 	}{
-		{"ctrl+h", "haiku"},
-		{"ctrl+o", "opus"},
-		{"ctrl+n", "sonnet"},
-		{"ctrl+x", ""},
+		{"alt+h", "haiku"},
+		{"alt+o", "opus"},
+		{"alt+n", "sonnet"},
+		{"alt+x", ""},
 	}
 
 	for _, tt := range tests {
@@ -112,13 +112,13 @@ func TestNewRunModalSubmit(t *testing.T) {
 	}
 
 	// Select workflow
-	m, _ = m.Update(newRunKeyMsg("ctrl+l"))
+	m, _ = m.Update(newRunKeyMsg("alt+l"))
 	if m == nil {
 		t.Fatal("modal dismissed on workflow select")
 	}
 
 	// Select model
-	m, _ = m.Update(newRunKeyMsg("ctrl+o"))
+	m, _ = m.Update(newRunKeyMsg("alt+o"))
 	if m == nil {
 		t.Fatal("modal dismissed on model select")
 	}
@@ -247,33 +247,33 @@ func stripAnsi(s string) string {
 	return string(result)
 }
 
-// keyMsg creates a tea.KeyMsg from a key string.
+// newRunKeyMsg creates a tea.KeyMsg from a key string.
 func newRunKeyMsg(key string) tea.KeyMsg {
 	switch key {
 	case "enter":
 		return tea.KeyMsg{Type: tea.KeyEnter}
 	case "esc":
 		return tea.KeyMsg{Type: tea.KeyEscape}
-	case "ctrl+a":
-		return tea.KeyMsg{Type: tea.KeyCtrlA}
-	case "ctrl+b":
-		return tea.KeyMsg{Type: tea.KeyCtrlB}
-	case "ctrl+p":
-		return tea.KeyMsg{Type: tea.KeyCtrlP}
 	case "ctrl+s":
 		return tea.KeyMsg{Type: tea.KeyCtrlS}
-	case "ctrl+l":
-		return tea.KeyMsg{Type: tea.KeyCtrlL}
-	case "ctrl+q":
-		return tea.KeyMsg{Type: tea.KeyCtrlQ}
-	case "ctrl+h":
-		return tea.KeyMsg{Type: tea.KeyCtrlH}
-	case "ctrl+o":
-		return tea.KeyMsg{Type: tea.KeyCtrlO}
-	case "ctrl+n":
-		return tea.KeyMsg{Type: tea.KeyCtrlN}
-	case "ctrl+x":
-		return tea.KeyMsg{Type: tea.KeyCtrlX}
+	case "alt+a":
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}, Alt: true}
+	case "alt+b":
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}, Alt: true}
+	case "alt+p":
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}, Alt: true}
+	case "alt+l":
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}, Alt: true}
+	case "alt+q":
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}, Alt: true}
+	case "alt+h":
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}, Alt: true}
+	case "alt+o":
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}, Alt: true}
+	case "alt+n":
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}, Alt: true}
+	case "alt+x":
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}, Alt: true}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
 	}

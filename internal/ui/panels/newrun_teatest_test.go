@@ -69,27 +69,27 @@ func TestNewRunModalWorkflowSwitching(t *testing.T) {
 	}
 
 	// Switch to build
-	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlB})
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}, Alt: true})
 	time.Sleep(100 * time.Millisecond)
 
 	if adapter.modal != nil && adapter.modal.Workflow() != "build" {
-		t.Errorf("expected workflow 'build' after Ctrl+B, got %q", adapter.modal.Workflow())
+		t.Errorf("expected workflow 'build' after Alt+B, got %q", adapter.modal.Workflow())
 	}
 
 	// Switch to plan-build
-	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlP})
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}, Alt: true})
 	time.Sleep(100 * time.Millisecond)
 
 	if adapter.modal != nil && adapter.modal.Workflow() != "plan-build" {
-		t.Errorf("expected workflow 'plan-build' after Ctrl+P, got %q", adapter.modal.Workflow())
+		t.Errorf("expected workflow 'plan-build' after Alt+P, got %q", adapter.modal.Workflow())
 	}
 
 	// Switch to sdlc
-	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlL})
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}, Alt: true})
 	time.Sleep(100 * time.Millisecond)
 
 	if adapter.modal != nil && adapter.modal.Workflow() != "sdlc" {
-		t.Errorf("expected workflow 'sdlc' after Ctrl+L, got %q", adapter.modal.Workflow())
+		t.Errorf("expected workflow 'sdlc' after Alt+L, got %q", adapter.modal.Workflow())
 	}
 
 	tm.Send(tea.QuitMsg{})

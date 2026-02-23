@@ -32,6 +32,8 @@ func TestDetailSetRun(t *testing.T) {
 		TokensOut:    1800,
 		Cost:         0.15,
 		CurrentSkill: "build",
+		SkillIndex:   3,
+		SkillTotal:   6,
 		Model:        "claude-sonnet-4-5",
 	}
 	d.SetRun(r)
@@ -42,6 +44,12 @@ func TestDetailSetRun(t *testing.T) {
 	}
 	if !strings.Contains(view, "build") {
 		t.Error("expected details to show skill name")
+	}
+	if !strings.Contains(view, "sdlc") {
+		t.Error("expected details to show workflow name")
+	}
+	if !strings.Contains(view, "3/6") {
+		t.Error("expected details to show step progress")
 	}
 	if !strings.Contains(view, "$0.15") {
 		t.Error("expected details to show cost")

@@ -27,6 +27,6 @@
 │┃                                                                                             │
 │┃                                                                                             │
 │                                                                                              │
-│Workflow  [^a] auto  [^b] build  [^p] plan  [^l] sdlc  [^q] quick                             │
-│Model     [^h] haiku  [^o] opus  [^n] sonnet  [^x] default                                    │
-╰─ [^S] submit  [^U/^D] scroll  [Esc] cancel ──────────────────────────────────────────────────╯
+│Workflow  [M-a] auto  [M-b] build  [M-p] plan  [M-l] sdlc  [M-q] quick                        │
+│Model     [M-h] haiku  [M-o] opus  [M-n] sonnet  [M-x] default                                │
+╰─ [^S] submit  [Esc] cancel  [M-·] workflow/model ───────────────────────────────────────────╯

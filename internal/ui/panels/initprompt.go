@@ -32,7 +32,7 @@ func (p InitPrompt) Update(msg tea.Msg) (InitPrompt, tea.Cmd) {
 }
 
 func (p InitPrompt) View() string {
-	body := styles.TextPrimaryStyle.Render("No agtop.yaml found in this directory.") + "\n" +
+	body := styles.TextPrimaryStyle.Render("No agtop.toml found in this directory.") + "\n" +
 		"\n" +
 		styles.TextPrimaryStyle.Render("Run agtop init to set up hooks and config?")
 

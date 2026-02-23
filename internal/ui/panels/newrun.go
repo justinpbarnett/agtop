@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/justinpbarnett/agtop/internal/ui/border"
 	"github.com/justinpbarnett/agtop/internal/ui/styles"
 )
@@ -23,18 +24,18 @@ type modelOption struct {
 }
 
 var workflows = []workflowOption{
-	{key: "^a", name: "auto", workflow: "auto"},
-	{key: "^b", name: "build", workflow: "build"},
-	{key: "^p", name: "plan", workflow: "plan-build"},
-	{key: "^l", name: "sdlc", workflow: "sdlc"},
-	{key: "^q", name: "quick", workflow: "quick-fix"},
+	{key: "M-a", name: "auto", workflow: "auto"},
+	{key: "M-b", name: "build", workflow: "build"},
+	{key: "M-p", name: "plan", workflow: "plan-build"},
+	{key: "M-l", name: "sdlc", workflow: "sdlc"},
+	{key: "M-q", name: "quick", workflow: "quick-fix"},
 }
 
 var models = []modelOption{
-	{key: "^h", name: "haiku", model: "haiku"},
-	{key: "^o", name: "opus", model: "opus"},
-	{key: "^n", name: "sonnet", model: "sonnet"},
-	{key: "^x", name: "default", model: ""},
+	{key: "M-h", name: "haiku", model: "haiku"},
+	{key: "M-o", name: "opus", model: "opus"},
+	{key: "M-n", name: "sonnet", model: "sonnet"},
+	{key: "M-x", name: "default", model: ""},
 }
 
 type NewRunModal struct {
@@ -43,7 +44,16 @@ type NewRunModal struct {
 	model          string
 	width          int
 	height         int
+	screenW        int
+	screenH        int
 	textareaHeight int
+
+	// Mouse selection state
+	mouseSelecting   bool
+	mouseAnchorLine  int
+	mouseAnchorCol   int
+	mouseCurrentLine int
+	mouseCurrentCol  int
 }
 
 func NewNewRunModal(screenW, screenH int) *NewRunModal {
@@ -63,6 +73,8 @@ func NewNewRunModal(screenW, screenH int) *NewRunModal {
 }
 
 func (m *NewRunModal) SetSize(screenW, screenH int) {
+	m.screenW = screenW
+	m.screenH = screenH
 	m.width = screenW * 80 / 100
 	m.height = screenH * 80 / 100
 	if m.width < 40 {
@@ -89,6 +101,7 @@ func (m *NewRunModal) Init() tea.Cmd {
 func (m *NewRunModal) Update(msg tea.Msg) (*NewRunModal, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		m.mouseSelecting = false
 		switch msg.String() {
 		case "esc":
 			return nil, func() tea.Msg { return CloseModalMsg{} }
@@ -101,57 +114,125 @@ func (m *NewRunModal) Update(msg tea.Msg) (*NewRunModal, tea.Cmd) {
 			return nil, func() tea.Msg {
 				return SubmitNewRunMsg{Prompt: p, Workflow: w, Model: mo}
 			}
-		case "ctrl+u":
-			half := m.textareaHeight / 2
-			if half < 1 {
-				half = 1
-			}
-			for i := 0; i < half; i++ {
-				m.promptInput, _ = m.promptInput.Update(tea.KeyMsg{Type: tea.KeyUp})
-			}
-			return m, nil
-		case "ctrl+d":
-			half := m.textareaHeight / 2
-			if half < 1 {
-				half = 1
-			}
-			for i := 0; i < half; i++ {
-				m.promptInput, _ = m.promptInput.Update(tea.KeyMsg{Type: tea.KeyDown})
-			}
-			return m, nil
-		case "ctrl+a":
+		case "alt+a":
 			m.workflow = "auto"
 			return m, nil
-		case "ctrl+b":
+		case "alt+b":
 			m.workflow = "build"
 			return m, nil
-		case "ctrl+p":
+		case "alt+p":
 			m.workflow = "plan-build"
 			return m, nil
-		case "ctrl+l":
+		case "alt+l":
 			m.workflow = "sdlc"
 			return m, nil
-		case "ctrl+q":
+		case "alt+q":
 			m.workflow = "quick-fix"
 			return m, nil
-		case "ctrl+h":
+		case "alt+h":
 			m.model = "haiku"
 			return m, nil
-		case "ctrl+o":
+		case "alt+o":
 			m.model = "opus"
 			return m, nil
-		case "ctrl+n":
+		case "alt+n":
 			m.model = "sonnet"
 			return m, nil
-		case "ctrl+x":
+		case "alt+x":
 			m.model = ""
 			return m, nil
 		}
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	}
 
 	var cmd tea.Cmd
 	m.promptInput, cmd = m.promptInput.Update(msg)
 	return m, cmd
+}
+
+// handleMouse processes mouse events for text selection within the textarea.
+func (m *NewRunModal) handleMouse(msg tea.MouseMsg) (*NewRunModal, tea.Cmd) {
+	line, col, ok := m.mouseToTextarea(msg.X, msg.Y)
+
+	switch msg.Action {
+	case tea.MouseActionPress:
+		if msg.Button != tea.MouseButtonLeft || !ok {
+			return m, nil
+		}
+		m.mouseSelecting = true
+		m.mouseAnchorLine = line
+		m.mouseAnchorCol = col
+		m.mouseCurrentLine = line
+		m.mouseCurrentCol = col
+		return m, nil
+
+	case tea.MouseActionMotion:
+		if !m.mouseSelecting {
+			return m, nil
+		}
+		if ok {
+			m.mouseCurrentLine = line
+			m.mouseCurrentCol = col
+		}
+		return m, nil
+
+	case tea.MouseActionRelease:
+		if !m.mouseSelecting {
+			return m, nil
+		}
+		if ok {
+			m.mouseCurrentLine = line
+			m.mouseCurrentCol = col
+		}
+
+		// Single click — no selection, just clear
+		if m.mouseAnchorLine == m.mouseCurrentLine && m.mouseAnchorCol == m.mouseCurrentCol {
+			m.mouseSelecting = false
+			return m, nil
+		}
+
+		// Extract selected text and copy
+		taView := m.promptInput.View()
+		sl, sc, el, ec := m.normalizedSelection()
+		text := extractCharSelection(taView, sl, sc, el, ec)
+		m.mouseSelecting = false
+		if text != "" {
+			return m, func() tea.Msg { return YankMsg{Text: text} }
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// mouseToTextarea converts absolute screen coordinates to textarea-relative
+// line and column. Returns false if the click is outside the textarea area.
+func (m *NewRunModal) mouseToTextarea(absX, absY int) (line, col int, ok bool) {
+	// Modal top-left on screen (centered by lipgloss.Place)
+	modalX := (m.screenW - m.width) / 2
+	modalY := (m.screenH - m.height) / 2
+
+	// Textarea sits inside the panel border: 1 row down, 1 col in
+	taX := modalX + 1
+	taY := modalY + 1
+
+	relX := absX - taX
+	relY := absY - taY
+
+	if relX < 0 || relY < 0 || relX >= m.width-2 || relY >= m.textareaHeight {
+		return 0, 0, false
+	}
+	return relY, relX, true
+}
+
+// normalizedSelection returns the mouse selection with start before end.
+func (m *NewRunModal) normalizedSelection() (startLine, startCol, endLine, endCol int) {
+	startLine, startCol = m.mouseAnchorLine, m.mouseAnchorCol
+	endLine, endCol = m.mouseCurrentLine, m.mouseCurrentCol
+	if startLine > endLine || (startLine == endLine && startCol > endCol) {
+		startLine, startCol, endLine, endCol = endLine, endCol, startLine, startCol
+	}
+	return
 }
 
 func (m *NewRunModal) View() string {
@@ -160,7 +241,12 @@ func (m *NewRunModal) View() string {
 
 	var b strings.Builder
 
-	b.WriteString(m.promptInput.View())
+	taView := m.promptInput.View()
+	if m.mouseSelecting {
+		sl, sc, el, ec := m.normalizedSelection()
+		taView = m.applySelectionHighlight(taView, sl, sc, el, ec)
+	}
+	b.WriteString(taView)
 	b.WriteString("\n\n")
 
 	// Workflow row
@@ -194,8 +280,8 @@ func (m *NewRunModal) View() string {
 
 	bottomKb := []border.Keybind{
 		{Key: "^S", Label: " submit"},
-		{Key: "^U/^D", Label: " scroll"},
 		{Key: "Esc", Label: " cancel"},
+		{Key: "M-·", Label: " workflow/model"},
 	}
 	return border.RenderPanel("New Run", b.String(), bottomKb, m.width, m.height, true)
 }
@@ -208,3 +294,48 @@ func (m *NewRunModal) Model() string { return m.model }
 
 // PromptValue returns the current text input value.
 func (m *NewRunModal) PromptValue() string { return m.promptInput.Value() }
+
+// applySelectionHighlight overlays selection styling on rendered textarea content.
+func (m *NewRunModal) applySelectionHighlight(content string, startLine, startCol, endLine, endCol int) string {
+	lines := strings.Split(content, "\n")
+	for i := range lines {
+		if i < startLine || i > endLine {
+			continue
+		}
+		lineWidth := ansi.StringWidth(lines[i])
+		if lineWidth == 0 {
+			continue
+		}
+
+		var sc, ec int
+		if i == startLine && i == endLine {
+			sc = startCol
+			ec = endCol + 1
+		} else if i == startLine {
+			sc = startCol
+			ec = lineWidth
+		} else if i == endLine {
+			sc = 0
+			ec = endCol + 1
+		} else {
+			sc = 0
+			ec = lineWidth
+		}
+
+		if sc > lineWidth {
+			sc = lineWidth
+		}
+		if ec > lineWidth {
+			ec = lineWidth
+		}
+		if sc >= ec {
+			continue
+		}
+
+		before := ansi.Cut(lines[i], 0, sc)
+		selected := ansi.Cut(lines[i], sc, ec)
+		after := ansi.Cut(lines[i], ec, lineWidth)
+		lines[i] = before + styles.SelectionStyle.Render(ansi.Strip(selected)) + after
+	}
+	return strings.Join(lines, "\n")
+}
