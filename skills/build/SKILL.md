@@ -1,5 +1,5 @@
 ---
-name: implement
+name: build
 description: >
   Implements a development plan by reading it, breaking it into tasks,
   writing the code, validating the result, and reporting a summary of

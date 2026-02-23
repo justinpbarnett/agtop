@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -27,28 +28,23 @@ func NewRegistry(cfg *config.Config) *Registry {
 	}
 }
 
-// Load discovers SKILL.md files from the six precedence-ordered directories,
+// Load discovers SKILL.md files from the precedence-ordered sources,
 // loads them, and resolves name conflicts (highest precedence wins).
-// Directories are scanned in reverse precedence order (lowest priority first)
+// Sources are scanned in reverse precedence order (lowest priority first)
 // so that simple map assignment handles overrides — later writes win.
-func (r *Registry) Load(projectRoot string) error {
+// builtInFS, if non-nil, provides embedded built-in skills.
+func (r *Registry) Load(projectRoot string, builtInFS fs.FS) error {
 	home, _ := os.UserHomeDir()
 
-	binaryDir := ""
-	if exe, err := os.Executable(); err == nil {
-		binaryDir = filepath.Dir(exe)
+	// Load embedded built-in skills first (lowest precedence).
+	if builtInFS != nil {
+		r.loadFromFS(builtInFS, PriorityBuiltIn)
 	}
 
-	// Build sources in reverse precedence order (lowest priority first).
+	// Build filesystem sources in reverse precedence order (lowest priority first).
 	// Later entries overwrite earlier ones in the map.
 	sources := []SkillSource{}
 
-	if binaryDir != "" {
-		sources = append(sources, SkillSource{
-			Dir:      filepath.Join(binaryDir, "skills"),
-			Priority: PriorityBuiltIn,
-		})
-	}
 	if home != "" {
 		sources = append(sources, SkillSource{
 			Dir:      filepath.Join(home, ".claude", "skills"),
@@ -84,6 +80,29 @@ func (r *Registry) loadFromDir(dir string, priority int) {
 		skill, err := ParseSkillFile(path, priority)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: skipping %s: %v\n", path, err)
+			continue
+		}
+		r.skills[skill.Name] = skill
+	}
+}
+
+func (r *Registry) loadFromFS(fsys fs.FS, priority int) {
+	entries, err := fs.ReadDir(fsys, ".")
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		path := entry.Name() + "/SKILL.md"
+		data, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			continue
+		}
+		skill, err := ParseSkill(data, "builtin://"+entry.Name()+"/SKILL.md", priority)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: skipping embedded skill %s: %v\n", entry.Name(), err)
 			continue
 		}
 		r.skills[skill.Name] = skill

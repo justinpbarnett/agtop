@@ -44,7 +44,7 @@ Test things.
 `)
 
 	reg := NewRegistry(testConfig())
-	if err := reg.Load(tmp); err != nil {
+	if err := reg.Load(tmp, nil); err != nil {
 		t.Fatalf("Load error: %v", err)
 	}
 
@@ -93,7 +93,7 @@ Agtop build content.
 `)
 
 	reg := NewRegistry(testConfig())
-	if err := reg.Load(tmp); err != nil {
+	if err := reg.Load(tmp, nil); err != nil {
 		t.Fatalf("Load error: %v", err)
 	}
 
@@ -127,7 +127,7 @@ Route content.
 	cfg.Skills["route"] = config.SkillConfig{Model: "opus", Timeout: 30}
 
 	reg := NewRegistry(cfg)
-	if err := reg.Load(tmp); err != nil {
+	if err := reg.Load(tmp, nil); err != nil {
 		t.Fatalf("Load error: %v", err)
 	}
 
@@ -164,7 +164,7 @@ Review content.
 	}
 
 	reg := NewRegistry(cfg)
-	if err := reg.Load(tmp); err != nil {
+	if err := reg.Load(tmp, nil); err != nil {
 		t.Fatalf("Load error: %v", err)
 	}
 
@@ -182,7 +182,7 @@ func TestRegistrySkipsMissingDirectories(t *testing.T) {
 	// No skill directories exist at all
 
 	reg := NewRegistry(testConfig())
-	if err := reg.Load(tmp); err != nil {
+	if err := reg.Load(tmp, nil); err != nil {
 		t.Fatalf("Load error: %v", err)
 	}
 	// Should not error, registry may have skills from user home dirs
@@ -208,7 +208,7 @@ Bad content.
 `)
 
 	reg := NewRegistry(testConfig())
-	if err := reg.Load(tmp); err != nil {
+	if err := reg.Load(tmp, nil); err != nil {
 		t.Fatalf("Load error: %v", err)
 	}
 
@@ -233,7 +233,7 @@ Build.
 `)
 
 	reg := NewRegistry(testConfig())
-	_ = reg.Load(tmp)
+	_ = reg.Load(tmp, nil)
 
 	if _, ok := reg.Get("build"); !ok {
 		t.Error("Get('build') returned false, want true")
@@ -270,7 +270,7 @@ B.
 `)
 
 	reg := NewRegistry(testConfig())
-	_ = reg.Load(tmp)
+	_ = reg.Load(tmp, nil)
 
 	list := reg.List()
 	// Filter to just our test skills (user home dirs may add others)
@@ -315,7 +315,7 @@ A.
 `)
 
 	reg := NewRegistry(testConfig())
-	_ = reg.Load(tmp)
+	_ = reg.Load(tmp, nil)
 
 	names := reg.Names()
 	// Find our test names
@@ -361,7 +361,7 @@ Review content.
 	cfg.Runtime.Claude.PermissionMode = "acceptEdits"
 
 	reg := NewRegistry(cfg)
-	_ = reg.Load(tmp)
+	_ = reg.Load(tmp, nil)
 
 	skill, opts, ok := reg.SkillForRun("review")
 	if !ok {
@@ -409,7 +409,7 @@ Custom content.
 	// No config override for "custom"
 
 	reg := NewRegistry(cfg)
-	_ = reg.Load(tmp)
+	_ = reg.Load(tmp, nil)
 
 	_, opts, ok := reg.SkillForRun("custom")
 	if !ok {
@@ -439,7 +439,7 @@ Build content.
 	cfg.Runtime.OpenCode.Agent = "code"
 
 	reg := NewRegistry(cfg)
-	_ = reg.Load(tmp)
+	_ = reg.Load(tmp, nil)
 
 	skill, opts, ok := reg.SkillForRun("build")
 	if !ok {
@@ -490,7 +490,7 @@ Custom content.
 	delete(cfg.Skills, "custom")
 
 	reg := NewRegistry(cfg)
-	_ = reg.Load(tmp)
+	_ = reg.Load(tmp, nil)
 
 	_, opts, ok := reg.SkillForRun("custom")
 	if !ok {
