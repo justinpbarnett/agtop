@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -51,6 +53,37 @@ func NewLogEntry(ts, skill string, eventType StreamEventType, detail string) *Lo
 	return e
 }
 
+var (
+	cwdOnce sync.Once
+	cachedCWD string
+)
+
+func getCWD() string {
+	cwdOnce.Do(func() {
+		if d, err := os.Getwd(); err == nil {
+			cachedCWD = d
+		}
+	})
+	return cachedCWD
+}
+
+// shortenPath converts an absolute path to a relative path from the process
+// working directory. Non-absolute or non-local paths are returned unchanged.
+func shortenPath(p string) string {
+	if !filepath.IsAbs(p) {
+		return p
+	}
+	cwd := getCWD()
+	if cwd == "" {
+		return p
+	}
+	rel, err := filepath.Rel(cwd, p)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return p
+	}
+	return rel
+}
+
 // ToolUseSummary produces a readable one-line tool summary.
 // For known tools it extracts meaningful context from the JSON input.
 func ToolUseSummary(toolName, toolInput string) string {
@@ -63,21 +96,21 @@ func ToolUseSummary(toolName, toolInput string) string {
 			FilePath string `json:"file_path"`
 		}
 		if json.Unmarshal([]byte(toolInput), &input) == nil && input.FilePath != "" {
-			return "Tool: Read — " + input.FilePath
+			return "Tool: Read — " + shortenPath(input.FilePath)
 		}
 	case "Edit":
 		var input struct {
 			FilePath string `json:"file_path"`
 		}
 		if json.Unmarshal([]byte(toolInput), &input) == nil && input.FilePath != "" {
-			return "Tool: Edit — " + input.FilePath
+			return "Tool: Edit — " + shortenPath(input.FilePath)
 		}
 	case "Write":
 		var input struct {
 			FilePath string `json:"file_path"`
 		}
 		if json.Unmarshal([]byte(toolInput), &input) == nil && input.FilePath != "" {
-			return "Tool: Write — " + input.FilePath
+			return "Tool: Write — " + shortenPath(input.FilePath)
 		}
 	case "Bash":
 		var input struct {
