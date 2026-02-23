@@ -1,0 +1,76 @@
+# agtop.toml — Project configuration for agtop
+# See: https://github.com/anthropics/agtop
+
+[project]
+name = "agtop"
+
+# ── Agent Backend ──────────────────────────────────────────────
+[agent]
+backend = "claude-code"
+default_model = "sonnet"           # sonnet | opus | haiku
+
+# ── Defaults ───────────────────────────────────────────────────
+[defaults]
+max_parallel = 4                   # max concurrent agent runs
+branch_mode = "worktree"           # worktree | branch
+auto_dev_server = false            # start dev server for each run
+theme = "tokyo-night"              # tokyo-night | dracula
+
+# ── Worktree Isolation ─────────────────────────────────────────
+[worktree]
+base_dir = "/tmp/agtop-worktrees"
+branch_prefix = "agtop"
+
+# ── Dev Server ─────────────────────────────────────────────────
+[devserver]
+start = "{dev_start_cmd}"
+install_deps = "{install_deps_cmd}"
+port_range = [3001, 3999]
+
+# ── Notifications ──────────────────────────────────────────────
+[notifications]
+# command = "notify-send"          # external notification command
+on_complete = true
+on_await = true
+bell = false
+
+# ── Phases ─────────────────────────────────────────────────────
+# Phases define the steps in a multi-phase workflow.
+# Each phase runs a skill (bundled or project-local).
+
+[phases]
+order = ["spec", "build", "test", "review"]
+
+[phases.spec]
+label = "Spec"
+skill = "spec"
+model = "sonnet"
+description = "Analyze the prompt and produce an implementation plan"
+
+[phases.build]
+label = "Build"
+skill = "implement"
+model = "sonnet"
+description = "Implement the spec"
+retryable = true
+
+[phases.test]
+label = "Test"
+skill = "test"
+model = "sonnet"
+description = "Run tests and fix failures"
+retryable = true
+
+[phases.review]
+label = "Review"
+skill = "review"
+model = "sonnet"
+description = "Review changes against the spec"
+
+# ── Workflows ──────────────────────────────────────────────────
+# Named workflow presets that select which phases to run.
+
+[workflows]
+quick = ["build"]
+standard = ["spec", "build", "test"]
+full = ["spec", "build", "test", "review"]
