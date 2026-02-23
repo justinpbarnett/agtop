@@ -7,3 +7,5 @@
 [ ] pressing enter on a run in the runs panel should show a dropdown list of all concurrent runs happening or just one if one is the only run
 [?] add ability to update (provide follow-on prompts) a run after it's completed
 [ ] Convert skills to output in json for easier reading by LLMs. Could also allow for things like the spec skill to specify if this should be broken down into multiple tasks and allow skipping the deconstruct skill and go straight to a parallel workflow?
+[ ] show full minutes and seconds in the detail panel of a run time, and hours, or even days if it gets to that. runs list can show the highest type (like 4m if it's actually 4m 13s)
+[ ] diff seems to be showing off main branch and not the current worktree or branch the run is working in
