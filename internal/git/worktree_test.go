@@ -521,6 +521,85 @@ func TestWorktreeMergeRebasesBeforeMerge(t *testing.T) {
 	}
 }
 
+func TestWorktreeMergeDirtyWorkingTree(t *testing.T) {
+	repo := initTestRepo(t)
+	wm := NewWorktreeManager(repo)
+
+	// Create a file on main
+	if err := os.WriteFile(filepath.Join(repo, "shared.txt"), []byte("original"), 0o644); err != nil {
+		t.Fatalf("write shared: %v", err)
+	}
+	gitCommit(t, repo, "add shared file")
+
+	// Create worktree and modify the shared file
+	wtPath, _, err := wm.Create("050")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "shared.txt"), []byte("worktree version"), 0o644); err != nil {
+		t.Fatalf("write worktree shared: %v", err)
+	}
+	gitCommit(t, wtPath, "update shared in worktree")
+
+	// Make an uncommitted change to the same file on main (dirty working tree)
+	if err := os.WriteFile(filepath.Join(repo, "shared.txt"), []byte("dirty local edit"), 0o644); err != nil {
+		t.Fatalf("write dirty: %v", err)
+	}
+
+	// Merge should succeed — dirty changes stashed and restored
+	if err := wm.Merge("050"); err != nil {
+		t.Fatalf("Merge with dirty working tree should succeed: %v", err)
+	}
+
+	// The merged content should be from the worktree branch
+	content, err := os.ReadFile(filepath.Join(repo, "shared.txt"))
+	if err != nil {
+		t.Fatalf("read shared: %v", err)
+	}
+	if string(content) != "worktree version" {
+		t.Errorf("shared.txt = %q, want %q", content, "worktree version")
+	}
+}
+
+func TestWorktreeMergeDirtyUnrelatedFile(t *testing.T) {
+	repo := initTestRepo(t)
+	wm := NewWorktreeManager(repo)
+
+	// Create worktree and add a file
+	wtPath, _, err := wm.Create("051")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "feature.txt"), []byte("feature"), 0o644); err != nil {
+		t.Fatalf("write feature: %v", err)
+	}
+	gitCommit(t, wtPath, "add feature")
+
+	// Create a dirty unrelated file on main
+	if err := os.WriteFile(filepath.Join(repo, "unrelated.txt"), []byte("work in progress"), 0o644); err != nil {
+		t.Fatalf("write unrelated: %v", err)
+	}
+
+	// Merge should succeed and preserve the dirty file
+	if err := wm.Merge("051"); err != nil {
+		t.Fatalf("Merge with dirty unrelated file: %v", err)
+	}
+
+	// Feature file should exist from the merge
+	if _, err := os.Stat(filepath.Join(repo, "feature.txt")); os.IsNotExist(err) {
+		t.Error("feature.txt not found after merge")
+	}
+
+	// Unrelated dirty file should still be present
+	content, err := os.ReadFile(filepath.Join(repo, "unrelated.txt"))
+	if err != nil {
+		t.Fatalf("read unrelated: %v", err)
+	}
+	if string(content) != "work in progress" {
+		t.Errorf("unrelated.txt = %q, want %q", content, "work in progress")
+	}
+}
+
 func TestWorktreeExists(t *testing.T) {
 	repo := initTestRepo(t)
 	wm := NewWorktreeManager(repo)

@@ -97,6 +97,17 @@ func (w *WorktreeManager) MergeWithOptions(runID string, opts MergeOptions) (Mer
 		result.GoldenFilesResolved = goldenResolved
 	}
 
+	// Stash any uncommitted changes so merge doesn't fail on dirty working tree
+	stashed, stashErr := w.stashIfDirty()
+	if stashErr != nil {
+		return result, fmt.Errorf("pre-merge stash: %w", stashErr)
+	}
+	defer func() {
+		if stashed {
+			w.unstash()
+		}
+	}()
+
 	// Now merge (should be fast-forward after rebase)
 	cmd := exec.Command("git", "merge", branch)
 	cmd.Dir = w.repoRoot
@@ -145,6 +156,46 @@ func (w *WorktreeManager) MergeWithOptions(runID string, opts MergeOptions) (Mer
 	}
 
 	return result, nil
+}
+
+// stashIfDirty stashes uncommitted changes in the main repo if present.
+// Returns true if changes were stashed. Must be called with w.mu held.
+func (w *WorktreeManager) stashIfDirty() (bool, error) {
+	status := exec.Command("git", "status", "--porcelain")
+	status.Dir = w.repoRoot
+	out, err := status.Output()
+	if err != nil {
+		return false, fmt.Errorf("git status: %w", err)
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return false, nil
+	}
+
+	stash := exec.Command("git", "stash", "push", "-m", "agtop: auto-stash before merge")
+	stash.Dir = w.repoRoot
+	if out, err := stash.CombinedOutput(); err != nil {
+		return false, fmt.Errorf("git stash push: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return true, nil
+}
+
+// unstash pops the most recent stash entry. If the pop conflicts (because
+// merged files overlap with stashed changes), reset to the clean merge state
+// and drop the stash — the accepted merge takes priority. Must be called with
+// w.mu held.
+func (w *WorktreeManager) unstash() {
+	pop := exec.Command("git", "stash", "pop")
+	pop.Dir = w.repoRoot
+	if err := pop.Run(); err != nil {
+		// Pop conflicted — restore to the clean merge state from HEAD
+		reset := exec.Command("git", "checkout", "HEAD", "--", ".")
+		reset.Dir = w.repoRoot
+		_ = reset.Run()
+
+		drop := exec.Command("git", "stash", "drop")
+		drop.Dir = w.repoRoot
+		_ = drop.Run()
+	}
 }
 
 // rebaseOntoMain rebases the worktree branch onto current main HEAD.
