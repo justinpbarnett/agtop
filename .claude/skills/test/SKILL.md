@@ -25,11 +25,11 @@ This skill requires no additional input.
 
 ### Step 1: Discover Available Test Commands
 
-Detect which test commands are available by checking these sources in priority order:
+Read all config files in **parallel** (single batch of tool calls): check for `justfile`, `package.json`, `Makefile`, and `pyproject.toml` / `setup.cfg` simultaneously. From the results, identify available commands:
 
-1. **justfile** — If a `justfile` exists, look for recipes like `check`, `lint`, `typecheck`, `test`, `test-e2e`
-2. **package.json** — If it exists, look for scripts like `lint`, `typecheck`, `test`, `test:e2e`, `test:unit`, `check`
-3. **Makefile** — If it exists, look for targets like `check`, `lint`, `test`
+1. **justfile** — look for recipes like `check`, `lint`, `typecheck`, `test`, `test-e2e`
+2. **package.json** — look for scripts like `lint`, `typecheck`, `test`, `test:e2e`, `test:unit`, `check`
+3. **Makefile** — look for targets like `check`, `lint`, `test`
 4. **pyproject.toml / setup.cfg** — For Python projects, look for test configuration (pytest, ruff, mypy)
 
 Map discovered commands to these test categories:
@@ -141,23 +141,42 @@ Before returning the report:
 
 ## Examples
 
-### Example 1: Node.js Project with justfile
+### Example 1: Go project with Makefile `check` target
 
-**Discovery:** justfile has `lint`, `typecheck`, `test`, `test-e2e` recipes
+**Discovery:** Makefile has `check`, `lint`, `test` targets. `check` runs lint + tests together.
 **Actions:**
-1. Run `just lint`, `just typecheck`, `just test`, `just test-e2e` in sequence
-2. Return JSON report
+1. `make check` is available — run it as a single command (it handles parallelism internally)
+2. Return JSON report mapping the result to `linting` and `unit_tests` categories
 
-### Example 2: Python Project
+```json
+[
+  {
+    "test_name": "linting + unit_tests",
+    "passed": true,
+    "execution_command": "make check",
+    "test_purpose": "Runs go vet and go test in parallel"
+  }
+]
+```
 
-**Discovery:** pyproject.toml with ruff + mypy + pytest config
+### Example 2: Node.js project with justfile, no combined `check`
+
+**Discovery:** justfile has `lint`, `typecheck`, `test` recipes, but no `check` recipe.
 **Actions:**
-1. Run `ruff check .`, `mypy .`, `pytest` in sequence
-2. Return JSON report
+1. No combined command — launch `just lint`, `just typecheck`, `just test` as **concurrent Bash calls** (one parallel batch)
+2. Wait for all three to complete
+3. If all pass, return JSON report; if any fail, skip e2e and report failures
 
-### Example 3: Package.json Only
+### Example 3: Python project (no combined check)
 
-**Discovery:** package.json has `lint` and `test` scripts
+**Discovery:** pyproject.toml with ruff + pytest config; no combined `check` command.
 **Actions:**
-1. Run `npm run lint`, `npm test` in sequence
+1. Launch `ruff check .` and `pytest` as **concurrent Bash calls**
+2. Wait for both; report results
+
+### Example 4: package.json only
+
+**Discovery:** package.json has `lint` and `test` scripts; no `check` script.
+**Actions:**
+1. Launch `npm run lint` and `npm test` as **concurrent Bash calls**
 2. Return JSON report (no typecheck or e2e — not configured)
