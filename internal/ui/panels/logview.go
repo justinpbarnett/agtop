@@ -549,7 +549,7 @@ func (l *LogView) renderEntries() string {
 
 		// Collapse/expand indicator
 		icon := "▸ "
-		if isExpanded || isStreaming {
+		if isExpanded {
 			icon = "▾ "
 		}
 
@@ -567,10 +567,14 @@ func (l *LogView) renderEntries() string {
 			summaryLine = prefix + tsStyle.Render(icon) + summary
 		}
 
+		if isStreaming {
+			summaryLine += " ▍"
+		}
+
 		lines = append(lines, summaryLine)
 
 		// Expanded detail
-		if isExpanded || isStreaming {
+		if isExpanded {
 			detail := e.Detail
 			if detail != "" && detail != e.Summary {
 				// Word-wrap detail text to fit within the viewport
@@ -588,9 +592,6 @@ func (l *LogView) renderEntries() string {
 					}
 					lines = append(lines, rendered)
 				}
-			}
-			if isStreaming {
-				lines[len(lines)-1] += " ▍"
 			}
 		}
 	}
