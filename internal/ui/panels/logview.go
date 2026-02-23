@@ -572,12 +572,15 @@ func (l *LogView) renderEntries() string {
 
 		// Collapse/expand indicator — only shown when the entry has expandable detail
 		hasDetail := e.Detail != "" && e.Detail != e.Summary
-		icon := "  "
+		var iconSpacing string
 		if hasDetail {
-			icon = "▸ "
+			icon := "▸"
 			if isExpanded {
-				icon = "▾ "
+				icon = "▾"
 			}
+			iconSpacing = tsStyle.Render(icon) + " "
+		} else {
+			iconSpacing = "  "
 		}
 
 		// Summary line
@@ -589,9 +592,9 @@ func (l *LogView) renderEntries() string {
 
 		var summaryLine string
 		if isCursor {
-			summaryLine = prefix + cursorStyle.Render(icon+summary)
+			summaryLine = prefix + cursorStyle.Render(iconSpacing+summary)
 		} else {
-			summaryLine = prefix + tsStyle.Render(icon) + summary
+			summaryLine = prefix + iconSpacing + summary
 		}
 
 		if isStreaming {
