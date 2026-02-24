@@ -2,20 +2,20 @@
 name: test
 description: >
   Discovers and executes the project's validation suite — linting, type checking,
-  unit tests, and integration/e2e tests — returning results in a standardized
-  JSON format for automated processing. Auto-detects available test commands
-  from the project's task runner or package manager. Use when a user wants to
-  run tests, validate the application, check code quality, or verify the app
-  is healthy. Triggers on "run tests", "test the app", "validate the application",
-  "run the test suite", "check for errors", "run all checks", "is the app healthy".
-  Do NOT use for implementing features (use the implement skill). Do NOT use for
-  reviewing against a spec (use the review skill). Do NOT use for starting the
-  dev server (use the start skill).
+  unit tests, and integration/e2e tests — fixing any failures found, then returning
+  results in a standardized JSON format for automated processing. Auto-detects
+  available test commands from the project's task runner or package manager. Use
+  when a user wants to run tests, validate the application, check code quality,
+  or verify the app is healthy. Triggers on "run tests", "test the app", "validate
+  the application", "run the test suite", "check for errors", "run all checks",
+  "is the app healthy". Do NOT use for implementing features (use the implement
+  skill). Do NOT use for reviewing against a spec (use the review skill). Do NOT
+  use for starting the dev server (use the start skill).
 ---
 
 # Purpose
 
-Discovers and executes the project's full validation suite — linting, type checking, unit tests, and integration/e2e tests — returning results as a standardized JSON report for automated processing.
+Discovers and executes the project's full validation suite — linting, type checking, unit tests, and integration/e2e tests. If any tests fail, diagnoses and fixes the issues, then re-runs to confirm the fix. Returns results as a standardized JSON report for automated processing.
 
 ## Variables
 
@@ -61,7 +61,24 @@ For each test:
 2. Capture the result (passed/failed) and any error output
 3. If any parallel test **fails** (non-zero exit code), mark it as failed, capture stderr, and do not proceed to e2e_tests
 
-### Step 3: Produce the Report
+### Step 3: Fix Failures (if any)
+
+If all tests passed, skip to Step 4.
+
+If any tests failed, fix them:
+
+1. Read the error output carefully — identify the root cause (broken test, lint violation, type error, or a real bug in the implementation)
+2. Fix the issue:
+   - **Lint/type errors** — fix the code to satisfy the linter or type checker
+   - **Test failures from implementation bugs** — fix the implementation code, not the test assertions
+   - **Test failures from outdated test expectations** — update the test to match the new correct behavior (e.g., golden files, snapshot assertions, changed return values)
+3. Re-run **only the failed test category** to confirm the fix
+4. If it passes, re-run the full suite to check for regressions
+5. If it still fails, repeat from sub-step 1
+
+**Maximum 3 fix attempts.** If tests still fail after 3 rounds of fixes, stop and include the remaining failures in the report.
+
+### Step 4: Produce the Report
 
 Return ONLY a JSON array — no surrounding text, markdown formatting, or explanation. The output must be valid for `JSON.parse()`.
 
@@ -69,6 +86,7 @@ Return ONLY a JSON array — no surrounding text, markdown formatting, or explan
 - Include all executed tests (both passed and failed)
 - If a test passed, omit the `error` field
 - If a test failed, include the error message in the `error` field
+- If a test was fixed during Step 3, add `"fixed": true` to the entry
 - The `execution_command` field should contain the exact command that can be run to reproduce the test
 
 ### Output Structure
@@ -80,7 +98,8 @@ Return ONLY a JSON array — no surrounding text, markdown formatting, or explan
     "passed": boolean,
     "execution_command": "string",
     "test_purpose": "string",
-    "error": "optional string"
+    "error": "optional string",
+    "fixed": "optional boolean"
   }
 ]
 ```
@@ -90,17 +109,17 @@ Return ONLY a JSON array — no surrounding text, markdown formatting, or explan
 ```json
 [
   {
-    "test_name": "type_check",
-    "passed": false,
-    "execution_command": "npx tsc --noEmit",
-    "test_purpose": "Validates TypeScript type annotations and catches type mismatches",
-    "error": "src/app/page.tsx(42,5): error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'."
+    "test_name": "unit_tests",
+    "passed": true,
+    "execution_command": "go test ./...",
+    "test_purpose": "Validates all unit tests pass",
+    "fixed": true
   },
   {
     "test_name": "linting",
     "passed": true,
-    "execution_command": "npm run lint",
-    "test_purpose": "Validates code quality using ESLint"
+    "execution_command": "make lint",
+    "test_purpose": "Validates code quality using go vet"
   }
 ]
 ```
@@ -109,7 +128,8 @@ Return ONLY a JSON array — no surrounding text, markdown formatting, or explan
 
 1. **Discover** — Detect available test commands from justfile, package.json, Makefile, or language-specific config
 2. **Run** — Prefer a combined `check` command when available; otherwise run linting, type_check, and unit_tests in parallel, then e2e_tests if all pass
-3. **Report** — Produce a JSON array with results, failed tests sorted to top
+3. **Fix** — If any tests failed, diagnose and fix (up to 3 attempts), re-running after each fix
+4. **Report** — Produce a JSON array with results, failed tests sorted to top
 
 ## Cookbook
 
@@ -122,31 +142,34 @@ Return ONLY a JSON array — no surrounding text, markdown formatting, or explan
 <If: test runner discovers no tests>
 <Then: verify test files exist. Check the project's config for test file patterns.>
 
-<If: a test fails and subsequent tests are not run>
-<Then: this is by design — stop on first failure to avoid cascading noise. Include only executed tests in the report.>
-
 <If: error messages are very long>
 <Then: keep them concise but include enough context to locate and fix the issue>
 
 <If: Python project detected>
 <Then: look for pytest, ruff/flake8, mypy/pyright. Run with appropriate commands (e.g., `pytest`, `ruff check .`, `mypy .`)>
 
+<If: a fix introduces new failures>
+<Then: this counts as one of the 3 fix attempts. Read the new error carefully — it may indicate the previous fix was wrong. Revert if needed and try a different approach.>
+
+<If: golden file / snapshot mismatches>
+<Then: check if the project has an update command (e.g., `make update-golden`, `npm test -- -u`). If the new output is correct, regenerate the snapshots. If the output is wrong, fix the code.>
+
 ## Validation
 
 Before returning the report:
 - Verify the JSON is valid and parseable
 - Confirm failed tests are sorted to the top
-- Confirm that if any test failed, no subsequent tests were executed
 - Verify each `execution_command` can be copy-pasted and run from the project root
 
 ## Examples
 
-### Example 1: Go project with Makefile `check` target
+### Example 1: Go project — all tests pass
 
 **Discovery:** Makefile has `check`, `lint`, `test` targets. `check` runs lint + tests together.
 **Actions:**
-1. `make check` is available — run it as a single command (it handles parallelism internally)
-2. Return JSON report mapping the result to `linting` and `unit_tests` categories
+1. `make check` is available — run it as a single command
+2. All tests pass — no fixes needed
+3. Return JSON report
 
 ```json
 [
@@ -159,24 +182,32 @@ Before returning the report:
 ]
 ```
 
-### Example 2: Node.js project with justfile, no combined `check`
+### Example 2: Go project — test failure, fixed
 
-**Discovery:** justfile has `lint`, `typecheck`, `test` recipes, but no `check` recipe.
+**Discovery:** Makefile has `check` target.
 **Actions:**
-1. No combined command — launch `just lint`, `just typecheck`, `just test` as **concurrent Bash calls** (one parallel batch)
-2. Wait for all three to complete
-3. If all pass, return JSON report; if any fail, skip e2e and report failures
+1. Run `make check` — unit test fails: `TestFoo expected "bar" got "baz"`
+2. Read the failing test and the implementation. The implementation changed the return value correctly but the test expectation is outdated
+3. Update the test assertion to match the new behavior
+4. Re-run `make check` — all pass
+5. Return JSON report with `"fixed": true`
 
-### Example 3: Python project (no combined check)
+### Example 3: Node.js project — lint failure, fixed
 
-**Discovery:** pyproject.toml with ruff + pytest config; no combined `check` command.
+**Discovery:** package.json has `lint` and `test` scripts.
 **Actions:**
-1. Launch `ruff check .` and `pytest` as **concurrent Bash calls**
-2. Wait for both; report results
+1. Run `npm run lint` and `npm test` in parallel — lint fails with unused import
+2. Remove the unused import
+3. Re-run `npm run lint` — passes
+4. Re-run full suite to confirm no regressions
+5. Return JSON report
 
-### Example 4: package.json only
+### Example 4: Unfixable failure after 3 attempts
 
-**Discovery:** package.json has `lint` and `test` scripts; no `check` script.
+**Discovery:** Makefile has `check` target.
 **Actions:**
-1. Launch `npm run lint` and `npm test` as **concurrent Bash calls**
-2. Return JSON report (no typecheck or e2e — not configured)
+1. Run `make check` — test fails
+2. Attempt fix 1 — still fails (different error)
+3. Attempt fix 2 — still fails
+4. Attempt fix 3 — still fails
+5. Return JSON report with `"passed": false` and the error details

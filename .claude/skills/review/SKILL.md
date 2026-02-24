@@ -3,20 +3,21 @@ name: review
 description: >
   Reviews implemented features against a specification file to verify the
   implementation matches requirements. Compares git diffs with spec criteria,
-  optionally captures screenshots of critical UI paths, and produces a
-  structured JSON report with issue severity classification. Use when a user
-  wants to review work against a spec, validate an implementation, check if
-  features match requirements, or verify work before merging. Triggers on
-  "review the spec", "review my work", "validate against the spec", "check
-  the implementation", "review this feature", "does this match the spec",
-  "spec review", "review before merge". Do NOT use for implementing features
-  (use the implement skill). Do NOT use for creating or writing specs (use the
-  spec skill). Do NOT use for running tests or linting directly.
+  optionally captures screenshots of critical UI paths, fixes any blocker or
+  tech_debt issues found, and produces a structured JSON report with issue
+  severity classification. Use when a user wants to review work against a spec,
+  validate an implementation, check if features match requirements, or verify
+  work before merging. Triggers on "review the spec", "review my work",
+  "validate against the spec", "check the implementation", "review this
+  feature", "does this match the spec", "spec review", "review before merge".
+  Do NOT use for implementing features (use the implement skill). Do NOT use
+  for creating or writing specs (use the spec skill). Do NOT use for running
+  tests or linting directly — the test skill handles that.
 ---
 
 # Purpose
 
-Reviews implemented features against a specification file to verify the work matches requirements. Produces a structured JSON report with optional screenshots and issue severity classification.
+Reviews implemented features against a specification file to verify the work matches requirements. Fixes any blocker or tech_debt issues found, then produces a structured JSON report with optional screenshots and issue severity classification. Does NOT run the test/lint suite — the test skill handles that as a separate workflow step.
 
 ## Variables
 
@@ -100,7 +101,23 @@ For each issue found during review, classify its severity using the guidelines i
 
 Think carefully about impact before classifying. When in doubt, lean toward the less severe classification — only `blocker` should prevent a release.
 
-### Step 7: Produce the Report
+### Step 7: Fix Blocker and Tech Debt Issues
+
+If there are any `blocker` or `tech_debt` issues, fix them now:
+
+1. **Blockers first** — Fix all `blocker` issues before moving to tech debt. These prevent release and must be resolved.
+2. **Tech debt second** — Fix all `tech_debt` issues. These create maintenance burden and should be cleaned up while context is fresh.
+3. **Skip `skippable` issues** — Do not fix these. They are minor and not worth the cost of additional changes.
+
+For each fix:
+- Read the relevant code to understand the issue
+- Make the minimal change needed to resolve it
+- Do NOT run the full test/lint suite — the test skill handles that separately
+- Mark the issue as `"fixed": true` in the report
+
+If a fix is too complex or risky to make inline (e.g., requires architectural changes), leave it unfixed and note why in the `issue_resolution` field.
+
+### Step 8: Produce the Report
 
 Output the review result as a JSON object. Return ONLY the JSON — no surrounding text, markdown formatting, or explanation. The output must be valid for `JSON.parse()`.
 
@@ -116,11 +133,12 @@ Use the schema defined in `references/output-schema.json`.
 ```
 
 Key rules:
-- `success` is `true` if there are NO `blocker` issues (can still have `skippable` or `tech_debt` issues)
-- `success` is `false` ONLY if there are `blocker` issues
+- `success` is `true` if there are no unfixed `blocker` issues
+- `success` is `false` ONLY if there are unfixed `blocker` issues
 - `screenshots` should always contain paths to captured screenshots, regardless of success status
 - All paths must be absolute
 - `review_summary` should read like a standup update: what was built, does it match, any concerns
+- Issues that were fixed should have `"fixed": true`
 
 ## Workflow
 
@@ -130,7 +148,8 @@ Key rules:
 4. **Review strategy** — Decide code-only or code + UI review
 5. **UI review** — If needed: start app, capture screenshots, compare against spec
 6. **Classify** — Assign severity to each issue found
-7. **Report** — Produce a JSON report with summary, issues, and screenshots
+7. **Fix** — Resolve all blocker and tech_debt issues; skip skippable ones
+8. **Report** — Produce a JSON report with summary, issues (with fix status), and screenshots
 
 ## Cookbook
 
@@ -149,51 +168,65 @@ Key rules:
 <If: unsure about issue severity>
 <Then: lean toward the less severe classification. Over-classifying as `blocker` creates unnecessary churn.>
 
+<If: a fix is too complex or risky to make inline>
+<Then: leave the issue unfixed. Note in `issue_resolution` why it was not fixed (e.g., "requires architectural changes beyond review scope"). The issue will still appear in the report with `"fixed": false`.>
+
+<If: no blocker or tech_debt issues found>
+<Then: skip Step 7 entirely. Only skippable issues remain — do not fix those.>
+
 ## Validation
 
 Before finalizing the report, verify:
 
 - Every spec requirement has been checked against the implementation
 - All `blocker` issues genuinely prevent release (not just cosmetic preferences)
+- All fixable `blocker` and `tech_debt` issues have been resolved
 - Screenshots clearly demonstrate the critical functionality paths
 - The JSON output is valid and parseable
 - All file paths in the output are absolute
 
 ## Examples
 
-### Example 1: Review a Specific Spec
+### Example 1: Review with fixes
 
-**User says:** "Review the implementation against specs/feat-user-auth.md"
-
-**Actions:**
-
-1. Read `specs/feat-user-auth.md`
-2. Run `git diff origin/<base>` to see changes
-3. Compare changes against spec requirements
-4. If spec includes UI requirements, start the app and capture screenshots
-5. Classify any issues found
-6. Output JSON report
-
-### Example 2: Review Current Branch Work
-
-**User says:** "Review my work against the spec"
+**Spec:** `specs/feat-user-auth.md`
 
 **Actions:**
 
-1. Run `git branch --show-current` to identify the branch
-2. Search `specs/` for a matching spec file
-3. If found, proceed with review; if ambiguous, ask the user
-4. Compare diff against spec, capture screenshots if needed
-5. Output JSON report
+1. Read spec, gather git diff
+2. Compare changes against spec requirements
+3. Find 1 blocker (missing auth check on /admin route) and 1 tech_debt (hardcoded session timeout)
+4. Fix both: add auth middleware to /admin, extract timeout to config
+5. Output JSON report with both issues marked `"fixed": true`
 
-### Example 3: Code-Only Review
+### Example 2: Review with unfixable blocker
 
-**User says:** "Review this feature against the spec — it's all backend, no UI"
+**Spec:** `specs/feat-payment-flow.md`
 
 **Actions:**
 
-1. Identify the spec file
-2. Run `git diff origin/<base>`
-3. Compare code changes against spec requirements (skip UI review)
-4. Classify issues
-5. Output JSON report with empty `screenshots` array
+1. Read spec, gather git diff
+2. Find 1 blocker: payment provider integration uses wrong API version — requires upgrading the SDK (large change)
+3. Cannot fix inline — note in `issue_resolution`: "Requires SDK upgrade from v2 to v3, beyond review scope"
+4. Output JSON report with `"success": false`, issue marked `"fixed": false`
+
+### Example 3: Clean review — no issues
+
+**Spec:** `specs/fix-health-endpoint.md`
+
+**Actions:**
+
+1. Read spec, gather git diff
+2. All requirements met, no issues found
+3. Output JSON report with `"success": true`, empty `review_issues`
+
+### Example 4: Review with skippable-only issues
+
+**Spec:** `specs/feat-dashboard.md`
+
+**Actions:**
+
+1. Read spec, gather git diff
+2. Find 2 skippable issues (minor spacing, copy wording)
+3. Skip Step 7 — no blockers or tech_debt to fix
+4. Output JSON report with `"success": true`, 2 skippable issues listed

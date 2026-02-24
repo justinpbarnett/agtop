@@ -7,7 +7,7 @@
   "properties": {
     "success": {
       "type": "boolean",
-      "description": "true if there are NO blocker issues (can have skippable/tech_debt issues), false if there are blocker issues"
+      "description": "true if there are no unfixed blocker issues (fixed blockers and any skippable/tech_debt issues are OK), false if there are unfixed blocker issues"
     },
     "review_summary": {
       "type": "string",
@@ -42,6 +42,11 @@
             "type": "string",
             "enum": ["skippable", "tech_debt", "blocker"],
             "description": "Impact classification per the severity guide"
+          },
+          "fixed": {
+            "type": "boolean",
+            "description": "Whether the issue was fixed during the review step. Blockers and tech_debt issues should be fixed when possible.",
+            "default": false
           }
         }
       }

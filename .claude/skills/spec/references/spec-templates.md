@@ -95,6 +95,8 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 ## Validation Commands
 
+NOTE: These commands are run by the **test skill**, not the build skill. The build skill should only compile-check.
+
 <project's actual check/lint/test commands to verify completion>
 
 ## Open Questions (Unresolved)
@@ -168,6 +170,8 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 ## Validation Commands
 
+NOTE: These commands are run by the **test skill**, not the build skill. The build skill should only compile-check.
+
 <project's actual check/lint/test commands>
 
 ## Open Questions (Unresolved)
@@ -230,6 +234,8 @@ IMPORTANT: Execute every step in order, top to bottom.
 <what could break, deployment concerns>
 
 ## Validation Commands
+
+NOTE: These commands are run by the **test skill**, not the build skill. The build skill should only compile-check.
 
 <project's actual check/lint/test commands>
 
@@ -296,6 +302,8 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 ## Validation Commands
 
+NOTE: These commands are run by the **test skill**, not the build skill. The build skill should only compile-check.
+
 <project's actual check/lint/test commands>
 
 ## Open Questions (Unresolved)
@@ -338,6 +346,8 @@ IMPORTANT: Execute every step in order, top to bottom.
 - <specific action>
 
 ## Validation Commands
+
+NOTE: These commands are run by the **test skill**, not the build skill. The build skill should only compile-check.
 
 <project's actual check/lint/test commands>
 
