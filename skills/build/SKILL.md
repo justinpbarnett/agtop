@@ -9,13 +9,12 @@ description: >
   or when given a spec file path or inline plan text. Do NOT use for
   creating or writing specs (use the spec skill instead). Do NOT use for
   reviewing, critiquing, or modifying existing plans without implementing
-  them. Do NOT use for running or deploying applications. Do NOT run the
-  full test suite — the test skill handles validation.
+  them. Do NOT use for running or deploying applications.
 ---
 
 # Purpose
 
-Executes a development plan by methodically reading the spec, implementing each task in dependency order, and reporting a concise summary of completed work with change statistics. Does NOT run the full test/lint suite — that responsibility belongs to the test skill which runs as a separate workflow step.
+Executes a development plan by methodically reading the spec, implementing each task in dependency order, running the full validation suite, and reporting a concise summary of completed work with change statistics.
 
 ## Variables
 
@@ -56,18 +55,30 @@ Work through the plan's tasks in dependency order:
 - **Follow existing patterns** — Match the codebase's style, naming conventions, and architectural patterns
 - **Prefer editing over creating** — Modify existing files when possible rather than creating new ones
 - **Self-documenting code** — Write clear, readable code rather than adding comments
-- **Quick compile check** — After completing a logical chunk of work, verify the code compiles (e.g., `go build ./...`, `tsc --noEmit`, `python -c "import module"`) to catch syntax errors early. Do NOT run the full test or lint suite — that is the test skill's job.
+- **Quick compile check** — After completing a logical chunk of work, verify the code compiles (e.g., `go build ./...`, `tsc --noEmit`, `python -c "import module"`) to catch syntax errors early.
 
-### Step 4: Review
+### Step 4: Run Validation Suite
 
-After all implementation tasks are complete, do a final review:
+After all tasks are implemented, run the project's full validation suite:
+
+1. Discover the validation command — check for `make check`, `just check`, `npm run check`, or fall back to running lint and test commands separately
+2. Run the full suite (e.g., `make check`, `go test ./...`, `npm test`)
+3. If any tests fail, diagnose the root cause and fix:
+   - **Lint/type errors** — fix the code to satisfy the linter or type checker
+   - **Test failures from implementation bugs** — fix the implementation, not the test
+   - **Test failures from outdated expectations** — update the test to match new correct behavior (e.g., golden files, snapshots)
+4. Re-run after each fix to confirm. **Maximum 3 fix attempts** — if tests still fail after 3 rounds, note the remaining failures in the report
+5. Only proceed to the next step after validation passes or max attempts are exhausted
+
+### Step 5: Review
+
+After validation passes, do a final review:
 
 1. Review your changes holistically — do they match the plan's intent?
 2. Verify all new files referenced in the plan were created
 3. Verify all modifications described in the plan were made
-4. Do NOT run the full test/lint/check suite — the test skill handles that as the next workflow step
 
-### Step 5: Report
+### Step 6: Report
 
 Summarize the completed work:
 
@@ -91,8 +102,9 @@ Format the report as:
 1. **Parse** — Read the plan, identify scope, tasks, dependencies, and files
 2. **Research** — Read all relevant files to understand current codebase state
 3. **Implement** — Execute tasks in dependency order, compile-checking after each chunk
-4. **Review** — Verify changes match the plan's intent
-5. **Report** — Bullet summary + `git diff --stat`
+4. **Validate** — Run the full test/lint suite, fix failures (up to 3 attempts)
+5. **Review** — Verify changes match the plan's intent
+6. **Report** — Bullet summary + `git diff --stat`
 
 ## Cookbook
 
@@ -100,7 +112,7 @@ Format the report as:
 <Then: inform the user of the discrepancy. Suggest either updating the plan or adapting the implementation to the current state. Do not silently ignore missing files.>
 
 <If: code doesn't compile after a chunk of work>
-<Then: fix the compilation error before moving to the next task. Only fix what's needed to compile — do not run the full test suite.>
+<Then: fix the compilation error before moving to the next task. Only fix what's needed to compile — save full validation for Step 4.>
 
 <If: plan is ambiguous or incomplete>
 <Then: ask the user for clarification on specific ambiguous points. Do not guess at requirements — it's faster to ask than to implement the wrong thing and redo it.>
@@ -116,7 +128,7 @@ Format the report as:
 Before reporting completion, verify:
 
 - All plan tasks have been addressed
-- Code compiles without errors
+- Full validation suite passes (or failures are documented after 3 fix attempts)
 - No placeholder or TODO code was left behind
 - Changes match the plan's stated scope — nothing more, nothing less
 

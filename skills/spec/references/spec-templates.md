@@ -95,7 +95,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 ## Validation Commands
 
-NOTE: These commands are run by the **test skill**, not the build skill. The build skill should only compile-check.
+The build skill runs these commands as its final validation step before reporting.
 
 <project's actual check/lint/test commands to verify completion>
 
@@ -170,7 +170,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 ## Validation Commands
 
-NOTE: These commands are run by the **test skill**, not the build skill. The build skill should only compile-check.
+The build skill runs these commands as its final validation step before reporting.
 
 <project's actual check/lint/test commands>
 
@@ -235,7 +235,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 ## Validation Commands
 
-NOTE: These commands are run by the **test skill**, not the build skill. The build skill should only compile-check.
+The build skill runs these commands as its final validation step before reporting.
 
 <project's actual check/lint/test commands>
 
@@ -302,7 +302,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 ## Validation Commands
 
-NOTE: These commands are run by the **test skill**, not the build skill. The build skill should only compile-check.
+The build skill runs these commands as its final validation step before reporting.
 
 <project's actual check/lint/test commands>
 
@@ -347,7 +347,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 ## Validation Commands
 
-NOTE: These commands are run by the **test skill**, not the build skill. The build skill should only compile-check.
+The build skill runs these commands as its final validation step before reporting.
 
 <project's actual check/lint/test commands>
 

@@ -39,7 +39,7 @@ bell = false
 # Each phase runs a skill (bundled or project-local).
 
 [phases]
-order = ["spec", "build", "test", "review"]
+order = ["spec", "build", "review"]
 
 [phases.spec]
 label = "Spec"
@@ -54,13 +54,6 @@ model = "sonnet"
 description = "Implement the spec"
 retryable = true
 
-[phases.test]
-label = "Test"
-skill = "test"
-model = "sonnet"
-description = "Run tests and fix failures"
-retryable = true
-
 [phases.review]
 label = "Review"
 skill = "review"
@@ -72,5 +65,5 @@ description = "Review changes against the spec"
 
 [workflows]
 quick = ["build"]
-standard = ["spec", "build", "test"]
-full = ["spec", "build", "test", "review"]
+standard = ["spec", "build"]
+full = ["spec", "build", "review"]
