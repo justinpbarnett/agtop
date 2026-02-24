@@ -31,15 +31,15 @@ func DefaultConfig() Config {
 			"quick-fix":  {Skills: []string{"build", "test", "commit"}},
 		},
 		Skills: map[string]SkillConfig{
-			"route":     {Model: "haiku", Timeout: 300, AllowedTools: []string{"Read", "Grep", "Glob"}},
+			"route":     {Model: "haiku", Timeout: 600, AllowedTools: []string{"Read", "Grep", "Glob"}},
 			"spec":      {Model: "opus", AllowedTools: []string{"Read", "Write", "Grep", "Glob"}},
 			"decompose": {Model: "opus", AllowedTools: []string{"Read", "Grep", "Glob"}},
-			"build":     {Model: "sonnet", Timeout: 1800, Parallel: true},
-			"test":      {Model: "sonnet", Timeout: 900},
+			"build":     {Model: "sonnet", Timeout: 3600, Parallel: true},
+			"test":      {Model: "sonnet", Timeout: 1800},
 			"review":    {Model: "opus", AllowedTools: []string{"Read", "Grep", "Glob"}},
 			"document":  {Model: "haiku", AllowedTools: []string{"Read", "Write", "Grep", "Glob"}},
-			"commit":    {Model: "haiku", Timeout: 300},
-			"pr":        {Model: "haiku", Timeout: 300},
+			"commit":    {Model: "haiku", Timeout: 1200},
+			"pr":        {Model: "haiku", Timeout: 600},
 		},
 		Safety: SafetyConfig{
 			BlockedPatterns: []string{
