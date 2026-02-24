@@ -31,13 +31,13 @@ skills = ["route"]
 skills = ["build", "test"]
 
 [workflows.plan-build]
-skills = ["spec", "build", "test"]
+skills = ["spec", "build", "test", "review"]
 
 [workflows.sdlc]
 skills = ["spec", "decompose", "build", "test", "review", "document"]
 
-[workflows.quick-fix]
-skills = ["build", "test", "commit"]
+# quick-fix is a built-in mode: sends the prompt directly to the model
+# without skill wrapping, then commits. No skills configuration needed.
 
 [skills.route]
 model = "haiku"

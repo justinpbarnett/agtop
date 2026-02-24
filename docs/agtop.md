@@ -186,14 +186,15 @@ runtime:
     agent: build
 
 workflows:
+  auto:
+    skills: [route]
   build:
-    skills: [route, build, test]
+    skills: [build, test]
   plan-build:
-    skills: [route, spec, build, test]
+    skills: [spec, build, test, review]
   sdlc:
-    skills: [route, spec, decompose, build, test, review, document]
-  quick-fix:
-    skills: [build, test, commit]
+    skills: [spec, decompose, build, test, review, document]
+  quick-fix:              # built-in: direct prompt → commit
 
 skills:
   route:

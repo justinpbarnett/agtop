@@ -25,7 +25,7 @@ Choose the best workflow based on these criteria:
 
 | Workflow       | When to Use                                                                                           |
 | -------------- | ----------------------------------------------------------------------------------------------------- |
-| **quick-fix**  | Small, well-defined changes: typo fixes, one-line bugs, config tweaks, simple additions. No spec needed. |
+| **quick-fix**  | Small, well-defined changes: typo fixes, one-line bugs, config tweaks, simple additions. Sends prompt directly to model without skill wrapping. |
 | **build**      | Standard development tasks: adding features, fixing non-trivial bugs, moderate refactors. Clear enough to implement without a detailed spec. |
 | **plan-build** | Tasks that benefit from upfront planning: new features with design decisions, multi-file changes, tasks where the approach isn't obvious. |
 | **sdlc**       | Large, complex features: multi-component work, features needing decomposition, work that should be reviewed and documented. |

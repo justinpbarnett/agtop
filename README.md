@@ -113,13 +113,12 @@ agent = "build"
 skills = ["build", "test"]
 
 [workflows.plan-build]
-skills = ["spec", "build", "test"]
+skills = ["spec", "build", "test", "review"]
 
 [workflows.sdlc]
 skills = ["spec", "decompose", "build", "test", "review", "document"]
 
-[workflows.quick-fix]
-skills = ["build", "test", "commit"]
+# quick-fix is built-in: sends prompt directly to model, then commits
 
 [limits]
 max_cost_per_run = 5.00
