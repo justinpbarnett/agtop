@@ -20,11 +20,12 @@ func DefaultConfig() Config {
 				AllowedTools:   []string{"Read", "Write", "Edit", "MultiEdit", "Bash", "Grep", "Glob"},
 			},
 			OpenCode: OpenCodeConfig{
-				Model: "anthropic/claude-sonnet-4-5",
+				Model: "anthropic/claude-sonnet-4-6",
 				Agent: "build",
 			},
 		},
 		Workflows: map[string]WorkflowConfig{
+			"auto":       {Skills: []string{"route"}},
 			"build":      {Skills: []string{"build", "test"}},
 			"plan-build": {Skills: []string{"spec", "build", "test", "review"}},
 			"sdlc":       {Skills: []string{"spec", "decompose", "build", "test", "review", "document"}},
