@@ -51,3 +51,8 @@ type FullscreenMsg struct{ Panel int }
 
 // ExitFullscreenMsg requests returning to the normal 3-panel layout.
 type ExitFullscreenMsg struct{}
+
+// SelectRunMsg is sent when the user picks a run from the run picker dropdown.
+type SelectRunMsg struct {
+	RunID string
+}

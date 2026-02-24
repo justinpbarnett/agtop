@@ -76,6 +76,7 @@ type App struct {
 	helpOverlay    *panels.HelpOverlay
 	newRunModal    *panels.NewRunModal
 	followUpModal  *panels.FollowUpModal
+	runPickerModal *panels.RunPickerModal
 	initPrompt     *panels.InitPrompt
 	keys            KeyMap
 	ready           bool
@@ -293,8 +294,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.helpOverlay = nil
 		a.newRunModal = nil
 		a.followUpModal = nil
+		a.runPickerModal = nil
 		a.initPrompt = nil
 		return a, nil
+
+	case SelectRunMsg:
+		a.runPickerModal = nil
+		a.runList.SelectByID(msg.RunID)
+		return a, a.syncSelection()
 
 	case InitAcceptedMsg:
 		a.initPrompt = nil
@@ -518,6 +525,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, cmd
 		}
 
+		if a.runPickerModal != nil {
+			var cmd tea.Cmd
+			a.runPickerModal, cmd = a.runPickerModal.Update(msg)
+			return a, cmd
+		}
+
 		// When the log view is in search mode, route keys directly to it
 		// so that typing and n/N navigation aren't intercepted by global handlers.
 		if a.focusedPanel == panelLogView && a.logView.ConsumesKeys() {
@@ -610,6 +623,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleDevServerToggle()
 		case "u":
 			return a.handleFollowUp()
+		case "enter":
+			if a.focusedPanel == panelRunList && !a.runList.FilterActive() {
+				return a.handleRunPicker()
+			}
 		}
 
 		return a.routeKey(msg)
@@ -678,6 +695,15 @@ func (a App) View() string {
 
 	if a.followUpModal != nil {
 		modalView := a.followUpModal.View()
+		fullLayout = lipgloss.Place(a.width, a.height,
+			lipgloss.Center, lipgloss.Center, modalView,
+			lipgloss.WithWhitespaceChars(" "),
+			lipgloss.WithWhitespaceForeground(styles.TextDim),
+		)
+	}
+
+	if a.runPickerModal != nil {
+		modalView := a.runPickerModal.View()
 		fullLayout = lipgloss.Place(a.width, a.height,
 			lipgloss.Center, lipgloss.Center, modalView,
 			lipgloss.WithWhitespaceChars(" "),
@@ -1144,6 +1170,17 @@ func (a App) cleanupRun(runID string) {
 		}
 		process.RemoveLogFiles(stdoutLog, stderrLog)
 	}()
+}
+
+func (a App) handleRunPicker() (tea.Model, tea.Cmd) {
+	var active []run.Run
+	for _, r := range a.store.List() {
+		if !r.IsTerminal() {
+			active = append(active, r)
+		}
+	}
+	a.runPickerModal = panels.NewRunPickerModal(active, a.width, a.height)
+	return a, nil
 }
 
 func (a App) handleFollowUp() (tea.Model, tea.Cmd) {

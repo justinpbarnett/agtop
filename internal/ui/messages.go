@@ -33,3 +33,6 @@ type SubmitFollowUpMsg = panels.SubmitFollowUpMsg
 
 // UpdateAvailableMsg is sent when a newer version is available.
 type UpdateAvailableMsg = panels.UpdateAvailableMsg
+
+// SelectRunMsg is sent when the user picks a run from the run picker dropdown.
+type SelectRunMsg = panels.SelectRunMsg

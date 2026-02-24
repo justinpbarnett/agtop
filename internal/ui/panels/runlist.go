@@ -158,6 +158,7 @@ func (r RunList) View() string {
 	var keybinds []border.Keybind
 	if r.focused {
 		keybinds = []border.Keybind{
+			{Key: "↵", Label: " runs"},
 			{Key: "n", Label: "ew"},
 			{Key: "y", Label: "ank ID"},
 			{Key: "/", Label: "filter"},
@@ -373,4 +374,22 @@ func (r RunList) visibleRows() int {
 
 func (r RunList) renderFilterBar(width int) string {
 	return "/ " + r.filterInput.View()
+}
+
+// FilterActive reports whether the filter input is currently active.
+func (r RunList) FilterActive() bool {
+	return r.filterActive
+}
+
+// SelectByID navigates the list to the run with the given ID and returns
+// true if found. The selection and scroll offset are updated accordingly.
+func (r *RunList) SelectByID(id string) bool {
+	for i, rn := range r.filtered {
+		if rn.ID == id {
+			r.selected = i
+			r.scrollToSelection()
+			return true
+		}
+	}
+	return false
 }
