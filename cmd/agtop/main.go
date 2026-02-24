@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -67,6 +69,10 @@ func main() {
 	if safetyErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", safetyErr)
 	}
+
+	// Silence internal logging so no log.Printf output leaks to the terminal
+	// and disrupts the TUI layout during normal operation.
+	log.SetOutput(io.Discard)
 
 	model := ui.NewApp(cfg)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())

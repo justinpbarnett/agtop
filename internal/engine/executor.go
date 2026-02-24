@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -116,7 +115,6 @@ func (e *Executor) Shutdown() {
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
-		log.Printf("warning: executor shutdown timed out after 3s")
 	}
 }
 
@@ -406,14 +404,12 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 		if skillName == "route" {
 			resolvedWorkflow := parseRouteResult(previousOutput)
 			if resolvedWorkflow == "" {
-				log.Printf("route skill for run %s returned no parseable workflow name", runID)
 				e.logToBuffer(runID, "route", "WARNING: could not parse workflow name from route output, falling back to build")
 				resolvedWorkflow = "build"
 			}
 
 			newSkills, err := ResolveWorkflow(e.cfg, resolvedWorkflow)
 			if err != nil {
-				log.Printf("route skill for run %s resolved to unknown workflow %q: %v", runID, resolvedWorkflow, err)
 				e.logToBuffer(runID, "route", fmt.Sprintf("WARNING: workflow %q not found, falling back to build", resolvedWorkflow))
 				resolvedWorkflow = "build"
 				newSkills, err = ResolveWorkflow(e.cfg, resolvedWorkflow)
@@ -848,7 +844,6 @@ func (e *Executor) commitAfterStep(ctx context.Context, runID string) {
 
 	result, err := e.runSkill(ctx, runID, prompt, opts, skill.Timeout)
 	if err != nil {
-		log.Printf("auto-commit after step failed for run %s: %v", runID, err)
 		return
 	}
 
