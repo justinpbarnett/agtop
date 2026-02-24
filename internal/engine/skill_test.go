@@ -154,6 +154,30 @@ func TestSkillNameFromPath(t *testing.T) {
 	}
 }
 
+func TestPriorityLabel(t *testing.T) {
+	tests := []struct {
+		priority int
+		want     string
+	}{
+		{PriorityProjectAgtop, "project-agtop"},
+		{PriorityProjectClaude, "project-claude"},
+		{PriorityProjectOpenCode, "project-opencode"},
+		{PriorityProjectAgents, "project-agents"},
+		{PriorityUserAgtop, "user-agtop"},
+		{PriorityUserClaude, "user-claude"},
+		{PriorityUserOpenCode, "user-opencode"},
+		{PriorityBuiltIn, "builtin"},
+		{99, ""},
+		{-1, ""},
+	}
+	for _, tt := range tests {
+		got := PriorityLabel(tt.priority)
+		if got != tt.want {
+			t.Errorf("PriorityLabel(%d) = %q, want %q", tt.priority, got, tt.want)
+		}
+	}
+}
+
 func TestParseSkillFileMissing(t *testing.T) {
 	_, err := ParseSkillFile("/nonexistent/path/SKILL.md", 0)
 	if err == nil {

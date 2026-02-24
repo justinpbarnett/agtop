@@ -111,6 +111,30 @@ func ParseSkillFile(path string, priority int) (*Skill, error) {
 	return ParseSkill(data, path, priority)
 }
 
+// PriorityLabel returns the human-readable source label for a priority level.
+func PriorityLabel(priority int) string {
+	switch priority {
+	case PriorityProjectAgtop:
+		return "project-agtop"
+	case PriorityProjectClaude:
+		return "project-claude"
+	case PriorityProjectOpenCode:
+		return "project-opencode"
+	case PriorityProjectAgents:
+		return "project-agents"
+	case PriorityUserAgtop:
+		return "user-agtop"
+	case PriorityUserClaude:
+		return "user-claude"
+	case PriorityUserOpenCode:
+		return "user-opencode"
+	case PriorityBuiltIn:
+		return "builtin"
+	default:
+		return ""
+	}
+}
+
 // SkillNameFromPath extracts the skill name from a SKILL.md file path
 // by returning the name of the parent directory.
 func SkillNameFromPath(path string) string {
