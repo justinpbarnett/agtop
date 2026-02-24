@@ -491,6 +491,11 @@ func (e *Executor) runSkill(ctx context.Context, runID string, prompt string, op
 			if cancel != nil {
 				cancel()
 			}
+			// Drain ch so consumeSkillEvents finishes and removes the process
+			// from the manager before we return, preventing "already has an
+			// active process" errors when the next skill starts immediately.
+			for range ch {
+			}
 			return process.SkillResult{}, skillCtx.Err()
 		}
 		if cancel != nil {
