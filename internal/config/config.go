@@ -25,10 +25,11 @@ type JiraConfig struct {
 }
 
 type ProjectConfig struct {
-	Name        string          `toml:"name"`
-	Root        string          `toml:"root"`
-	TestCommand string          `toml:"test_command"`
-	DevServer   DevServerConfig `toml:"dev_server"`
+	Name               string          `toml:"name"`
+	Root               string          `toml:"root"`
+	TestCommand        string          `toml:"test_command"`
+	DevServer          DevServerConfig `toml:"dev_server"`
+	IgnoreSkillSources []string        `toml:"ignore_skill_sources"`
 }
 
 type DevServerConfig struct {
@@ -65,6 +66,7 @@ type SkillConfig struct {
 	Timeout      int      `toml:"timeout"`
 	Parallel     bool     `toml:"parallel"`
 	AllowedTools []string `toml:"allowed_tools"`
+	Ignore       bool     `toml:"ignore"`
 }
 
 type SafetyConfig struct {

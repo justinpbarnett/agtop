@@ -4,6 +4,7 @@
 name = "my-project"
 root = "."
 test_command = "npm test"
+# ignore_skill_sources = ["project-claude"]  # Ignore all skills from .claude/skills/
 
 [project.dev_server]
 command = "npm run dev"
@@ -67,6 +68,7 @@ model = "haiku"
 [skills.commit]
 model = "haiku"
 timeout = 1200
+# ignore = true   # Skip external versions; use agtop built-in instead
 
 [skills.pr]
 model = "haiku"
