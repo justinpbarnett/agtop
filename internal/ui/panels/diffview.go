@@ -3,17 +3,13 @@ package panels
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/justinpbarnett/agtop/internal/ui/border"
+	"github.com/justinpbarnett/agtop/internal/ui/selection"
 	"github.com/justinpbarnett/agtop/internal/ui/styles"
 )
-
-const diffGTimeout = 300 * time.Millisecond
-
-type DiffGTimerExpiredMsg struct{}
 
 type DiffView struct {
 	viewport    viewport.Model
@@ -27,24 +23,31 @@ type DiffView struct {
 	errMsg      string
 	emptyMsg    string
 	focused     bool
-	gPending    bool
-
-	// Copy mode state
-	copyMode   bool
-	copyAnchor int
-	copyCursor int
-
-	// Mouse selection state (character-level)
-	mouseSelecting   bool
-	mouseAnchorLine  int
-	mouseAnchorCol   int
-	mouseCurrentLine int
-	mouseCurrentCol  int
+	gTap        DoubleTap
+	sel         selection.Selection
 }
+
+// diffLinesProvider adapts DiffView.rawLines() to the selection.LinesProvider interface.
+type diffLinesProvider struct{ d *DiffView }
+
+func (p *diffLinesProvider) Lines() []string { return p.d.rawLines() }
 
 func NewDiffView() DiffView {
 	vp := viewport.New(0, 0)
-	return DiffView{viewport: vp, emptyMsg: "No changes on branch"}
+	return DiffView{
+		viewport: vp,
+		emptyMsg: "No changes on branch",
+		gTap:     NewDoubleTap(gTapIDDiffView),
+	}
+}
+
+func (d *DiffView) resetState() {
+	d.loading = false
+	d.errMsg = ""
+	d.emptyMsg = ""
+	d.rawDiff = ""
+	d.diffStat = ""
+	d.fileOffsets = nil
 }
 
 func (d *DiffView) SetDiff(diff, stat string) {
@@ -63,52 +66,32 @@ func (d *DiffView) SetDiff(diff, stat string) {
 }
 
 func (d *DiffView) SetLoading() {
+	d.resetState()
 	d.loading = true
-	d.errMsg = ""
-	d.emptyMsg = ""
-	d.rawDiff = ""
-	d.diffStat = ""
-	d.fileOffsets = nil
 	d.refreshContent()
 }
 
 func (d *DiffView) SetError(err string) {
+	d.resetState()
 	d.errMsg = err
-	d.loading = false
-	d.emptyMsg = ""
-	d.rawDiff = ""
-	d.diffStat = ""
-	d.fileOffsets = nil
 	d.refreshContent()
 }
 
 func (d *DiffView) SetEmpty() {
+	d.resetState()
 	d.emptyMsg = "No changes on branch"
-	d.loading = false
-	d.errMsg = ""
-	d.rawDiff = ""
-	d.diffStat = ""
-	d.fileOffsets = nil
 	d.refreshContent()
 }
 
 func (d *DiffView) SetNoBranch() {
+	d.resetState()
 	d.emptyMsg = "No branch — diff unavailable"
-	d.loading = false
-	d.errMsg = ""
-	d.rawDiff = ""
-	d.diffStat = ""
-	d.fileOffsets = nil
 	d.refreshContent()
 }
 
 func (d *DiffView) SetWaiting() {
+	d.resetState()
 	d.emptyMsg = "Waiting for worktree..."
-	d.loading = false
-	d.errMsg = ""
-	d.rawDiff = ""
-	d.diffStat = ""
-	d.fileOffsets = nil
 	d.refreshContent()
 }
 
@@ -118,7 +101,7 @@ func (d *DiffView) SetSize(w, h int) {
 	if w > 0 && h > 0 {
 		d.viewport.Width = w
 		vpH := h
-		if d.copyMode {
+		if d.sel.Active() {
 			vpH-- // Reserve row for copy mode status
 		}
 		if vpH < 0 {
@@ -135,11 +118,11 @@ func (d *DiffView) SetFocused(focused bool) {
 
 func (d DiffView) Update(msg tea.Msg) (DiffView, tea.Cmd) {
 	switch msg := msg.(type) {
-	case DiffGTimerExpiredMsg:
-		d.gPending = false
+	case GTimerExpiredMsg:
+		d.gTap.HandleExpiry(msg)
 		return d, nil
 	case tea.KeyMsg:
-		if d.copyMode {
+		if d.sel.Active() {
 			return d.updateCopyMode(msg)
 		}
 
@@ -151,15 +134,12 @@ func (d DiffView) Update(msg tea.Msg) (DiffView, tea.Cmd) {
 			d.viewport.GotoBottom()
 			return d, nil
 		case "g":
-			if d.gPending {
-				d.gPending = false
+			fired, cmd := d.gTap.Check()
+			if fired {
 				d.viewport.GotoTop()
 				return d, nil
 			}
-			d.gPending = true
-			return d, tea.Tick(diffGTimeout, func(time.Time) tea.Msg {
-				return DiffGTimerExpiredMsg{}
-			})
+			return d, cmd
 		case "j", "down":
 			d.viewport.SetYOffset(d.viewport.YOffset + 1)
 			return d, nil
@@ -186,14 +166,14 @@ func (d DiffView) Update(msg tea.Msg) (DiffView, tea.Cmd) {
 
 // ConsumesKeys reports whether the diff view is in copy mode.
 func (d DiffView) ConsumesKeys() bool {
-	return d.copyMode
+	return d.sel.Active()
 }
 
 // Content returns the rendered content string for embedding in another panel.
 func (d DiffView) Content() string {
 	content := d.viewport.View()
-	if d.copyMode {
-		selStart, selEnd := d.copySelectionRange()
+	if d.sel.Active() {
+		selStart, selEnd := d.sel.CopySelectionRange()
 		count := selEnd - selStart + 1
 		status := styles.TextSecondaryStyle.Render(
 			fmt.Sprintf("  VISUAL: %d line(s) selected", count),
@@ -208,7 +188,7 @@ func (d DiffView) Keybinds() []border.Keybind {
 	if !d.focused {
 		return nil
 	}
-	if d.copyMode {
+	if d.sel.Active() {
 		return []border.Keybind{
 			{Key: "y", Label: "ank"},
 			{Key: "j", Label: "/k select"},
@@ -247,166 +227,50 @@ func (d *DiffView) prevFile() {
 }
 
 func (d *DiffView) enterCopyMode() {
-	lines := d.rawLines()
-	if len(lines) == 0 {
-		return
+	provider := &diffLinesProvider{d: d}
+	d.sel.EnterCopyMode(provider, d.viewport.YOffset, d.viewport.Height)
+	if d.sel.Active() {
+		d.refreshContent()
 	}
-	centerLine := d.viewport.YOffset + d.viewport.Height/2
-	if centerLine >= len(lines) {
-		centerLine = len(lines) - 1
-	}
-	if centerLine < 0 {
-		centerLine = 0
-	}
-	d.copyMode = true
-	d.mouseSelecting = false
-	d.copyAnchor = centerLine
-	d.copyCursor = centerLine
-	d.refreshContent()
 }
 
 func (d *DiffView) updateCopyMode(msg tea.KeyMsg) (DiffView, tea.Cmd) {
-	lineCount := len(d.rawLines())
-
-	switch msg.String() {
-	case "esc":
-		d.copyMode = false
-		d.refreshContent()
-		return *d, nil
-	case "y":
-		text := d.yankSelection()
-		d.copyMode = false
-		d.refreshContent()
-		if text != "" {
-			return *d, func() tea.Msg { return YankMsg{Text: text} }
-		}
-		return *d, nil
-	case "j", "down":
-		if d.copyCursor < lineCount-1 {
-			d.copyCursor++
-			if d.copyCursor >= d.viewport.YOffset+d.viewport.Height {
-				d.viewport.SetYOffset(d.copyCursor - d.viewport.Height + 1)
-			}
-			d.refreshContent()
-		}
-		return *d, nil
-	case "k", "up":
-		if d.copyCursor > 0 {
-			d.copyCursor--
-			if d.copyCursor < d.viewport.YOffset {
-				d.viewport.SetYOffset(d.copyCursor)
-			}
-			d.refreshContent()
-		}
-		return *d, nil
-	case "G":
-		d.copyCursor = lineCount - 1
-		d.viewport.GotoBottom()
-		d.refreshContent()
-		return *d, nil
-	case "g":
-		if d.gPending {
-			d.gPending = false
-			d.copyCursor = 0
-			d.viewport.GotoTop()
-			d.refreshContent()
-			return *d, nil
-		}
-		d.gPending = true
-		return *d, tea.Tick(diffGTimeout, func(time.Time) tea.Msg {
-			return DiffGTimerExpiredMsg{}
-		})
+	provider := &diffLinesProvider{d: d}
+	yankText, cmd := d.sel.UpdateCopyMode(msg, provider, &d.viewport, &d.gTap.Pending, GTimerExpiredMsg{ID: gTapIDDiffView})
+	d.refreshContent()
+	if yankText != "" {
+		return *d, func() tea.Msg { return YankMsg{Text: yankText} }
 	}
-	return *d, nil
-}
-
-func (d *DiffView) yankSelection() string {
-	lines := d.rawLines()
-	if len(lines) == 0 {
-		return ""
-	}
-	start, end := d.copySelectionRange()
-	if start < 0 {
-		start = 0
-	}
-	if end >= len(lines) {
-		end = len(lines) - 1
-	}
-	return strings.Join(lines[start:end+1], "\n")
-}
-
-func (d *DiffView) copySelectionRange() (int, int) {
-	start := d.copyAnchor
-	end := d.copyCursor
-	if start > end {
-		start, end = end, start
-	}
-	return start, end
+	return *d, cmd
 }
 
 // StartMouseSelection begins a mouse drag selection at the given panel-relative coordinates.
 func (d *DiffView) StartMouseSelection(relX, relY int) {
-	d.copyMode = false
-	bufLine := d.viewport.YOffset + (relY - 1)
-	if bufLine < 0 {
-		bufLine = 0
-	}
-	col := relX - 1
-	if col < 0 {
-		col = 0
-	}
-	d.mouseSelecting = true
-	d.mouseAnchorLine = bufLine
-	d.mouseAnchorCol = col
-	d.mouseCurrentLine = bufLine
-	d.mouseCurrentCol = col
+	d.sel.StartMouse(relX, relY, d.viewport.YOffset)
 	d.refreshContent()
 }
 
 // ExtendMouseSelection updates the cursor position during a mouse drag.
 func (d *DiffView) ExtendMouseSelection(relX, relY int) {
-	if !d.mouseSelecting {
+	if !d.sel.MouseActive() {
 		return
 	}
-	bufLine := d.viewport.YOffset + (relY - 1)
-	if bufLine < 0 {
-		bufLine = 0
-	}
-	col := relX - 1
-	if col < 0 {
-		col = 0
-	}
-	d.mouseCurrentLine = bufLine
-	d.mouseCurrentCol = col
+	d.sel.ExtendMouse(relX, relY, d.viewport.YOffset)
 	d.refreshContent()
 }
 
 // FinalizeMouseSelection ends the mouse drag and returns the selected text.
 // Returns empty string for single-click (no drag).
 func (d *DiffView) FinalizeMouseSelection(relX, relY int) string {
-	if !d.mouseSelecting {
+	if !d.sel.MouseActive() {
 		return ""
 	}
-	d.mouseSelecting = false
-	bufLine := d.viewport.YOffset + (relY - 1)
-	if bufLine < 0 {
-		bufLine = 0
-	}
-	col := relX - 1
-	if col < 0 {
-		col = 0
-	}
-	d.mouseCurrentLine = bufLine
-	d.mouseCurrentCol = col
-
-	// Single click (same position) — no copy
-	if d.mouseAnchorLine == d.mouseCurrentLine && d.mouseAnchorCol == d.mouseCurrentCol {
+	sl, sc, el, ec, singleClick := d.sel.FinalizeMouse(relX, relY, d.viewport.YOffset)
+	if singleClick {
 		d.refreshContent()
 		return ""
 	}
-
 	content := d.styledContent()
-	sl, sc, el, ec := d.normalizedMouseSelection()
 	text := extractCharSelection(content, sl, sc, el, ec)
 	d.refreshContent()
 	return text
@@ -414,18 +278,8 @@ func (d *DiffView) FinalizeMouseSelection(relX, relY int) string {
 
 // CancelMouseSelection clears mouse selection state without copying.
 func (d *DiffView) CancelMouseSelection() {
-	d.mouseSelecting = false
+	d.sel.CancelMouse()
 	d.refreshContent()
-}
-
-// normalizedMouseSelection returns the mouse selection with start before end.
-func (d *DiffView) normalizedMouseSelection() (startLine, startCol, endLine, endCol int) {
-	startLine, startCol = d.mouseAnchorLine, d.mouseAnchorCol
-	endLine, endCol = d.mouseCurrentLine, d.mouseCurrentCol
-	if startLine > endLine || (startLine == endLine && startCol > endCol) {
-		startLine, startCol, endLine, endCol = endLine, endCol, startLine, startCol
-	}
-	return
 }
 
 func (d *DiffView) rawLines() []string {
@@ -479,11 +333,11 @@ func (d *DiffView) styledContent() string {
 
 func (d *DiffView) refreshContent() {
 	content := d.styledContent()
-	if d.copyMode {
-		selStart, selEnd := d.copySelectionRange()
+	if d.sel.Active() {
+		selStart, selEnd := d.sel.CopySelectionRange()
 		content = applySelectionHighlight(content, selStart, selEnd)
-	} else if d.mouseSelecting {
-		sl, sc, el, ec := d.normalizedMouseSelection()
+	} else if d.sel.MouseActive() {
+		sl, sc, el, ec := d.sel.NormalizedMouseSelection()
 		content = applyCharSelectionHighlight(content, sl, sc, el, ec)
 	}
 	d.viewport.SetContent(content)

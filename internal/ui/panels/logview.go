@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -13,13 +12,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/justinpbarnett/agtop/internal/process"
 	"github.com/justinpbarnett/agtop/internal/ui/border"
+	"github.com/justinpbarnett/agtop/internal/ui/selection"
 	"github.com/justinpbarnett/agtop/internal/ui/styles"
 )
 
-const gTimeout = 300 * time.Millisecond
-
 var ellipsisFrames = []string{".  ", ".. ", "..."}
-
 
 // Log view tab indices.
 const (
@@ -29,9 +26,6 @@ const (
 
 // logLineRe matches log lines like "[14:32:01 route] message"
 var logLineRe = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\s+(\S+)\]\s*(.*)$`)
-
-// GTimerExpiredMsg is sent when the gg double-tap window expires.
-type GTimerExpiredMsg struct{}
 
 type LogView struct {
 	viewport    viewport.Model
@@ -45,7 +39,7 @@ type LogView struct {
 	active      bool
 	follow      bool
 	focused     bool
-	gPending    bool
+	gTap        DoubleTap
 	scrollSpeed int
 
 	// Entry navigation state
@@ -64,19 +58,20 @@ type LogView struct {
 	matchIndices []int
 	currentMatch int
 
-	// Copy mode state
-	copyMode   bool
-	copyAnchor int // buffer line index where selection started
-	copyCursor int // buffer line index of current cursor
-
-	// Mouse selection state (character-level)
-	mouseSelecting  bool
-	mouseAnchorLine int
-	mouseAnchorCol  int
-	mouseCurrentLine int
-	mouseCurrentCol  int
+	// Selection state (copy mode and mouse)
+	sel selection.Selection
 
 	tickStep int
+}
+
+// logLinesProvider adapts LogView's RingBuffer to selection.LinesProvider.
+type logLinesProvider struct{ l *LogView }
+
+func (p *logLinesProvider) Lines() []string {
+	if p.l.buffer == nil {
+		return nil
+	}
+	return p.l.buffer.Lines()
 }
 
 func NewLogView() LogView {
@@ -85,7 +80,14 @@ func NewLogView() LogView {
 	ti.Prompt = "/"
 	ti.Placeholder = "Search..."
 	ti.CharLimit = 256
-	return LogView{viewport: vp, follow: true, searchInput: ti, scrollSpeed: 3, diffView: NewDiffView()}
+	return LogView{
+		viewport:    vp,
+		follow:      true,
+		searchInput: ti,
+		scrollSpeed: 3,
+		diffView:    NewDiffView(),
+		gTap:        NewDoubleTap(gTapIDLogView),
+	}
 }
 
 // ActiveTab returns the currently selected tab index.
@@ -114,18 +116,19 @@ func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
 			}
 			return l, nil
 		}
-	case DiffGTimerExpiredMsg:
-		if l.activeTab == tabDiff {
-			var cmd tea.Cmd
-			l.diffView, cmd = l.diffView.Update(msg)
-			return l, cmd
+	case GTimerExpiredMsg:
+		if msg.ID == gTapIDDiffView {
+			if l.activeTab == tabDiff {
+				var cmd tea.Cmd
+				l.diffView, cmd = l.diffView.Update(msg)
+				return l, cmd
+			}
+			return l, nil
 		}
+		l.gTap.HandleExpiry(msg)
 		return l, nil
 	case AnimTickMsg:
 		l.tickStep++
-		return l, nil
-	case GTimerExpiredMsg:
-		l.gPending = false
 		return l, nil
 	case tea.KeyMsg:
 		// On diff tab, delegate keys to diffView
@@ -149,7 +152,7 @@ func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
 		}
 
 		// Copy mode key handling
-		if l.copyMode {
+		if l.sel.Active() {
 			return l.updateCopyMode(msg)
 		}
 
@@ -187,20 +190,16 @@ func (l LogView) Update(msg tea.Msg) (LogView, tea.Cmd) {
 			l.viewport.GotoBottom()
 			return l, nil
 		case "g":
-			if l.gPending {
-				l.gPending = false
-				l.follow = false
+			l.follow = false
+			fired, cmd := l.gTap.Check()
+			if fired {
 				if l.entryBuffer != nil {
 					l.cursorEntry = 0
 				}
 				l.viewport.GotoTop()
 				return l, nil
 			}
-			l.gPending = true
-			l.follow = false
-			return l, tea.Tick(gTimeout, func(time.Time) tea.Msg {
-				return GTimerExpiredMsg{}
-			})
+			return l, cmd
 		case "/":
 			l.searching = true
 			l.follow = false
@@ -369,7 +368,7 @@ func (l LogView) View() string {
 
 	if l.activeTab == tabLog {
 		if l.focused {
-			if l.copyMode {
+			if l.sel.Active() {
 				keybinds = []border.Keybind{
 					{Key: "y", Label: "ank"},
 					{Key: "j", Label: "/k select"},
@@ -393,8 +392,8 @@ func (l LogView) View() string {
 		content = l.viewport.View()
 
 		// Append copy mode status, search bar, or match status below the viewport
-		if l.copyMode {
-			selStart, selEnd := l.copySelectionRange()
+		if l.sel.Active() {
+			selStart, selEnd := l.sel.CopySelectionRange()
 			count := selEnd - selStart + 1
 			status := styles.TextSecondaryStyle.Render(
 				fmt.Sprintf("  VISUAL: %d line(s) selected", count),
@@ -462,7 +461,7 @@ func (l LogView) ConsumesKeys() bool {
 	if l.activeTab == tabDiff {
 		return l.diffView.ConsumesKeys()
 	}
-	return l.searching || l.searchQuery != "" || l.copyMode
+	return l.searching || l.searchQuery != "" || l.sel.Active()
 }
 
 func (l *LogView) SetRun(runID, skill, branch string, buf *process.RingBuffer, eb *process.EntryBuffer, active bool) {
@@ -476,8 +475,7 @@ func (l *LogView) SetRun(runID, skill, branch string, buf *process.RingBuffer, e
 	l.searchQuery = ""
 	l.matchIndices = nil
 	l.searching = false
-	l.copyMode = false
-	l.mouseSelecting = false
+	l.sel.Reset()
 	l.cursorEntry = 0
 	l.expandedEntries = make(map[int]bool)
 	l.lastEvicted = 0
@@ -523,7 +521,7 @@ func (l *LogView) updateDiffFocus() {
 func (l *LogView) resizeViewport() {
 	innerW := l.width - 2
 	innerH := l.height - 2
-	if l.searching || l.searchQuery != "" || l.copyMode || l.active {
+	if l.searching || l.searchQuery != "" || l.sel.Active() || l.active {
 		innerH-- // Reserve 1 row for search bar / status / copy mode / active ellipsis
 	}
 	if innerW < 0 {
@@ -775,11 +773,11 @@ func (l *LogView) entryAtViewportTop() int {
 func (l *LogView) renderContent() string {
 	content := l.renderContentBase()
 
-	if l.copyMode {
-		selStart, selEnd := l.copySelectionRange()
+	if l.sel.Active() {
+		selStart, selEnd := l.sel.CopySelectionRange()
 		content = applySelectionHighlight(content, selStart, selEnd)
-	} else if l.mouseSelecting {
-		sl, sc, el, ec := l.normalizedMouseSelection()
+	} else if l.sel.MouseActive() {
+		sl, sc, el, ec := l.sel.NormalizedMouseSelection()
 		content = applyCharSelectionHighlight(content, sl, sc, el, ec)
 	}
 
@@ -862,116 +860,20 @@ func (l *LogView) enterCopyMode() {
 	if l.buffer == nil {
 		return
 	}
-	lines := l.buffer.Lines()
-	if len(lines) == 0 {
-		return
+	l.sel.EnterCopyMode(&logLinesProvider{l: l}, l.viewport.YOffset, l.viewport.Height)
+	if l.sel.Active() {
+		l.follow = false
+		l.refreshContent()
 	}
-	// Anchor at the center of the visible viewport
-	centerLine := l.viewport.YOffset + l.viewport.Height/2
-	if centerLine >= len(lines) {
-		centerLine = len(lines) - 1
-	}
-	if centerLine < 0 {
-		centerLine = 0
-	}
-	l.copyMode = true
-	l.mouseSelecting = false
-	l.copyAnchor = centerLine
-	l.copyCursor = centerLine
-	l.follow = false
-	l.refreshContent()
 }
 
 func (l *LogView) updateCopyMode(msg tea.KeyMsg) (LogView, tea.Cmd) {
-	lineCount := 0
-	if l.buffer != nil {
-		lineCount = len(l.buffer.Lines())
+	yankText, cmd := l.sel.UpdateCopyMode(msg, &logLinesProvider{l: l}, &l.viewport, &l.gTap.Pending, GTimerExpiredMsg{ID: gTapIDLogView})
+	l.refreshContent()
+	if yankText != "" {
+		return *l, func() tea.Msg { return YankMsg{Text: yankText} }
 	}
-
-	switch msg.String() {
-	case "esc":
-		l.copyMode = false
-		l.refreshContent()
-		return *l, nil
-	case "y":
-		// Yank the selected lines
-		text := l.yankSelection()
-		l.copyMode = false
-		l.refreshContent()
-		if text != "" {
-			return *l, func() tea.Msg { return YankMsg{Text: text} }
-		}
-		return *l, nil
-	case "j", "down":
-		if l.copyCursor < lineCount-1 {
-			l.copyCursor++
-			// Scroll viewport to keep cursor visible
-			if l.copyCursor >= l.viewport.YOffset+l.viewport.Height {
-				l.viewport.SetYOffset(l.copyCursor - l.viewport.Height + 1)
-			}
-			l.refreshContent()
-		}
-		return *l, nil
-	case "k", "up":
-		if l.copyCursor > 0 {
-			l.copyCursor--
-			// Scroll viewport to keep cursor visible
-			if l.copyCursor < l.viewport.YOffset {
-				l.viewport.SetYOffset(l.copyCursor)
-			}
-			l.refreshContent()
-		}
-		return *l, nil
-	case "G":
-		l.copyCursor = lineCount - 1
-		l.viewport.GotoBottom()
-		l.refreshContent()
-		return *l, nil
-	case "g":
-		if l.gPending {
-			l.gPending = false
-			l.copyCursor = 0
-			l.viewport.GotoTop()
-			l.refreshContent()
-			return *l, nil
-		}
-		l.gPending = true
-		return *l, tea.Tick(gTimeout, func(time.Time) tea.Msg {
-			return GTimerExpiredMsg{}
-		})
-	}
-	return *l, nil
-}
-
-func (l *LogView) yankSelection() string {
-	if l.buffer == nil {
-		return ""
-	}
-	lines := l.buffer.Lines()
-	if len(lines) == 0 {
-		return ""
-	}
-	start := l.copyAnchor
-	end := l.copyCursor
-	if start > end {
-		start, end = end, start
-	}
-	if start < 0 {
-		start = 0
-	}
-	if end >= len(lines) {
-		end = len(lines) - 1
-	}
-	return strings.Join(lines[start:end+1], "\n")
-}
-
-func (l *LogView) copySelectionRange() (int, int) {
-	start := l.copyAnchor
-	end := l.copyCursor
-	if start > end {
-		start, end = end, start
-	}
-	return start, end
+	return *l, cmd
 }
 
 // StartMouseSelection begins a mouse drag selection at the given panel-relative coordinates.
@@ -980,20 +882,7 @@ func (l *LogView) StartMouseSelection(relX, relY int) {
 		l.diffView.StartMouseSelection(relX, relY)
 		return
 	}
-	l.copyMode = false
-	bufLine := l.viewport.YOffset + (relY - 1)
-	if bufLine < 0 {
-		bufLine = 0
-	}
-	col := relX - 1 // account for left border
-	if col < 0 {
-		col = 0
-	}
-	l.mouseSelecting = true
-	l.mouseAnchorLine = bufLine
-	l.mouseAnchorCol = col
-	l.mouseCurrentLine = bufLine
-	l.mouseCurrentCol = col
+	l.sel.StartMouse(relX, relY, l.viewport.YOffset)
 	l.follow = false
 	l.refreshContent()
 }
@@ -1004,19 +893,10 @@ func (l *LogView) ExtendMouseSelection(relX, relY int) {
 		l.diffView.ExtendMouseSelection(relX, relY)
 		return
 	}
-	if !l.mouseSelecting {
+	if !l.sel.MouseActive() {
 		return
 	}
-	bufLine := l.viewport.YOffset + (relY - 1)
-	if bufLine < 0 {
-		bufLine = 0
-	}
-	col := relX - 1
-	if col < 0 {
-		col = 0
-	}
-	l.mouseCurrentLine = bufLine
-	l.mouseCurrentCol = col
+	l.sel.ExtendMouse(relX, relY, l.viewport.YOffset)
 	l.refreshContent()
 }
 
@@ -1026,29 +906,15 @@ func (l *LogView) FinalizeMouseSelection(relX, relY int) string {
 	if l.activeTab == tabDiff {
 		return l.diffView.FinalizeMouseSelection(relX, relY)
 	}
-	if !l.mouseSelecting {
+	if !l.sel.MouseActive() {
 		return ""
 	}
-	l.mouseSelecting = false
-	bufLine := l.viewport.YOffset + (relY - 1)
-	if bufLine < 0 {
-		bufLine = 0
-	}
-	col := relX - 1
-	if col < 0 {
-		col = 0
-	}
-	l.mouseCurrentLine = bufLine
-	l.mouseCurrentCol = col
-
-	// Single click (same position) — no copy
-	if l.mouseAnchorLine == l.mouseCurrentLine && l.mouseAnchorCol == l.mouseCurrentCol {
+	sl, sc, el, ec, singleClick := l.sel.FinalizeMouse(relX, relY, l.viewport.YOffset)
+	if singleClick {
 		l.refreshContent()
 		return ""
 	}
-
 	content := l.renderContentBase()
-	sl, sc, el, ec := l.normalizedMouseSelection()
 	text := extractCharSelection(content, sl, sc, el, ec)
 	l.refreshContent()
 	return text
@@ -1060,18 +926,8 @@ func (l *LogView) CancelMouseSelection() {
 		l.diffView.CancelMouseSelection()
 		return
 	}
-	l.mouseSelecting = false
+	l.sel.CancelMouse()
 	l.refreshContent()
-}
-
-// normalizedMouseSelection returns the mouse selection with start before end.
-func (l *LogView) normalizedMouseSelection() (startLine, startCol, endLine, endCol int) {
-	startLine, startCol = l.mouseAnchorLine, l.mouseAnchorCol
-	endLine, endCol = l.mouseCurrentLine, l.mouseCurrentCol
-	if startLine > endLine || (startLine == endLine && startCol > endCol) {
-		startLine, startCol, endLine, endCol = endLine, endCol, startLine, startCol
-	}
-	return
 }
 
 // formatLogContent styles log lines: timestamps in TextDim, tool names in TextSecondary,
@@ -1274,4 +1130,3 @@ func highlightMatches(line, query string, isCurrent bool) string {
 	}
 	return b.String()
 }
-

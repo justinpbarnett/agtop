@@ -321,10 +321,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
-	case panels.DiffGTimerExpiredMsg:
-		var cmd tea.Cmd
-		a.logView, cmd = a.logView.Update(msg)
-		return a, cmd
 
 	case TickMsg:
 		return a, tickCmd()
@@ -484,9 +480,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 
 	case panels.GTimerExpiredMsg:
-		var cmd tea.Cmd
-		a.logView, cmd = a.logView.Update(msg)
-		return a, cmd
+		var logCmd, detailCmd tea.Cmd
+		a.logView, logCmd = a.logView.Update(msg)
+		a.detail, detailCmd = a.detail.Update(msg)
+		return a, tea.Batch(logCmd, detailCmd)
 
 	case tea.MouseMsg:
 		if a.newRunModal != nil {

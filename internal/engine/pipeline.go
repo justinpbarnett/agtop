@@ -215,25 +215,7 @@ func (p *Pipeline) resolveConflicts(ctx context.Context, runID, worktree string)
 
 		// Auto-resolve golden test snapshot files (binary — agents can't resolve them)
 		files := strings.Split(strings.TrimSpace(string(out)), "\n")
-		var nonGolden []string
-		for _, f := range files {
-			if gitpkg.IsGoldenFile(f) {
-				checkout := exec.Command("git", "checkout", "--theirs", f)
-				checkout.Dir = worktree
-				if err := checkout.Run(); err != nil {
-					nonGolden = append(nonGolden, f)
-					continue
-				}
-				add := exec.Command("git", "add", f)
-				add.Dir = worktree
-				if err := add.Run(); err != nil {
-					nonGolden = append(nonGolden, f)
-					continue
-				}
-			} else {
-				nonGolden = append(nonGolden, f)
-			}
-		}
+		_, nonGolden := gitpkg.ResolveGoldenConflictsFromList(worktree, files)
 
 		// If only golden files conflicted, continue rebase without invoking agent
 		if len(nonGolden) == 0 {

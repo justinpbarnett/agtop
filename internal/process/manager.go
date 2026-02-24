@@ -100,20 +100,17 @@ func (m *Manager) SetProgram(p *tea.Program) {
 	m.mu.Unlock()
 }
 
-func (m *Manager) Start(runID string, prompt string, opts runtime.RunOptions) error {
-	m.mu.Lock()
-	if m.cfg.MaxConcurrentRuns > 0 && len(m.processes) >= m.cfg.MaxConcurrentRuns {
-		m.mu.Unlock()
-		return fmt.Errorf("concurrency limit reached: %d/%d runs active", len(m.processes), m.cfg.MaxConcurrentRuns)
-	}
+// processResources holds the handles created when launching a subprocess.
+type processResources struct {
+	mp           *ManagedProcess
+	stdoutReader io.Reader
+	stderrReader io.Reader
+	lf           *LogFiles
+}
 
-	if _, exists := m.processes[runID]; exists {
-		m.mu.Unlock()
-		return fmt.Errorf("run %s already has an active process", runID)
-	}
-	m.mu.Unlock()
-
-	// Create log files for persistent output
+// launchProcess creates log files, starts the subprocess, and wires up output
+// readers. On failure all allocated resources are cleaned up before returning.
+func (m *Manager) launchProcess(runID string, prompt string, opts runtime.RunOptions) (*processResources, error) {
 	var lf *LogFiles
 	if m.sessionsDir != "" {
 		var err error
@@ -133,25 +130,23 @@ func (m *Manager) Start(runID string, prompt string, opts runtime.RunOptions) er
 		if lf != nil {
 			lf.Close()
 		}
-		return fmt.Errorf("start process: %w", err)
+		return nil, fmt.Errorf("start process: %w", err)
 	}
 
-	// Determine stdout/stderr readers: use FollowReaders on log files, or pipes
-	var stdoutReader io.Reader
-	var stderrReader io.Reader
+	var stdoutReader, stderrReader io.Reader
 	if lf != nil {
 		stdoutR, err := os.Open(lf.StdoutPath())
 		if err != nil {
 			cancel()
 			lf.Close()
-			return fmt.Errorf("open stdout log for reading: %w", err)
+			return nil, fmt.Errorf("open stdout log for reading: %w", err)
 		}
 		stderrR, err := os.Open(lf.StderrPath())
 		if err != nil {
 			stdoutR.Close()
 			cancel()
 			lf.Close()
-			return fmt.Errorf("open stderr log for reading: %w", err)
+			return nil, fmt.Errorf("open stderr log for reading: %w", err)
 		}
 		stdoutReader = NewFollowReader(ctx, stdoutR)
 		stderrReader = NewFollowReader(ctx, stderrR)
@@ -160,32 +155,50 @@ func (m *Manager) Start(runID string, prompt string, opts runtime.RunOptions) er
 		stderrReader = proc.Stderr
 	}
 
+	return &processResources{
+		mp:           &ManagedProcess{proc: proc, cancel: cancel, runID: runID, pid: proc.PID},
+		stdoutReader: stdoutReader,
+		stderrReader: stderrReader,
+		lf:           lf,
+	}, nil
+}
+
+func (m *Manager) Start(runID string, prompt string, opts runtime.RunOptions) error {
+	m.mu.Lock()
+	if m.cfg.MaxConcurrentRuns > 0 && len(m.processes) >= m.cfg.MaxConcurrentRuns {
+		m.mu.Unlock()
+		return fmt.Errorf("concurrency limit reached: %d/%d runs active", len(m.processes), m.cfg.MaxConcurrentRuns)
+	}
+	if _, exists := m.processes[runID]; exists {
+		m.mu.Unlock()
+		return fmt.Errorf("run %s already has an active process", runID)
+	}
+	m.mu.Unlock()
+
+	res, err := m.launchProcess(runID, prompt, opts)
+	if err != nil {
+		return err
+	}
+
 	buf := NewRingBuffer(10000)
 	eb := NewEntryBuffer(5000)
 
-	mp := &ManagedProcess{
-		proc:   proc,
-		cancel: cancel,
-		runID:  runID,
-		pid:    proc.PID,
-	}
-
 	m.mu.Lock()
-	m.processes[runID] = mp
+	m.processes[runID] = res.mp
 	m.buffers[runID] = buf
 	m.entryBuffers[runID] = eb
-	if lf != nil {
-		m.logFiles[runID] = lf
+	if res.lf != nil {
+		m.logFiles[runID] = res.lf
 	}
 	m.mu.Unlock()
 
 	m.store.Update(runID, func(r *run.Run) {
 		r.State = run.StateRunning
-		r.PID = proc.PID
+		r.PID = res.mp.pid
 		r.StartedAt = time.Now()
 	})
 
-	go m.consumeEvents(runID, mp, buf, eb, stdoutReader, stderrReader, proc.Done)
+	go m.consumeEvents(runID, res.mp, buf, eb, res.stdoutReader, res.stderrReader, res.mp.proc.Done)
 
 	return nil
 }
@@ -498,53 +511,12 @@ func (m *Manager) StartSkill(runID string, prompt string, opts runtime.RunOption
 	}
 	m.mu.Unlock()
 
-	// Create log files for persistent output
-	var lf *LogFiles
-	if m.sessionsDir != "" {
-		var err error
-		lf, err = CreateLogFiles(m.sessionsDir, runID)
-		if err != nil {
-			log.Printf("warning: create log files for %s: %v (falling back to pipes)", runID, err)
-		} else {
-			opts.StdoutFile = lf.StdoutWriter()
-			opts.StderrFile = lf.StderrWriter()
-		}
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	proc, err := m.rt.Start(ctx, prompt, opts)
+	res, err := m.launchProcess(runID, prompt, opts)
 	if err != nil {
-		cancel()
-		if lf != nil {
-			lf.Close()
-		}
-		return nil, fmt.Errorf("start process: %w", err)
+		return nil, err
 	}
 
-	// Determine stdout/stderr readers
-	var stdoutReader io.Reader
-	var stderrReader io.Reader
-	if lf != nil {
-		stdoutR, err := os.Open(lf.StdoutPath())
-		if err != nil {
-			cancel()
-			lf.Close()
-			return nil, fmt.Errorf("open stdout log for reading: %w", err)
-		}
-		stderrR, err := os.Open(lf.StderrPath())
-		if err != nil {
-			stdoutR.Close()
-			cancel()
-			lf.Close()
-			return nil, fmt.Errorf("open stderr log for reading: %w", err)
-		}
-		stdoutReader = NewFollowReader(ctx, stdoutR)
-		stderrReader = NewFollowReader(ctx, stderrR)
-	} else {
-		stdoutReader = proc.Stdout
-		stderrReader = proc.Stderr
-	}
-
+	m.mu.Lock()
 	buf := m.buffers[runID]
 	if buf == nil {
 		buf = NewRingBuffer(10000)
@@ -553,32 +525,36 @@ func (m *Manager) StartSkill(runID string, prompt string, opts runtime.RunOption
 	if eb == nil {
 		eb = NewEntryBuffer(5000)
 	}
-
-	mp := &ManagedProcess{
-		proc:   proc,
-		cancel: cancel,
-		runID:  runID,
-		pid:    proc.PID,
-	}
-
-	resultCh := make(chan SkillResult, 1)
-
-	m.mu.Lock()
-	m.processes[runID] = mp
+	m.processes[runID] = res.mp
 	m.buffers[runID] = buf
 	m.entryBuffers[runID] = eb
-	if lf != nil {
-		m.logFiles[runID] = lf
+	if res.lf != nil {
+		m.logFiles[runID] = res.lf
 	}
 	m.mu.Unlock()
 
 	m.store.Update(runID, func(r *run.Run) {
-		r.PID = proc.PID
+		r.PID = res.mp.pid
 	})
 
-	go m.consumeSkillEvents(runID, mp, buf, eb, stdoutReader, stderrReader, proc.Done, resultCh)
+	resultCh := make(chan SkillResult, 1)
+	go m.consumeSkillEvents(runID, res.mp, buf, eb, res.stdoutReader, res.stderrReader, res.mp.proc.Done, resultCh)
 
 	return resultCh, nil
+}
+
+// scanStderr reads lines from stderr and appends them to the ring buffer and
+// entry buffer, then notifies the TUI. Intended to run in a goroutine.
+func (m *Manager) scanStderr(runID string, stderr io.Reader, buf *RingBuffer, eb *EntryBuffer, skillName func() string) {
+	scanner := bufio.NewScanner(stderr)
+	for scanner.Scan() {
+		line := scanner.Text()
+		ts := time.Now().Format("15:04:05")
+		skill := skillName()
+		buf.Append(logLine(ts, skill, "", line))
+		eb.Append(NewLogEntry(ts, skill, EventRaw, line))
+		m.sendLogLine(runID)
+	}
 }
 
 func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *RingBuffer, eb *EntryBuffer, stdout io.Reader, stderr io.Reader, done <-chan error, resultCh chan<- SkillResult) {
@@ -606,24 +582,7 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 
 	parser := m.newParser(stdout, 256)
 	go parser.Parse(context.Background())
-
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			ts := time.Now().Format("15:04:05")
-			skill := skillName()
-			var formatted string
-			if skill != "" {
-				formatted = fmt.Sprintf("[%s %s] %s", ts, skill, line)
-			} else {
-				formatted = fmt.Sprintf("[%s] %s", ts, line)
-			}
-			buf.Append(formatted)
-			eb.Append(NewLogEntry(ts, skill, EventRaw, line))
-			m.sendLogLine(runID)
-		}
-	}()
+	go m.scanStderr(runID, stderr, buf, eb, skillName)
 
 	for event := range parser.Events() {
 		ts := time.Now().Format("15:04:05")
@@ -633,9 +592,9 @@ func (m *Manager) consumeSkillEvents(runID string, mp *ManagedProcess, buf *Ring
 			resultText = event.Text
 		}
 
-		logLine, entry := m.formatEvent(event, ts, skill, buf, runID, buf)
-		if logLine != "" {
-			buf.Append(logLine)
+		line, entry := m.formatEvent(event, ts, skill, buf, runID, buf)
+		if line != "" {
+			buf.Append(line)
 			if entry != nil {
 				eb.Append(entry)
 			}
@@ -684,32 +643,15 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 
 	parser := m.newParser(stdout, 256)
 	go parser.Parse(context.Background())
-
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			ts := time.Now().Format("15:04:05")
-			skill := skillName()
-			var formatted string
-			if skill != "" {
-				formatted = fmt.Sprintf("[%s %s] %s", ts, skill, line)
-			} else {
-				formatted = fmt.Sprintf("[%s] %s", ts, line)
-			}
-			buf.Append(formatted)
-			eb.Append(NewLogEntry(ts, skill, EventRaw, line))
-			m.sendLogLine(runID)
-		}
-	}()
+	go m.scanStderr(runID, stderr, buf, eb, skillName)
 
 	for event := range parser.Events() {
 		ts := time.Now().Format("15:04:05")
 		skill := skillName()
 
-		logLine, entry := m.formatEvent(event, ts, skill, buf, runID, buf)
-		if logLine != "" {
-			buf.Append(logLine)
+		line, entry := m.formatEvent(event, ts, skill, buf, runID, buf)
+		if line != "" {
+			buf.Append(line)
 			if entry != nil {
 				eb.Append(entry)
 			}
@@ -743,94 +685,58 @@ func (m *Manager) consumeEvents(runID string, mp *ManagedProcess, buf *RingBuffe
 	m.mu.Unlock()
 }
 
+// logLine formats a timestamped log line with an optional skill prefix and message prefix.
+// When skill is non-empty it produces "[ts skill] prefix text"; otherwise "[ts] prefix text".
+func logLine(ts, skill, prefix, text string) string {
+	if skill != "" {
+		return fmt.Sprintf("[%s %s] %s%s", ts, skill, prefix, text)
+	}
+	return fmt.Sprintf("[%s] %s%s", ts, prefix, text)
+}
+
 // formatEvent converts a StreamEvent into a formatted log line and a LogEntry.
 // The safetyBuf is used for tool safety checks (pass the ring buffer).
 func (m *Manager) formatEvent(event StreamEvent, ts string, skill string, safetyBuf *RingBuffer, runID string, buf *RingBuffer) (string, *LogEntry) {
-	var logLine string
-	var entry *LogEntry
-
 	switch event.Type {
 	case EventText:
-		if skill != "" {
-			logLine = fmt.Sprintf("[%s %s] %s", ts, skill, event.Text)
-		} else {
-			logLine = fmt.Sprintf("[%s] %s", ts, event.Text)
-		}
-		entry = NewLogEntry(ts, skill, EventText, event.Text)
+		return logLine(ts, skill, "", event.Text), NewLogEntry(ts, skill, EventText, event.Text)
 	case EventToolUse:
-		if skill != "" {
-			logLine = fmt.Sprintf("[%s %s] Tool: %s", ts, skill, event.ToolName)
-		} else {
-			logLine = fmt.Sprintf("[%s] Tool: %s", ts, event.ToolName)
-		}
 		if safetyBuf != nil {
 			m.checkToolSafety(event.ToolName, event.ToolInput, ts, skill, safetyBuf, runID)
 		}
-		summary := ToolUseSummary(event.ToolName, event.ToolInput)
-		entry = &LogEntry{
+		return logLine(ts, skill, "Tool: ", event.ToolName), &LogEntry{
 			Timestamp: ts,
 			Skill:     skill,
 			Type:      EventToolUse,
-			Summary:   summary,
+			Summary:   ToolUseSummary(event.ToolName, event.ToolInput),
 			Detail:    FormatJSON(event.ToolInput),
 			Complete:  true,
 		}
 	case EventToolResult:
-		if skill != "" {
-			logLine = fmt.Sprintf("[%s %s] Result: %s", ts, skill, event.Text)
-		} else {
-			logLine = fmt.Sprintf("[%s] Result: %s", ts, event.Text)
-		}
-		entry = NewLogEntry(ts, skill, EventToolResult, event.Text)
+		return logLine(ts, skill, "Result: ", event.Text), NewLogEntry(ts, skill, EventToolResult, event.Text)
 	case EventResult:
-		if event.Usage != nil {
-			m.recordUsage(runID, skill, event.Usage, ts, buf)
-
-			if skill != "" {
-				logLine = fmt.Sprintf("[%s %s] Completed — %d tokens, $%.4f", ts, skill, event.Usage.TotalTokens, event.Usage.CostUSD)
-			} else {
-				logLine = fmt.Sprintf("[%s] Completed — %d tokens, $%.4f", ts, event.Usage.TotalTokens, event.Usage.CostUSD)
-			}
-			entry = NewLogEntry(ts, skill, EventResult, fmt.Sprintf("Completed — %d tokens, $%.4f", event.Usage.TotalTokens, event.Usage.CostUSD))
+		if event.Usage == nil {
+			return "", nil
 		}
+		m.recordUsage(runID, skill, event.Usage, ts, buf)
+		summary := fmt.Sprintf("Completed — %d tokens, $%.4f", event.Usage.TotalTokens, event.Usage.CostUSD)
+		return logLine(ts, skill, "", summary), NewLogEntry(ts, skill, EventResult, summary)
 	case EventUser:
-		if skill != "" {
-			logLine = fmt.Sprintf("[%s %s] User: %s", ts, skill, event.Text)
-		} else {
-			logLine = fmt.Sprintf("[%s] User: %s", ts, event.Text)
-		}
-		entry = NewLogEntry(ts, skill, EventUser, event.Text)
+		return logLine(ts, skill, "User: ", event.Text), NewLogEntry(ts, skill, EventUser, event.Text)
 	case EventError:
 		if m.limiter != nil && m.limiter.IsRateLimit(event.Text) {
-			if skill != "" {
-				logLine = fmt.Sprintf("[%s %s] RATE LIMITED: %s", ts, skill, event.Text)
-			} else {
-				logLine = fmt.Sprintf("[%s] RATE LIMITED: %s", ts, event.Text)
-			}
-			// entry stays nil — hidden from structured entry view
-		} else {
-			if skill != "" {
-				logLine = fmt.Sprintf("[%s %s] ERROR: %s", ts, skill, event.Text)
-			} else {
-				logLine = fmt.Sprintf("[%s] ERROR: %s", ts, event.Text)
-			}
-			entry = NewLogEntry(ts, skill, EventError, event.Text)
+			return logLine(ts, skill, "RATE LIMITED: ", event.Text), nil
 		}
+		return logLine(ts, skill, "ERROR: ", event.Text), NewLogEntry(ts, skill, EventError, event.Text)
 	case EventRaw:
-		if skill != "" {
-			logLine = fmt.Sprintf("[%s %s] %s", ts, skill, event.Text)
-		} else {
-			logLine = fmt.Sprintf("[%s] %s", ts, event.Text)
-		}
-		entry = InterpretRawEvent(ts, skill, event.Text)
 		if model := extractSystemInitModel(event.Text); model != "" {
 			m.store.Update(runID, func(r *run.Run) {
 				r.Model = model
 			})
 		}
+		return logLine(ts, skill, "", event.Text), InterpretRawEvent(ts, skill, event.Text)
 	}
-
-	return logLine, entry
+	return "", nil
 }
 
 // recordUsage updates run token/cost fields, records to the tracker, and checks thresholds.

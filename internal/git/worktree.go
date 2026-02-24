@@ -242,35 +242,11 @@ func resolveGoldenConflictsInDir(dir string) (resolved, remaining []string, err 
 	if err != nil {
 		return nil, nil, err
 	}
-
-	var golden, other []string
-	for _, f := range conflicted {
-		if IsGoldenFile(f) {
-			golden = append(golden, f)
-		} else {
-			other = append(other, f)
-		}
+	if len(conflicted) == 0 {
+		return nil, nil, nil
 	}
-
-	if len(golden) == 0 {
-		return nil, conflicted, nil
-	}
-
-	// Auto-resolve golden files by taking the incoming branch version
-	for _, f := range golden {
-		checkout := exec.Command("git", "checkout", "--theirs", f)
-		checkout.Dir = dir
-		if out, err := checkout.CombinedOutput(); err != nil {
-			return nil, conflicted, fmt.Errorf("checkout --theirs %s: %s: %w", f, strings.TrimSpace(string(out)), err)
-		}
-		add := exec.Command("git", "add", f)
-		add.Dir = dir
-		if out, err := add.CombinedOutput(); err != nil {
-			return nil, conflicted, fmt.Errorf("git add %s: %s: %w", f, strings.TrimSpace(string(out)), err)
-		}
-	}
-
-	return golden, other, nil
+	resolved, remaining = ResolveGoldenConflictsFromList(dir, conflicted)
+	return resolved, remaining, nil
 }
 
 // conflictedFilesInDir returns the list of files with unresolved conflicts in the given directory.
@@ -294,6 +270,32 @@ func IsGoldenFile(path string) bool {
 		return false
 	}
 	return strings.Contains(path, "/testdata/") || strings.HasPrefix(path, "testdata/")
+}
+
+// ResolveGoldenConflictsFromList auto-resolves golden files in the conflict
+// list by checking out the incoming branch version. Non-golden files and any
+// golden files that fail to resolve are returned in remaining.
+func ResolveGoldenConflictsFromList(dir string, files []string) (resolved, remaining []string) {
+	for _, f := range files {
+		if !IsGoldenFile(f) {
+			remaining = append(remaining, f)
+			continue
+		}
+		checkout := exec.Command("git", "checkout", "--theirs", f)
+		checkout.Dir = dir
+		if err := checkout.Run(); err != nil {
+			remaining = append(remaining, f)
+			continue
+		}
+		add := exec.Command("git", "add", f)
+		add.Dir = dir
+		if err := add.Run(); err != nil {
+			remaining = append(remaining, f)
+			continue
+		}
+		resolved = append(resolved, f)
+	}
+	return
 }
 
 // RunGoldenUpdate runs a command to regenerate golden test files, stages any
