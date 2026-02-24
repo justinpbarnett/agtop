@@ -90,6 +90,9 @@ func (s StatusBar) View() string {
 
 	left := " " + version + sep + counts + sep + tokensStr + sep + costStr
 
+	right := helpHint + " "
+	rightWidth := lipgloss.Width(right)
+
 	if s.flash != "" && time.Now().Before(s.flashUntil) {
 		var icon string
 		var color lipgloss.TerminalColor
@@ -103,20 +106,24 @@ func (s StatusBar) View() string {
 		default: // FlashInfo
 			icon, color = "●", styles.StatusRunning
 		}
-		flashStr := lipgloss.NewStyle().Foreground(color).Bold(true).Render(icon + " " + s.flash)
-		left += sep + flashStr
+		sepWidth := lipgloss.Width(sep)
+		availableForFlash := s.width - lipgloss.Width(left) - rightWidth - sepWidth - 1
+		if availableForFlash > 0 {
+			flashStr := lipgloss.NewStyle().Foreground(color).Bold(true).Render(icon + " " + s.flash)
+			flashStr = text.Truncate(flashStr, availableForFlash)
+			if lipgloss.Width(flashStr) > 0 {
+				left += sep + flashStr
+			}
+		}
 	}
 
-	right := helpHint + " "
-
 	leftWidth := lipgloss.Width(left)
-	rightWidth := lipgloss.Width(right)
 	gap := s.width - leftWidth - rightWidth
 	if gap < 1 {
 		gap = 1
 	}
 
-	return left + strings.Repeat(" ", gap) + right
+	return text.Truncate(left+strings.Repeat(" ", gap)+right, s.width)
 }
 
 func (s *StatusBar) SetFlash(msg string) {

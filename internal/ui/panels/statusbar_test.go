@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/justinpbarnett/agtop/internal/run"
 )
 
@@ -57,5 +58,58 @@ func TestStatusBarVersion(t *testing.T) {
 	view := sb.View()
 	if !strings.Contains(view, "agtop") {
 		t.Error("expected 'agtop' in status bar")
+	}
+}
+
+func TestStatusBarFlashNoOverflow(t *testing.T) {
+	s := run.NewStore()
+	sb := NewStatusBar(s)
+	sb.SetSize(80)
+	sb.SetFlashWithLevel("unparseable workflow: some very long error message that exceeds terminal width", FlashError)
+
+	view := sb.View()
+	if w := lipgloss.Width(view); w > 80 {
+		t.Errorf("status bar width %d exceeds terminal width 80", w)
+	}
+}
+
+func TestStatusBarFlashFitsShowsFull(t *testing.T) {
+	s := run.NewStore()
+	sb := NewStatusBar(s)
+	sb.SetSize(160)
+	sb.SetFlash("short")
+
+	view := sb.View()
+	if !strings.Contains(view, "short") {
+		t.Error("expected full flash message to appear when it fits")
+	}
+	if w := lipgloss.Width(view); w > 160 {
+		t.Errorf("status bar width %d exceeds terminal width 160", w)
+	}
+}
+
+func TestStatusBarFlashTruncatedWithEllipsis(t *testing.T) {
+	s := run.NewStore()
+	sb := NewStatusBar(s)
+	sb.SetSize(80)
+	sb.SetFlashWithLevel("this is a very long error message that will definitely be truncated at 80 cols", FlashError)
+
+	view := sb.View()
+	if w := lipgloss.Width(view); w > 80 {
+		t.Errorf("status bar width %d exceeds terminal width 80", w)
+	}
+	if !strings.Contains(view, "…") {
+		t.Error("expected ellipsis when flash message is truncated")
+	}
+}
+
+func TestStatusBarNoFlashNoOverflow(t *testing.T) {
+	s := run.NewStore()
+	sb := NewStatusBar(s)
+	sb.SetSize(80)
+
+	view := sb.View()
+	if w := lipgloss.Width(view); w > 80 {
+		t.Errorf("status bar width %d exceeds terminal width 80 (no flash)", w)
 	}
 }
