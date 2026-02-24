@@ -39,33 +39,18 @@ func NewExecutor(store *run.Store, manager *process.Manager, registry *Registry,
 	}
 }
 
-// Execute runs a workflow for the given run. It spawns a goroutine
-// and communicates progress via the run store. Call Cancel() to stop.
-func (e *Executor) Execute(runID string, workflowName string, userPrompt string) {
-	// "auto" is a special mode: run the route skill to pick the real workflow.
-	var skills []string
-	if workflowName == "auto" {
-		skills = []string{"route"}
-	} else {
-		var err error
-		skills, err = ResolveWorkflow(e.cfg, workflowName)
-		if err != nil {
-			e.store.Update(runID, func(r *run.Run) {
-				r.State = run.StateFailed
-				r.Error = err.Error()
-				r.CompletedAt = time.Now()
-			})
-			return
-		}
+// resolveSkills returns the skill list for a workflow name. "auto" maps to
+// the built-in route skill; everything else is resolved from config.
+func (e *Executor) resolveSkills(workflow string) ([]string, error) {
+	if workflow == "auto" {
+		return []string{"route"}, nil
 	}
+	return ResolveWorkflow(e.cfg, workflow)
+}
 
-	e.store.Update(runID, func(r *run.Run) {
-		r.SkillTotal = len(skills)
-		r.Workflow = workflowName
-		r.State = run.StateRunning
-		r.StartedAt = time.Now()
-	})
-
+// spawnWorker registers a cancel function for runID, starts a tracked goroutine
+// that calls fn(ctx), and removes the cancel registration when fn returns.
+func (e *Executor) spawnWorker(runID string, fn func(context.Context)) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	e.mu.Lock()
@@ -80,9 +65,33 @@ func (e *Executor) Execute(runID string, workflowName string, userPrompt string)
 			delete(e.active, runID)
 			e.mu.Unlock()
 		}()
-
-		e.executeWorkflow(ctx, runID, skills, userPrompt)
+		fn(ctx)
 	}()
+}
+
+// Execute runs a workflow for the given run. It spawns a goroutine
+// and communicates progress via the run store. Call Cancel() to stop.
+func (e *Executor) Execute(runID string, workflowName string, userPrompt string) {
+	skills, err := e.resolveSkills(workflowName)
+	if err != nil {
+		e.store.Update(runID, func(r *run.Run) {
+			r.State = run.StateFailed
+			r.Error = err.Error()
+			r.CompletedAt = time.Now()
+		})
+		return
+	}
+
+	e.store.Update(runID, func(r *run.Run) {
+		r.SkillTotal = len(skills)
+		r.Workflow = workflowName
+		r.State = run.StateRunning
+		r.StartedAt = time.Now()
+	})
+
+	e.spawnWorker(runID, func(ctx context.Context) {
+		e.executeWorkflow(ctx, runID, skills, userPrompt)
+	})
 }
 
 // Cancel stops execution of a run. Safe to call if the run isn't active.
@@ -134,15 +143,9 @@ func (e *Executor) Resume(runID string, userPrompt string) error {
 		return fmt.Errorf("run %s is %s, not resumable", runID, r.State)
 	}
 
-	var skills []string
-	if r.Workflow == "auto" {
-		skills = []string{"route"}
-	} else {
-		var err error
-		skills, err = ResolveWorkflow(e.cfg, r.Workflow)
-		if err != nil {
-			return err
-		}
+	skills, err := e.resolveSkills(r.Workflow)
+	if err != nil {
+		return err
 	}
 
 	// Start from the failed skill (SkillIndex is 1-based)
@@ -163,23 +166,9 @@ func (e *Executor) Resume(runID string, userPrompt string) error {
 		}
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	e.mu.Lock()
-	e.active[runID] = cancel
-	e.mu.Unlock()
-
-	e.wg.Add(1)
-	go func() {
-		defer e.wg.Done()
-		defer func() {
-			e.mu.Lock()
-			delete(e.active, runID)
-			e.mu.Unlock()
-		}()
-
+	e.spawnWorker(runID, func(ctx context.Context) {
 		e.executeWorkflow(ctx, runID, remainingSkills, userPrompt)
-	}()
+	})
 
 	return nil
 }
@@ -193,15 +182,9 @@ func (e *Executor) ResumeReconnected(runID string, userPrompt string) {
 		return
 	}
 
-	var skills []string
-	if r.Workflow == "auto" {
-		skills = []string{"route"}
-	} else {
-		var err error
-		skills, err = ResolveWorkflow(e.cfg, r.Workflow)
-		if err != nil {
-			return
-		}
+	skills, err := e.resolveSkills(r.Workflow)
+	if err != nil {
+		return
 	}
 
 	// Start from the current skill (SkillIndex is 1-based)
@@ -214,23 +197,9 @@ func (e *Executor) ResumeReconnected(runID string, userPrompt string) {
 	}
 	remainingSkills := skills[startIdx:]
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	e.mu.Lock()
-	e.active[runID] = cancel
-	e.mu.Unlock()
-
-	e.wg.Add(1)
-	go func() {
-		defer e.wg.Done()
-		defer func() {
-			e.mu.Lock()
-			delete(e.active, runID)
-			e.mu.Unlock()
-		}()
-
+	e.spawnWorker(runID, func(ctx context.Context) {
 		e.executeWorkflow(ctx, runID, remainingSkills, userPrompt)
-	}()
+	})
 }
 
 // FollowUp sends a follow-up prompt to a completed run, reusing its worktree.
@@ -250,23 +219,9 @@ func (e *Executor) FollowUp(runID, followUpPrompt string) error {
 		r.Error = ""
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	e.mu.Lock()
-	e.active[runID] = cancel
-	e.mu.Unlock()
-
-	e.wg.Add(1)
-	go func() {
-		defer e.wg.Done()
-		defer func() {
-			e.mu.Lock()
-			delete(e.active, runID)
-			e.mu.Unlock()
-		}()
-
+	e.spawnWorker(runID, func(ctx context.Context) {
 		e.executeFollowUp(ctx, runID, followUpPrompt)
-	}()
+	})
 
 	return nil
 }
