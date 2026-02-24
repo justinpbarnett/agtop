@@ -46,6 +46,11 @@ type UpdateAvailableMsg struct {
 	Version string
 }
 
+// UpdateAppliedMsg is sent when a background auto-update has been successfully applied.
+type UpdateAppliedMsg struct {
+	Version string
+}
+
 // FullscreenMsg requests that a panel be expanded to fill the terminal.
 type FullscreenMsg struct{ Panel int }
 

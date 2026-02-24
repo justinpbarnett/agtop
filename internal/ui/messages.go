@@ -34,5 +34,8 @@ type SubmitFollowUpMsg = panels.SubmitFollowUpMsg
 // UpdateAvailableMsg is sent when a newer version is available.
 type UpdateAvailableMsg = panels.UpdateAvailableMsg
 
+// UpdateAppliedMsg is sent when a background auto-update has been successfully applied.
+type UpdateAppliedMsg = panels.UpdateAppliedMsg
+
 // SelectRunMsg is sent when the user picks a run from the run picker dropdown.
 type SelectRunMsg = panels.SelectRunMsg

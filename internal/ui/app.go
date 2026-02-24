@@ -434,6 +434,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case UpdateAppliedMsg:
+		a.statusBar.SetFlashWithLevel(
+			fmt.Sprintf("Updated to v%s — please restart agtop", msg.Version),
+			panels.FlashInfo,
+		)
+		return a, nil
+
 	case UpdateAvailableMsg:
 		a.statusBar.SetFlashWithLevel(
 			fmt.Sprintf("Update available: v%s — run \"agtop update\"", msg.Version),
@@ -1261,7 +1268,11 @@ func checkForUpdateCmd(repo string) tea.Cmd {
 		if err != nil || rel == nil {
 			return nil
 		}
-		return UpdateAvailableMsg{Version: rel.Version}
+		applied, err := update.Apply(panels.Version, repo)
+		if err != nil || applied == nil {
+			return UpdateAvailableMsg{Version: rel.Version}
+		}
+		return UpdateAppliedMsg{Version: applied.Version}
 	}
 }
 
