@@ -91,8 +91,6 @@ func (d Detail) View() string {
 		keybinds = []border.Keybind{
 			{Key: "⏎", Label: " fullscreen"},
 			{Key: "j/k", Label: " scroll"},
-			{Key: "G", Label: " bottom"},
-			{Key: "g", Label: "g top"},
 			{Key: "y", Label: "ank"},
 		}
 	}

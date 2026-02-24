@@ -109,12 +109,10 @@ func TestRenderBorderBottomUnicodeKeybind(t *testing.T) {
 }
 
 func TestRenderBorderBottomKeybindOverflow(t *testing.T) {
-	// Detail-panel keybinds (58 visual chars) in a 24-wide panel — must not overflow.
+	// Detail-panel keybinds in a narrow panel — must not overflow.
 	kbs := []Keybind{
 		{Key: "⏎", Label: " fullscreen"},
 		{Key: "j/k", Label: " scroll"},
-		{Key: "G", Label: " bottom"},
-		{Key: "g", Label: "g top"},
 		{Key: "y", Label: "ank"},
 	}
 	got := RenderBorderBottom(kbs, 24, true)
