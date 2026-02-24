@@ -24,8 +24,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Limits.MaxCostPerRun != 50.00 {
 		t.Errorf("expected max cost 50.00, got %f", cfg.Limits.MaxCostPerRun)
 	}
-	if len(cfg.Workflows) != 4 {
-		t.Errorf("expected 4 default workflows, got %d", len(cfg.Workflows))
+	if len(cfg.Workflows) != 5 {
+		t.Errorf("expected 5 default workflows, got %d", len(cfg.Workflows))
 	}
 	if cfg.UI.ShowTokenCount == nil || !*cfg.UI.ShowTokenCount {
 		t.Error("expected ShowTokenCount default to be true")
@@ -114,8 +114,8 @@ func TestMergeWorkflows(t *testing.T) {
 	if _, ok := base.Workflows["sdlc"]; !ok {
 		t.Error("expected default 'sdlc' workflow to be preserved")
 	}
-	if len(base.Workflows) != 5 {
-		t.Errorf("expected 5 workflows (4 default + 1 custom), got %d", len(base.Workflows))
+	if len(base.Workflows) != 6 {
+		t.Errorf("expected 6 workflows (5 default + 1 custom), got %d", len(base.Workflows))
 	}
 }
 
