@@ -160,3 +160,83 @@ func TestBuildPromptPreservesSkillContent(t *testing.T) {
 		t.Error("prompt did not preserve skill content verbatim")
 	}
 }
+
+func TestBuildPromptSkillTaskOverride(t *testing.T) {
+	// Utility skills (test, commit, review, document) should get a fixed task,
+	// not the user's raw prompt which can cause them to go off-script.
+	for _, skillName := range []string{"test", "commit", "review", "document"} {
+		t.Run(skillName, func(t *testing.T) {
+			skill := &Skill{
+				Name:    skillName,
+				Content: "# " + skillName + " skill",
+			}
+			pctx := PromptContext{
+				WorkDir:    "/tmp/worktree",
+				Branch:     "main",
+				UserPrompt: "do a comprehensive review and implement refactoring",
+			}
+
+			result := BuildPrompt(skill, pctx)
+
+			if strings.Contains(result, "comprehensive review and implement refactoring") {
+				t.Errorf("skill %q should not receive the raw user prompt as its task", skillName)
+			}
+
+			override := skillTaskOverrides[skillName]
+			if !strings.Contains(result, override) {
+				t.Errorf("skill %q missing its fixed task override in prompt", skillName)
+			}
+		})
+	}
+}
+
+func TestBuildPromptNoOverrideForBuild(t *testing.T) {
+	// Non-utility skills (build, spec, route, decompose) should receive the
+	// user's original prompt — they need it to understand what to implement.
+	skill := &Skill{
+		Name:    "build",
+		Content: "# Build skill",
+	}
+	pctx := PromptContext{
+		UserPrompt: "Add JWT authentication",
+	}
+
+	result := BuildPrompt(skill, pctx)
+
+	if !strings.Contains(result, "Add JWT authentication") {
+		t.Error("build skill should receive the user's original prompt")
+	}
+}
+
+func TestBuildPromptWorkflowNames(t *testing.T) {
+	skill := &Skill{
+		Name:    "route",
+		Content: "# Route skill",
+	}
+	pctx := PromptContext{
+		UserPrompt:    "Fix the bug",
+		WorkflowNames: []string{"build", "plan-build", "sdlc", "quick-fix", "my-custom"},
+	}
+
+	result := BuildPrompt(skill, pctx)
+
+	if !strings.Contains(result, "Available workflows: build, plan-build, sdlc, quick-fix, my-custom") {
+		t.Error("prompt missing workflow names")
+	}
+}
+
+func TestBuildPromptWorkflowNamesAbsent(t *testing.T) {
+	skill := &Skill{
+		Name:    "build",
+		Content: "# Build skill",
+	}
+	pctx := PromptContext{
+		UserPrompt: "Fix the bug",
+	}
+
+	result := BuildPrompt(skill, pctx)
+
+	if strings.Contains(result, "Available workflows") {
+		t.Error("prompt should not contain Available workflows when none provided")
+	}
+}

@@ -72,6 +72,21 @@ func (e *Executor) spawnWorker(runID string, fn func(context.Context)) {
 // Execute runs a workflow for the given run. It spawns a goroutine
 // and communicates progress via the run store. Call Cancel() to stop.
 func (e *Executor) Execute(runID string, workflowName string, userPrompt string) {
+	// quick-fix is a built-in mode: send the user prompt directly to the
+	// model (no skill wrapping) and commit afterward.
+	if workflowName == "quick-fix" {
+		e.store.Update(runID, func(r *run.Run) {
+			r.SkillTotal = 1
+			r.Workflow = workflowName
+			r.State = run.StateRunning
+			r.StartedAt = time.Now()
+		})
+		e.spawnWorker(runID, func(ctx context.Context) {
+			e.executeQuickFix(ctx, runID, userPrompt)
+		})
+		return
+	}
+
 	skills, err := e.resolveSkills(workflowName)
 	if err != nil {
 		e.store.Update(runID, func(r *run.Run) {
@@ -143,6 +158,21 @@ func (e *Executor) Resume(runID string, userPrompt string) error {
 		return fmt.Errorf("run %s is %s, not resumable", runID, r.State)
 	}
 
+	e.store.Update(runID, func(r *run.Run) {
+		r.State = run.StateRunning
+		r.Error = ""
+		if r.StartedAt.IsZero() {
+			r.StartedAt = time.Now()
+		}
+	})
+
+	if r.Workflow == "quick-fix" {
+		e.spawnWorker(runID, func(ctx context.Context) {
+			e.executeQuickFix(ctx, runID, userPrompt)
+		})
+		return nil
+	}
+
 	skills, err := e.resolveSkills(r.Workflow)
 	if err != nil {
 		return err
@@ -158,14 +188,6 @@ func (e *Executor) Resume(runID string, userPrompt string) error {
 	}
 	remainingSkills := skills[startIdx:]
 
-	e.store.Update(runID, func(r *run.Run) {
-		r.State = run.StateRunning
-		r.Error = ""
-		if r.StartedAt.IsZero() {
-			r.StartedAt = time.Now()
-		}
-	})
-
 	e.spawnWorker(runID, func(ctx context.Context) {
 		e.executeWorkflow(ctx, runID, remainingSkills, userPrompt)
 	})
@@ -179,6 +201,13 @@ func (e *Executor) Resume(runID string, userPrompt string) error {
 func (e *Executor) ResumeReconnected(runID string, userPrompt string) {
 	r, ok := e.store.Get(runID)
 	if !ok {
+		return
+	}
+
+	if r.Workflow == "quick-fix" {
+		e.spawnWorker(runID, func(ctx context.Context) {
+			e.executeQuickFix(ctx, runID, userPrompt)
+		})
 		return
 	}
 
@@ -275,6 +304,73 @@ func (e *Executor) executeFollowUp(ctx context.Context, runID string, followUpPr
 	})
 }
 
+// executeQuickFix sends the user prompt directly to the model without skill
+// wrapping, then commits. Used for trivial changes where the build skill's
+// spec-parsing and plan-following overhead isn't needed.
+func (e *Executor) executeQuickFix(ctx context.Context, runID string, userPrompt string) {
+	skill, opts, ok := e.registry.SkillForRun("build")
+	if !ok {
+		e.store.Update(runID, func(r *run.Run) {
+			r.State = run.StateFailed
+			r.Error = "build skill not found"
+			r.CompletedAt = time.Now()
+		})
+		return
+	}
+
+	r, _ := e.store.Get(runID)
+	opts.WorkDir = r.Worktree
+
+	e.store.Update(runID, func(r *run.Run) {
+		r.SkillIndex = 1
+		r.SkillTotal = 1
+		r.CurrentSkill = "quick-fix"
+	})
+
+	// Build a minimal prompt: safety + context + user task, no skill content.
+	var b strings.Builder
+	if len(e.cfg.Safety.BlockedPatterns) > 0 {
+		b.WriteString("## Safety Constraints\n\n")
+		b.WriteString("You MUST NOT execute any of the following command patterns under any circumstances:\n")
+		for _, p := range e.cfg.Safety.BlockedPatterns {
+			b.WriteString(fmt.Sprintf("- `%s`\n", p))
+		}
+		b.WriteString("\nIf a task requires any of these operations, STOP and report that the operation is blocked by safety policy.\n\n")
+	}
+	b.WriteString("## Context\n")
+	if r.Worktree != "" {
+		b.WriteString("\n- Working directory: ")
+		b.WriteString(r.Worktree)
+	}
+	if r.Branch != "" {
+		b.WriteString("\n- Branch: ")
+		b.WriteString(r.Branch)
+	}
+	b.WriteString("\n\n## Task\n\n")
+	b.WriteString(userPrompt)
+
+	_, err := e.runSkill(ctx, runID, b.String(), opts, skill.Timeout)
+	if err != nil {
+		if errors.Is(err, process.ErrDisconnected) || e.isShuttingDown() {
+			return
+		}
+		e.store.Update(runID, func(r *run.Run) {
+			r.State = run.StateFailed
+			r.Error = fmt.Sprintf("quick-fix failed: %v", err)
+			r.CompletedAt = time.Now()
+		})
+		return
+	}
+
+	e.commitAfterStep(ctx, runID)
+
+	e.store.Update(runID, func(r *run.Run) {
+		r.State = run.StateCompleted
+		r.CurrentSkill = ""
+		r.CompletedAt = time.Now()
+	})
+}
+
 func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []string, userPrompt string) {
 	var previousOutput string
 
@@ -325,13 +421,17 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 		opts.WorkDir = r.Worktree
 
 		// Build prompt
-		prompt := BuildPrompt(skill, PromptContext{
+		pctx := PromptContext{
 			WorkDir:        r.Worktree,
 			Branch:         r.Branch,
 			PreviousOutput: previousOutput,
 			UserPrompt:     userPrompt,
 			SafetyPatterns: e.cfg.Safety.BlockedPatterns,
-		})
+		}
+		if skillName == "route" {
+			pctx.WorkflowNames = workflowNames(e.cfg)
+		}
+		prompt := BuildPrompt(skill, pctx)
 
 		// Execute skill
 		result, err := e.runSkill(ctx, runID, prompt, opts, skill.Timeout)
@@ -357,7 +457,7 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 
 		// Handle route skill: override workflow
 		if skillName == "route" {
-			resolvedWorkflow := parseRouteResult(previousOutput)
+			resolvedWorkflow := parseRouteResult(previousOutput, workflowNames(e.cfg))
 			if resolvedWorkflow == "" {
 				e.logToBuffer(runID, "route", "WARNING: could not parse workflow name from route output, falling back to build")
 				resolvedWorkflow = "build"
@@ -662,8 +762,9 @@ func (e *Executor) runParallelSkill(ctx context.Context, taskRunID string, paren
 
 // parseRouteResult extracts a workflow name from the route skill's output.
 // Tries JSON format first ({"workflow": "name"}), then scans all lines
-// (last to first) for a valid workflow identifier.
-func parseRouteResult(resultText string) string {
+// (last to first) for a valid workflow identifier. The knownWorkflows
+// slice is used as a fallback to find workflow names embedded in prose.
+func parseRouteResult(resultText string, knownWorkflows []string) string {
 	text := strings.TrimSpace(resultText)
 	if text == "" {
 		return ""
@@ -695,7 +796,7 @@ func parseRouteResult(resultText string) string {
 
 		// If not a standalone name, try to extract a workflow name from the line
 		// by searching for known workflow names (this handles cases like "use build" or "build workflow")
-		found := extractWorkflowName(lines[i])
+		found := extractWorkflowName(lines[i], knownWorkflows)
 		if found != "" {
 			return found
 		}
@@ -730,7 +831,7 @@ func isWorkflowName(s string) bool {
 // extractWorkflowName searches a line for known workflow names and returns the
 // first match found. This handles cases where the workflow name is embedded in text,
 // e.g., "I recommend the build workflow" or "use quick-fix for this task".
-func extractWorkflowName(line string) string {
+func extractWorkflowName(line string, knownWorkflows []string) string {
 	// Only attempt extraction on short lines (≤ 4 words). This handles
 	// near-direct references like "use build" or "build workflow" while
 	// rejecting full sentences such as "I think you should use the build workflow".
@@ -738,9 +839,6 @@ func extractWorkflowName(line string) string {
 	if len(words) > 4 {
 		return ""
 	}
-
-	// Known workflow names from defaults
-	knownWorkflows := []string{"build", "plan-build", "sdlc", "quick-fix"}
 
 	// Convert line to lowercase for case-insensitive matching
 	lowerLine := strings.ToLower(line)
@@ -771,7 +869,7 @@ func (e *Executor) logToBuffer(runID string, skill string, msg string) {
 // isNonModifyingSkill returns true for skills that don't modify files in the worktree.
 func isNonModifyingSkill(name string) bool {
 	switch name {
-	case "route", "decompose", "review", "document":
+	case "route", "decompose":
 		return true
 	}
 	return false
@@ -807,6 +905,15 @@ func (e *Executor) commitAfterStep(ctx context.Context, runID string) {
 }
 
 // terminalState determines the final run state after all skills complete.
+// workflowNames returns the sorted list of workflow names from config.
+func workflowNames(cfg *config.Config) []string {
+	names := make([]string, 0, len(cfg.Workflows))
+	for name := range cfg.Workflows {
+		names = append(names, name)
+	}
+	return names
+}
+
 func terminalState(skills []string) run.State {
 	if len(skills) == 0 {
 		return run.StateCompleted

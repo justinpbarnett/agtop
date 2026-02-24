@@ -26,9 +26,9 @@ func DefaultConfig() Config {
 		},
 		Workflows: map[string]WorkflowConfig{
 			"build":      {Skills: []string{"build", "test"}},
-			"plan-build": {Skills: []string{"spec", "build", "test"}},
+			"plan-build": {Skills: []string{"spec", "build", "test", "review"}},
 			"sdlc":       {Skills: []string{"spec", "decompose", "build", "test", "review", "document"}},
-			"quick-fix":  {Skills: []string{"build", "test", "commit"}},
+			"quick-fix":  {Skills: []string{}},
 		},
 		Skills: map[string]SkillConfig{
 			"route":     {Model: "haiku", Timeout: 600, AllowedTools: []string{"Read", "Grep", "Glob"}},

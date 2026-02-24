@@ -11,6 +11,19 @@ type PromptContext struct {
 	PreviousOutput string   // Summary from previous skill (empty for first skill)
 	UserPrompt     string   // The user's original task description
 	SafetyPatterns []string // Blocked command patterns for safety preamble
+	WorkflowNames  []string // Available workflow names (injected for route skill)
+}
+
+// skillTaskOverrides maps skill names to fixed task descriptions.
+// These skills have a well-defined job regardless of the user's original prompt.
+// Without this, the raw user prompt (e.g. "review the project and implement
+// refactoring opportunities") leaks into utility skills and causes them to go
+// off-script — exploring, implementing, or duplicating work done by earlier skills.
+var skillTaskOverrides = map[string]string{
+	"test":     "Run the project's full validation suite (lint, typecheck, tests). If any checks fail, diagnose and fix the issues, then re-run to confirm. Produce the JSON report.",
+	"commit":   "Review all uncommitted changes in this worktree and create atomic commits using conventional commit format. If there are no changes to commit, do nothing.",
+	"review":   "Review the implemented changes against the spec to verify correctness and completeness. Fix any blocker and tech_debt issues found. Produce the structured review report.",
+	"document": "Generate documentation for the changes made on this branch.",
 }
 
 // BuildPrompt assembles the final prompt for a claude -p invocation by
@@ -39,13 +52,25 @@ func BuildPrompt(skill *Skill, pctx PromptContext) string {
 		b.WriteString(pctx.Branch)
 	}
 
+	if len(pctx.WorkflowNames) > 0 {
+		b.WriteString("\n- Available workflows: ")
+		b.WriteString(strings.Join(pctx.WorkflowNames, ", "))
+	}
+
 	if pctx.PreviousOutput != "" {
 		b.WriteString("\n- Previous skill output:\n")
 		b.WriteString(pctx.PreviousOutput)
 	}
 
+	// Use a fixed task for utility skills so the user's raw prompt doesn't
+	// cause them to go off-script (e.g. test skill doing implementation).
+	task := pctx.UserPrompt
+	if override, ok := skillTaskOverrides[skill.Name]; ok {
+		task = override
+	}
+
 	b.WriteString("\n\n## Task\n\n")
-	b.WriteString(pctx.UserPrompt)
+	b.WriteString(task)
 
 	return b.String()
 }

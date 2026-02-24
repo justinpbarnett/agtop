@@ -21,9 +21,9 @@ func executorTestConfig() *config.Config {
 	return &config.Config{
 		Workflows: map[string]config.WorkflowConfig{
 			"build":      {Skills: []string{"build", "test"}},
-			"plan-build": {Skills: []string{"spec", "build", "test"}},
+			"plan-build": {Skills: []string{"spec", "build", "test", "review"}},
 			"sdlc":       {Skills: []string{"spec", "decompose", "build", "test", "review", "document"}},
-			"quick-fix":  {Skills: []string{"build", "test", "commit"}},
+			"quick-fix":  {Skills: []string{}},
 			"empty":      {Skills: []string{}},
 		},
 		Skills: map[string]config.SkillConfig{
@@ -123,6 +123,8 @@ func TestValidateWorkflowMissing(t *testing.T) {
 
 // --- parseRouteResult tests ---
 
+var defaultKnownWorkflows = []string{"build", "plan-build", "sdlc", "quick-fix"}
+
 func TestParseRouteResultPlainText(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -162,7 +164,7 @@ func TestParseRouteResultPlainText(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := parseRouteResult(tt.input)
+		got := parseRouteResult(tt.input, defaultKnownWorkflows)
 		if got != tt.expected {
 			t.Errorf("parseRouteResult(%q) = %q, want %q", tt.input, got, tt.expected)
 		}
@@ -170,21 +172,21 @@ func TestParseRouteResultPlainText(t *testing.T) {
 }
 
 func TestParseRouteResultJSON(t *testing.T) {
-	got := parseRouteResult(`{"workflow": "plan-build"}`)
+	got := parseRouteResult(`{"workflow": "plan-build"}`, defaultKnownWorkflows)
 	if got != "plan-build" {
 		t.Errorf("expected plan-build, got %q", got)
 	}
 }
 
 func TestParseRouteResultEmpty(t *testing.T) {
-	got := parseRouteResult("")
+	got := parseRouteResult("", defaultKnownWorkflows)
 	if got != "" {
 		t.Errorf("expected empty, got %q", got)
 	}
 }
 
 func TestParseRouteResultInvalidChars(t *testing.T) {
-	got := parseRouteResult("I think you should use the build workflow")
+	got := parseRouteResult("I think you should use the build workflow", defaultKnownWorkflows)
 	if got != "" {
 		t.Errorf("expected empty for sentence input, got %q", got)
 	}
@@ -192,9 +194,24 @@ func TestParseRouteResultInvalidChars(t *testing.T) {
 
 func TestParseRouteResultAllSentences(t *testing.T) {
 	// No valid workflow name on any line
-	got := parseRouteResult("I recommend the build workflow.\nIt seems like a good fit.")
+	got := parseRouteResult("I recommend the build workflow.\nIt seems like a good fit.", defaultKnownWorkflows)
 	if got != "" {
 		t.Errorf("expected empty when all lines are sentences, got %q", got)
+	}
+}
+
+func TestParseRouteResultCustomWorkflow(t *testing.T) {
+	// Custom workflow name should be found when included in knownWorkflows
+	custom := append(defaultKnownWorkflows, "my-custom")
+	got := parseRouteResult("use my-custom", custom)
+	if got != "my-custom" {
+		t.Errorf("expected my-custom, got %q", got)
+	}
+
+	// But not when using default list
+	got = parseRouteResult("use my-custom", defaultKnownWorkflows)
+	if got != "" {
+		t.Errorf("expected empty without custom in known list, got %q", got)
 	}
 }
 
@@ -345,7 +362,7 @@ func TestTerminalStateCompleted(t *testing.T) {
 // --- isNonModifyingSkill tests ---
 
 func TestIsNonModifyingSkillTrue(t *testing.T) {
-	for _, name := range []string{"route", "decompose", "review", "document"} {
+	for _, name := range []string{"route", "decompose"} {
 		if !isNonModifyingSkill(name) {
 			t.Errorf("isNonModifyingSkill(%q) = false, want true", name)
 		}
@@ -353,7 +370,7 @@ func TestIsNonModifyingSkillTrue(t *testing.T) {
 }
 
 func TestIsNonModifyingSkillFalse(t *testing.T) {
-	for _, name := range []string{"build", "test", "commit", "spec", ""} {
+	for _, name := range []string{"build", "test", "commit", "spec", "review", "document", ""} {
 		if isNonModifyingSkill(name) {
 			t.Errorf("isNonModifyingSkill(%q) = true, want false", name)
 		}
@@ -395,6 +412,7 @@ func newTestExecutor(rt runtime.Runtime) (*Executor, *run.Store) {
 	reg.skills["test"] = &Skill{Name: "test"}
 	reg.skills["spec"] = &Skill{Name: "spec"}
 	reg.skills["commit"] = &Skill{Name: "commit"}
+	reg.skills["review"] = &Skill{Name: "review"}
 
 	exec := NewExecutor(store, mgr, reg, cfg)
 	return exec, store
@@ -513,13 +531,13 @@ func TestExecutorResumeReconnectedSkillIndex(t *testing.T) {
 	_ = rt
 
 	// Simulate a reconnected run at SkillIndex=2 in "plan-build" workflow
-	// plan-build = ["spec", "build", "test"]; SkillIndex 2 means the 2nd
-	// skill ("build") was in progress, so resume should start from "build".
+	// plan-build = ["spec", "build", "test", "review"]; SkillIndex 2 means
+	// the 2nd skill ("build") was in progress, so resume should start from "build".
 	store.Add(&run.Run{
 		State:      run.StateRunning,
 		Workflow:   "plan-build",
 		SkillIndex: 2,
-		SkillTotal: 3,
+		SkillTotal: 4,
 		Prompt:     "implement feature",
 	})
 
@@ -536,13 +554,13 @@ func TestExecutorResumeReconnectedSkillIndex(t *testing.T) {
 	}
 
 	r, _ := store.Get("001")
-	if r.State != run.StateCompleted {
-		t.Errorf("expected StateCompleted, got %s (error: %s)", r.State, r.Error)
+	// plan-build ends with "review", so terminal state is StateReviewing
+	if r.State != run.StateReviewing {
+		t.Errorf("expected StateReviewing, got %s (error: %s)", r.State, r.Error)
 	}
 
-	// Should have executed "build", "test", and auto-commit after "build"
-	// (3 skill invocations: build, commit, test)
-	if len(*invocations) < 2 {
-		t.Errorf("expected at least 2 skill invocations (build + test), got %d", len(*invocations))
+	// Should have executed "build", "test", "review", plus auto-commits
+	if len(*invocations) < 3 {
+		t.Errorf("expected at least 3 skill invocations (build + test + review), got %d", len(*invocations))
 	}
 }
