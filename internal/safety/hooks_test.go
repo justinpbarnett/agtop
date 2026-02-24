@@ -94,6 +94,7 @@ func TestGenerateGuardScriptFiltersBashUnsafe(t *testing.T) {
 			`DROP\s+TABLE`,          // safe
 			`pattern with ]]`,       // unsafe: closes conditional
 			`pattern with $(cmd)`,   // unsafe: command substitution
+			`:(){.*};`,              // unsafe: semicolon terminates [[ ]]
 		},
 	}
 	engine, _ := NewHookEngine(cfg)
@@ -116,6 +117,9 @@ func TestGenerateGuardScriptFiltersBashUnsafe(t *testing.T) {
 	}
 	if strings.Contains(script, `$(cmd)`) {
 		t.Error("script should not contain pattern with command substitution")
+	}
+	if strings.Contains(script, `:(){.*};`) {
+		t.Error("script should not contain fork bomb pattern with semicolon")
 	}
 }
 

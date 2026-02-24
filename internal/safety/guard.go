@@ -54,6 +54,8 @@ func bashSafe(pattern string) bool {
 			return false // backtick command substitution in echo
 		case '\n', '\r':
 			return false // breaks if statement across lines
+		case ';':
+			return false // terminates [[ ]] conditional prematurely
 		}
 	}
 	// $( triggers command substitution inside double quotes
