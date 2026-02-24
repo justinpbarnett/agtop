@@ -6,12 +6,13 @@ import (
 )
 
 type PromptContext struct {
-	WorkDir        string   // Worktree path
-	Branch         string   // Git branch name
-	PreviousOutput string   // Summary from previous skill (empty for first skill)
-	UserPrompt     string   // The user's original task description
-	SafetyPatterns []string // Blocked command patterns for safety preamble
-	WorkflowNames  []string // Available workflow names (injected for route skill)
+	WorkDir        string            // Worktree path
+	Branch         string            // Git branch name
+	PreviousOutput string            // Summary from previous skill (empty for first skill)
+	UserPrompt     string            // The user's original task description
+	SafetyPatterns []string          // Blocked command patterns for safety preamble
+	WorkflowNames  []string          // Available workflow names (injected for route skill)
+	Repos          map[string]string // Multi-repo: relative path → worktree path (nil for single-repo)
 }
 
 // skillTaskOverrides maps skill names to fixed task descriptions.
@@ -22,7 +23,7 @@ type PromptContext struct {
 var skillTaskOverrides = map[string]string{
 	"test":     "Run the project's full validation suite (lint, typecheck, tests). If any checks fail, diagnose and fix the issues, then re-run to confirm. Produce the JSON report.",
 	"commit":   "Review all uncommitted changes in this worktree and create atomic commits using conventional commit format. If there are no changes to commit, do nothing.",
-	"review":   "Review the implemented changes against the spec to verify correctness and completeness. Fix any blocker and tech_debt issues found. Produce the structured review report.",
+	"review":   "Review the implemented changes against the spec to verify correctness and completeness. Classify any issues found by severity. Produce the structured review report.",
 	"document": "Generate documentation for the changes made on this branch.",
 }
 
@@ -52,6 +53,12 @@ func BuildPrompt(skill *Skill, pctx PromptContext) string {
 		b.WriteString(pctx.Branch)
 	}
 
+	if len(pctx.Repos) > 0 {
+		b.WriteString("\n- Multi-repo project with sub-repositories:")
+		for relPath, wtPath := range pctx.Repos {
+			b.WriteString(fmt.Sprintf("\n  - %s → %s", relPath, wtPath))
+		}
+	}
 	if len(pctx.WorkflowNames) > 0 {
 		b.WriteString("\n- Available workflows: ")
 		b.WriteString(strings.Join(pctx.WorkflowNames, ", "))

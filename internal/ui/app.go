@@ -2,10 +2,12 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -142,13 +144,42 @@ func NewApp(cfg *config.Config) App {
 		exec = engine.NewExecutor(store, mgr, reg, cfg)
 	}
 
-	var pl *engine.Pipeline
-	if exec != nil {
-		pl = engine.NewPipeline(exec, store, &cfg.Merge, projectRoot)
+	// Discover repositories (single repo or multi-repo)
+	var repos []string
+	if len(cfg.Project.Repos) > 0 {
+		// Explicit repos from config — resolve relative to project root
+		for _, r := range cfg.Project.Repos {
+			if filepath.IsAbs(r) {
+				repos = append(repos, r)
+			} else {
+				repos = append(repos, filepath.Join(projectRoot, r))
+			}
+		}
+	} else {
+		repos, _ = gitpkg.DiscoverRepos(projectRoot)
 	}
 
-	wt := gitpkg.NewWorktreeManager(projectRoot)
-	dg := gitpkg.NewDiffGenerator(projectRoot)
+	var wt *gitpkg.WorktreeManager
+	var dg *gitpkg.DiffGenerator
+	if len(repos) > 1 {
+		wt = gitpkg.NewMultiRepoWorktreeManager(projectRoot, repos)
+		dg = gitpkg.NewMultiRepoDiffGenerator(projectRoot, repos)
+	} else if len(repos) == 1 {
+		wt = gitpkg.NewWorktreeManager(repos[0])
+		dg = gitpkg.NewDiffGenerator(repos[0])
+	} else {
+		wt = gitpkg.NewWorktreeManager(projectRoot)
+		dg = gitpkg.NewDiffGenerator(projectRoot)
+	}
+
+	var pl *engine.Pipeline
+	if exec != nil {
+		if len(repos) > 1 {
+			pl = engine.NewMultiRepoPipeline(exec, store, &cfg.Merge, projectRoot, repos)
+		} else {
+			pl = engine.NewPipeline(exec, store, &cfg.Merge, projectRoot)
+		}
+	}
 	ds := server.NewDevServerManager(cfg.Project.DevServer)
 
 	// Session persistence: rehydrate previous runs
@@ -419,6 +450,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.store.Update(runID, func(r *run.Run) {
 				r.Worktree = wtPath
 				r.Branch = branch
+				// Populate multi-repo tracking fields
+				if a.worktrees.IsMultiRepo() {
+					r.Worktrees = make(map[string]string)
+					r.Branches = make(map[string]string)
+					for _, repo := range a.worktrees.Repos() {
+						relPath, _ := filepath.Rel(a.worktrees.ProjectRoot(), repo)
+						r.Worktrees[relPath] = filepath.Join(wtPath, relPath)
+						r.Branches[relPath] = branch
+					}
+				}
 			})
 
 			a.executor.Execute(runID, msg.Workflow, msg.Prompt)
@@ -925,14 +966,26 @@ func (a App) handleAccept() (tea.Model, tea.Cmd) {
 		return a, flashClearCmd()
 	}
 
-	// Allow re-accept of failed merge pipelines
-	if selected.State != run.StateCompleted && selected.State != run.StateReviewing &&
-		!(selected.State == run.StateFailed && selected.MergeStatus != "") {
-		a.statusBar.SetFlashWithLevel(fmt.Sprintf("Cannot accept: run is %s", selected.State), panels.FlashError)
+	runID := selected.ID
+
+	// Block accept while the executor still has an active worker for this run.
+	if a.executor != nil && a.executor.IsActive(runID) {
+		a.statusBar.SetFlashWithLevel("Cannot accept: run is still executing", panels.FlashError)
 		return a, flashClearCmd()
 	}
 
-	runID := selected.ID
+	// Re-read state fresh from the store to avoid acting on a stale cache.
+	fresh, ok := a.store.Get(runID)
+	if !ok {
+		return a, nil
+	}
+
+	// Allow re-accept of failed merge pipelines
+	if fresh.State != run.StateCompleted && fresh.State != run.StateReviewing &&
+		!(fresh.State == run.StateFailed && fresh.MergeStatus != "") {
+		a.statusBar.SetFlashWithLevel(fmt.Sprintf("Cannot accept: run is %s", fresh.State), panels.FlashError)
+		return a, flashClearCmd()
+	}
 
 	_ = a.devServers.Stop(runID)
 
@@ -955,22 +1008,74 @@ func (a App) handleAccept() (tea.Model, tea.Cmd) {
 		return a, flashClearCmd()
 	}
 
-	// Legacy flow: merge locally then clean up
+	// Legacy flow: merge locally, with AI conflict resolution if available
 	a.store.Update(runID, func(r *run.Run) { r.State = run.StateAccepted })
 
 	goldenCmd := a.config.Merge.GoldenUpdateCommand
+	pipeline := a.pipeline
+	worktrees := a.worktrees
+	store := a.store
+	conflictAttempts := a.config.Merge.ConflictResolutionAttempts
 	go func() {
-		_, err := a.worktrees.MergeWithOptions(runID, gitpkg.MergeOptions{
+		_, mergeErr := worktrees.MergeWithOptions(runID, gitpkg.MergeOptions{
 			GoldenUpdateCommand: goldenCmd,
 		})
-		if err != nil {
-			a.store.Update(runID, func(r *run.Run) {
-				r.State = run.StateFailed
-				r.Error = fmt.Sprintf("merge failed: %v", err)
-			})
+		if mergeErr == nil {
+			a.cleanupRun(runID)
 			return
 		}
-		a.cleanupRun(runID)
+
+		// Check if the error is a conflict that AI can resolve
+		var conflictErr *gitpkg.MergeConflictError
+		if pipeline != nil && errors.As(mergeErr, &conflictErr) {
+			store.Update(runID, func(r *run.Run) {
+				r.State = run.StateMerging
+				r.MergeStatus = "resolving-conflicts"
+			})
+
+			ctx := context.Background()
+			resolveErr := pipeline.ResolveConflictsInMerge(ctx, runID, worktrees.RepoRoot(), conflictErr.ConflictedFiles, conflictAttempts)
+			if resolveErr != nil {
+				// Resolution failed — abort merge and fail
+				abort := exec.Command("git", "merge", "--abort")
+				abort.Dir = worktrees.RepoRoot()
+				_ = abort.Run()
+				store.Update(runID, func(r *run.Run) {
+					r.State = run.StateFailed
+					r.MergeStatus = "failed"
+					r.Error = fmt.Sprintf("merge conflict resolution failed: %v", resolveErr)
+				})
+				return
+			}
+
+			// Resolution succeeded — complete the merge commit
+			commit := exec.Command("git", "commit", "--no-edit")
+			commit.Dir = worktrees.RepoRoot()
+			if commitOut, commitErr := commit.CombinedOutput(); commitErr != nil {
+				abort := exec.Command("git", "merge", "--abort")
+				abort.Dir = worktrees.RepoRoot()
+				_ = abort.Run()
+				store.Update(runID, func(r *run.Run) {
+					r.State = run.StateFailed
+					r.MergeStatus = "failed"
+					r.Error = fmt.Sprintf("merge commit failed: %s: %v", strings.TrimSpace(string(commitOut)), commitErr)
+				})
+				return
+			}
+
+			store.Update(runID, func(r *run.Run) {
+				r.State = run.StateAccepted
+				r.MergeStatus = "merged"
+			})
+			a.cleanupRun(runID)
+			return
+		}
+
+		// Non-conflict error — fail as before
+		store.Update(runID, func(r *run.Run) {
+			r.State = run.StateFailed
+			r.Error = fmt.Sprintf("merge failed: %v", mergeErr)
+		})
 	}()
 
 	a.statusBar.SetFlashWithLevel("Merging and cleaning up...", panels.FlashSuccess)
@@ -983,12 +1088,25 @@ func (a App) handleReject() (tea.Model, tea.Cmd) {
 		a.statusBar.SetFlashWithLevel("No run selected", panels.FlashWarning)
 		return a, flashClearCmd()
 	}
-	if selected.State != run.StateCompleted && selected.State != run.StateReviewing {
-		a.statusBar.SetFlashWithLevel(fmt.Sprintf("Cannot reject: run is %s", selected.State), panels.FlashError)
+
+	runID := selected.ID
+
+	// Block reject while the executor still has an active worker for this run.
+	if a.executor != nil && a.executor.IsActive(runID) {
+		a.statusBar.SetFlashWithLevel("Cannot reject: run is still executing", panels.FlashError)
 		return a, flashClearCmd()
 	}
 
-	runID := selected.ID
+	// Re-read state fresh from the store to avoid acting on a stale cache.
+	fresh, ok := a.store.Get(runID)
+	if !ok {
+		return a, nil
+	}
+
+	if fresh.State != run.StateCompleted && fresh.State != run.StateReviewing {
+		a.statusBar.SetFlashWithLevel(fmt.Sprintf("Cannot reject: run is %s", fresh.State), panels.FlashError)
+		return a, flashClearCmd()
+	}
 
 	a.store.Update(runID, func(r *run.Run) {
 		r.State = run.StateRejected
@@ -1072,14 +1190,8 @@ func (a App) handleTogglePause() (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case run.StateFailed:
-		if a.executor != nil {
-			if err := a.executor.Resume(selected.ID, selected.Prompt); err != nil {
-				a.statusBar.SetFlashWithLevel(fmt.Sprintf("Resume: %v", err), panels.FlashError)
-				return a, flashClearCmd()
-			}
-			return a, nil
-		}
-		return a, nil
+		a.statusBar.SetFlashWithLevel("Run has failed — use 'r' to restart", panels.FlashError)
+		return a, flashClearCmd()
 
 	default:
 		a.statusBar.SetFlashWithLevel(fmt.Sprintf("Cannot pause/resume: run is %s", selected.State), panels.FlashError)

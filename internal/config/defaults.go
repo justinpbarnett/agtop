@@ -26,9 +26,9 @@ func DefaultConfig() Config {
 		},
 		Workflows: map[string]WorkflowConfig{
 			"auto":       {Skills: []string{"route"}},
-			"build":      {Skills: []string{"build", "test"}},
-			"plan-build": {Skills: []string{"spec", "build", "test", "review"}},
-			"sdlc":       {Skills: []string{"spec", "decompose", "build", "test", "review", "document"}},
+			"build":      {Skills: []string{"build"}},
+			"plan-build": {Skills: []string{"spec", "build", "review"}},
+			"sdlc":       {Skills: []string{"spec", "decompose", "build", "review", "document"}},
 			"quick-fix":  {Skills: []string{}},
 		},
 		Skills: map[string]SkillConfig{
@@ -59,6 +59,9 @@ func DefaultConfig() Config {
 			MaxConcurrentRuns:   5,
 			RateLimitBackoff:    60,
 			RateLimitMaxRetries: 3,
+		},
+		Merge: MergeConfig{
+			ConflictResolutionAttempts: 3,
 		},
 		UI: UIConfig{
 			Theme:          "default",

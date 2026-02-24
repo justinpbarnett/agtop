@@ -27,6 +27,7 @@ type JiraConfig struct {
 type ProjectConfig struct {
 	Name               string          `toml:"name"`
 	Root               string          `toml:"root"`
+	Repos              []string        `toml:"repos"`
 	TestCommand        string          `toml:"test_command"`
 	DevServer          DevServerConfig `toml:"dev_server"`
 	IgnoreSkillSources []string        `toml:"ignore_skill_sources"`
@@ -83,13 +84,14 @@ type LimitsConfig struct {
 }
 
 type MergeConfig struct {
-	TargetBranch        string `toml:"target_branch"`
-	AutoMerge           bool   `toml:"auto_merge"`
-	MergeStrategy       string `toml:"merge_strategy"`
-	FixAttempts         int    `toml:"fix_attempts"`
-	PollInterval        int    `toml:"poll_interval"`
-	PollTimeout         int    `toml:"poll_timeout"`
-	GoldenUpdateCommand string `toml:"golden_update_command"`
+	TargetBranch                string `toml:"target_branch"`
+	AutoMerge                   bool   `toml:"auto_merge"`
+	MergeStrategy               string `toml:"merge_strategy"`
+	FixAttempts                 int    `toml:"fix_attempts"`
+	PollInterval                int    `toml:"poll_interval"`
+	PollTimeout                 int    `toml:"poll_timeout"`
+	GoldenUpdateCommand         string `toml:"golden_update_command"`
+	ConflictResolutionAttempts  int    `toml:"conflict_resolution_attempts"`
 }
 
 type UIConfig struct {

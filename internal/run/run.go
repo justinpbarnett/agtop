@@ -48,7 +48,10 @@ type Run struct {
 	DevServerURL  string       `json:"dev_server_url"`
 	MergeStatus     string       `json:"merge_status,omitempty"`
 	PRURL           string       `json:"pr_url,omitempty"`
-	FollowUpPrompts []string     `json:"follow_up_prompts,omitempty"`
+	PRURLs          map[string]string   `json:"pr_urls,omitempty"`
+	FollowUpPrompts []string            `json:"follow_up_prompts,omitempty"`
+	Worktrees       map[string]string   `json:"worktrees,omitempty"`
+	Branches        map[string]string   `json:"branches,omitempty"`
 }
 
 func (r *Run) StatusIcon() string {
