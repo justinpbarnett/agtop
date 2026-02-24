@@ -104,16 +104,16 @@ func TestLogViewGGJumpsToTop(t *testing.T) {
 	// Viewport is at the bottom (follow mode). First g press:
 	var cmd tea.Cmd
 	lv, cmd = lv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
-	if !lv.gPending {
-		t.Fatal("expected gPending to be true after first g")
+	if !lv.gTap.Pending {
+		t.Fatal("expected gTap.Pending to be true after first g")
 	}
 	if cmd == nil {
 		t.Fatal("expected timer cmd after first g")
 	}
 	// Second g press before timer:
 	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
-	if lv.gPending {
-		t.Error("expected gPending to be false after gg")
+	if lv.gTap.Pending {
+		t.Error("expected gTap.Pending to be false after gg")
 	}
 	if lv.follow {
 		t.Error("expected follow to be disabled after gg")
@@ -128,13 +128,13 @@ func TestLogViewGTimerExpiry(t *testing.T) {
 	lv.SetSize(80, 10)
 	// First g press:
 	lv, _ = lv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
-	if !lv.gPending {
-		t.Fatal("expected gPending after first g")
+	if !lv.gTap.Pending {
+		t.Fatal("expected gTap.Pending after first g")
 	}
 	// Timer expires:
-	lv, _ = lv.Update(GTimerExpiredMsg{})
-	if lv.gPending {
-		t.Error("expected gPending to be cleared after timer expiry")
+	lv, _ = lv.Update(GTimerExpiredMsg{ID: gTapIDLogView})
+	if lv.gTap.Pending {
+		t.Error("expected gTap.Pending to be cleared after timer expiry")
 	}
 }
 

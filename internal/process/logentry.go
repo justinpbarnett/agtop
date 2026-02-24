@@ -84,6 +84,19 @@ func shortenPath(p string) string {
 	return rel
 }
 
+// toolField extracts a single string field from a JSON tool input.
+// Returns "" if the input is invalid JSON or the field is absent/non-string.
+func toolField(toolInput, fieldName string) string {
+	var m map[string]interface{}
+	if json.Unmarshal([]byte(toolInput), &m) != nil {
+		return ""
+	}
+	if v, ok := m[fieldName].(string); ok {
+		return v
+	}
+	return ""
+}
+
 // ToolUseSummary produces a readable one-line tool summary.
 // For known tools it extracts meaningful context from the JSON input.
 func ToolUseSummary(toolName, toolInput string) string {
@@ -91,76 +104,33 @@ func ToolUseSummary(toolName, toolInput string) string {
 		return "Tool: " + toolName
 	}
 	switch toolName {
-	case "Read":
-		var input struct {
-			FilePath string `json:"file_path"`
+	case "Read", "Edit", "Write":
+		if p := toolField(toolInput, "file_path"); p != "" {
+			return "Tool: " + toolName + " — " + shortenPath(p)
 		}
-		if json.Unmarshal([]byte(toolInput), &input) == nil && input.FilePath != "" {
-			return "Tool: Read — " + shortenPath(input.FilePath)
-		}
-	case "Edit":
-		var input struct {
-			FilePath string `json:"file_path"`
-		}
-		if json.Unmarshal([]byte(toolInput), &input) == nil && input.FilePath != "" {
-			return "Tool: Edit — " + shortenPath(input.FilePath)
-		}
-	case "Write":
-		var input struct {
-			FilePath string `json:"file_path"`
-		}
-		if json.Unmarshal([]byte(toolInput), &input) == nil && input.FilePath != "" {
-			return "Tool: Write — " + shortenPath(input.FilePath)
+	case "Glob", "Grep":
+		if p := toolField(toolInput, "pattern"); p != "" {
+			return "Tool: " + toolName + " — " + p
 		}
 	case "Bash":
-		var input struct {
-			Command string `json:"command"`
-		}
-		if json.Unmarshal([]byte(toolInput), &input) == nil && input.Command != "" {
-			cmd := truncateLine(firstLine(input.Command), 60)
-			return "Tool: Bash — " + cmd
-		}
-	case "Glob":
-		var input struct {
-			Pattern string `json:"pattern"`
-		}
-		if json.Unmarshal([]byte(toolInput), &input) == nil && input.Pattern != "" {
-			return "Tool: Glob — " + input.Pattern
-		}
-	case "Grep":
-		var input struct {
-			Pattern string `json:"pattern"`
-		}
-		if json.Unmarshal([]byte(toolInput), &input) == nil && input.Pattern != "" {
-			return "Tool: Grep — " + input.Pattern
+		if cmd := toolField(toolInput, "command"); cmd != "" {
+			return "Tool: Bash — " + truncateLine(firstLine(cmd), 60)
 		}
 	case "WebSearch":
-		var input struct {
-			Query string `json:"query"`
-		}
-		if json.Unmarshal([]byte(toolInput), &input) == nil && input.Query != "" {
-			return "Tool: WebSearch — " + truncateLine(input.Query, 60)
+		if q := toolField(toolInput, "query"); q != "" {
+			return "Tool: WebSearch — " + truncateLine(q, 60)
 		}
 	case "WebFetch":
-		var input struct {
-			URL string `json:"url"`
-		}
-		if json.Unmarshal([]byte(toolInput), &input) == nil && input.URL != "" {
-			return "Tool: WebFetch — " + truncateLine(input.URL, 60)
+		if u := toolField(toolInput, "url"); u != "" {
+			return "Tool: WebFetch — " + truncateLine(u, 60)
 		}
 	case "Task":
-		var input struct {
-			Description string `json:"description"`
-		}
-		if json.Unmarshal([]byte(toolInput), &input) == nil && input.Description != "" {
-			return "Tool: Task — " + truncateLine(input.Description, 60)
+		if desc := toolField(toolInput, "description"); desc != "" {
+			return "Tool: Task — " + truncateLine(desc, 60)
 		}
 	case "TodoWrite", "TaskCreate":
-		var input struct {
-			Subject string `json:"subject"`
-		}
-		if json.Unmarshal([]byte(toolInput), &input) == nil && input.Subject != "" {
-			return "Tool: " + toolName + " — " + truncateLine(input.Subject, 50)
+		if subj := toolField(toolInput, "subject"); subj != "" {
+			return "Tool: " + toolName + " — " + truncateLine(subj, 50)
 		}
 	}
 	return "Tool: " + toolName

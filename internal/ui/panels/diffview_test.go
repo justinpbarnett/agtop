@@ -170,8 +170,8 @@ func TestDiffViewGGJumpsToTop(t *testing.T) {
 	// First g press
 	var cmd tea.Cmd
 	dv, cmd = dv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
-	if !dv.gPending {
-		t.Fatal("expected gPending after first g")
+	if !dv.gTap.Pending {
+		t.Fatal("expected gTap.Pending after first g")
 	}
 	if cmd == nil {
 		t.Fatal("expected timer cmd after first g")
@@ -179,8 +179,8 @@ func TestDiffViewGGJumpsToTop(t *testing.T) {
 
 	// Second g press
 	dv, _ = dv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
-	if dv.gPending {
-		t.Error("expected gPending=false after gg")
+	if dv.gTap.Pending {
+		t.Error("expected gTap.Pending=false after gg")
 	}
 	if dv.viewport.YOffset != 0 {
 		t.Errorf("expected viewport at top (offset 0), got %d", dv.viewport.YOffset)
@@ -193,14 +193,14 @@ func TestDiffViewGTimerExpiry(t *testing.T) {
 
 	// First g press
 	dv, _ = dv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
-	if !dv.gPending {
-		t.Fatal("expected gPending after first g")
+	if !dv.gTap.Pending {
+		t.Fatal("expected gTap.Pending after first g")
 	}
 
 	// Timer expires
-	dv, _ = dv.Update(DiffGTimerExpiredMsg{})
-	if dv.gPending {
-		t.Error("expected gPending cleared after timer expiry")
+	dv, _ = dv.Update(GTimerExpiredMsg{ID: gTapIDDiffView})
+	if dv.gTap.Pending {
+		t.Error("expected gTap.Pending cleared after timer expiry")
 	}
 }
 

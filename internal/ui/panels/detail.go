@@ -3,7 +3,6 @@ package panels
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -14,28 +13,26 @@ import (
 	"github.com/justinpbarnett/agtop/internal/ui/text"
 )
 
-// DetailGTimerExpiredMsg is sent when the gg double-tap window expires in the detail panel.
-type DetailGTimerExpiredMsg struct{}
-
 type Detail struct {
 	width       int
 	height      int
 	selectedRun *run.Run
 	focused     bool
 	viewport    viewport.Model
-	gPending    bool
+	gTap        DoubleTap
 }
 
 func NewDetail() Detail {
 	return Detail{
 		viewport: viewport.New(0, 0),
+		gTap:     NewDoubleTap(gTapIDDetail),
 	}
 }
 
 func (d Detail) Update(msg tea.Msg) (Detail, tea.Cmd) {
 	switch msg := msg.(type) {
-	case DetailGTimerExpiredMsg:
-		d.gPending = false
+	case GTimerExpiredMsg:
+		d.gTap.HandleExpiry(msg)
 		return d, nil
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -68,15 +65,12 @@ func (d Detail) Update(msg tea.Msg) (Detail, tea.Cmd) {
 			}
 		case "g":
 			if d.focused && d.selectedRun != nil {
-				if d.gPending {
-					d.gPending = false
+				fired, cmd := d.gTap.Check()
+				if fired {
 					d.viewport.GotoTop()
 					return d, nil
 				}
-				d.gPending = true
-				return d, tea.Tick(gTimeout, func(time.Time) tea.Msg {
-					return DetailGTimerExpiredMsg{}
-				})
+				return d, cmd
 			}
 		}
 	}
