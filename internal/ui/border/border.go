@@ -81,27 +81,37 @@ func RenderBorderBottom(keybinds []Keybind, width int, focused bool) string {
 	}
 
 	// ╰─ [e]dit  [k]ill ─...─╯
-	var kbParts []string
-	kbVisualWidth := 0
-	for i, kb := range keybinds {
-		rendered := RenderKeybind(kb)
-		kbParts = append(kbParts, rendered)
-		kbVisualWidth += KeybindWidth(kb)
-		if i < len(keybinds)-1 {
-			kbVisualWidth += 2 // "  " separator
-		}
-	}
-
-	// "─ " prefix + keybinds + " " suffix
+	// "─ " prefix (2) + keybinds + " " suffix pad (1) must fit within innerWidth.
+	// Build incrementally so keybinds that overflow the panel are simply dropped.
 	prefixWidth := 2
 	suffixPadWidth := 1
-	usedWidth := prefixWidth + kbVisualWidth + suffixPadWidth
-	fillWidth := innerWidth - usedWidth
+	maxKbWidth := innerWidth - prefixWidth - suffixPadWidth
+	if maxKbWidth < 0 {
+		maxKbWidth = 0
+	}
+
+	var kbParts []string
+	usedWidth := 0
+	for _, kb := range keybinds {
+		rendered := RenderKeybind(kb)
+		kbW := lipgloss.Width(rendered)
+		sepW := 0
+		if len(kbParts) > 0 {
+			sepW = 2 // "  " separator
+		}
+		if usedWidth+sepW+kbW > maxKbWidth {
+			break
+		}
+		kbParts = append(kbParts, rendered)
+		usedWidth += sepW + kbW
+	}
+
+	kbStr := strings.Join(kbParts, "  ")
+	fillWidth := maxKbWidth - usedWidth
 	if fillWidth < 0 {
 		fillWidth = 0
 	}
 
-	kbStr := strings.Join(kbParts, "  ")
 	return bs.Render(cornerBL+horizBar+" ") +
 		kbStr +
 		bs.Render(" "+strings.Repeat(horizBar, fillWidth)+cornerBR)

@@ -96,6 +96,34 @@ func TestRenderBorderBottomWithKeybinds(t *testing.T) {
 	}
 }
 
+func TestRenderBorderBottomUnicodeKeybind(t *testing.T) {
+	// ⏎ is a 3-byte UTF-8 char with visual width 1; must not cause overflow.
+	kbs := []Keybind{
+		{Key: "⏎", Label: " fullscreen"},
+	}
+	got := RenderBorderBottom(kbs, 24, true)
+	w := visibleWidth(got)
+	if w != 24 {
+		t.Errorf("RenderBorderBottom unicode keybind: width %d, want 24", w)
+	}
+}
+
+func TestRenderBorderBottomKeybindOverflow(t *testing.T) {
+	// Detail-panel keybinds (58 visual chars) in a 24-wide panel — must not overflow.
+	kbs := []Keybind{
+		{Key: "⏎", Label: " fullscreen"},
+		{Key: "j/k", Label: " scroll"},
+		{Key: "G", Label: " bottom"},
+		{Key: "g", Label: "g top"},
+		{Key: "y", Label: "ank"},
+	}
+	got := RenderBorderBottom(kbs, 24, true)
+	w := visibleWidth(got)
+	if w != 24 {
+		t.Errorf("RenderBorderBottom overflow: width %d, want 24", w)
+	}
+}
+
 func TestRenderBorderSides(t *testing.T) {
 	content := "hello\nworld"
 	got := RenderBorderSides(content, 12, false)

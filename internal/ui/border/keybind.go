@@ -19,7 +19,7 @@ func RenderKeybind(kb Keybind) string {
 }
 
 // KeybindWidth returns the display width of a rendered keybind (without ANSI).
-// Format is [key]label, so width = 2 + len(key) + len(label)
+// Uses lipgloss.Width so multi-byte Unicode keys are measured correctly.
 func KeybindWidth(kb Keybind) int {
-	return 2 + len(kb.Key) + len(kb.Label)
+	return lipgloss.Width(RenderKeybind(kb))
 }
