@@ -30,13 +30,13 @@ agent = "build"
 skills = ["route"]
 
 [workflows.build]
-skills = ["build", "test"]
+skills = ["build"]
 
 [workflows.plan-build]
-skills = ["spec", "build", "test", "review"]
+skills = ["spec", "build", "review"]
 
 [workflows.sdlc]
-skills = ["spec", "decompose", "build", "test", "review", "document"]
+skills = ["spec", "decompose", "build", "review", "document"]
 
 # quick-fix is a built-in mode: sends the prompt directly to the model
 # without skill wrapping, then commits. No skills configuration needed.

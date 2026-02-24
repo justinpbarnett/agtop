@@ -121,7 +121,7 @@ Each mini-spec at `specs/subtasks/{task_id}/{sub_task_id}.md` must contain:
 
 ## Validation
 
-NOTE: These commands are run by the **test skill**, not the build skill. The build skill should only compile-check.
+The build skill runs these commands as its final validation step before reporting.
 
 {Specific validation criteria for this sub-task — what commands to run, what to check}
 ```
