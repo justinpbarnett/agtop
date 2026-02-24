@@ -82,6 +82,7 @@ type App struct {
 	lastSyncedRunID string
 	updateRepo      string
 	fullscreenPanel int // -1 = normal layout, panelDetail/panelLogView = fullscreen
+	runStates       map[string]run.State // tracks previous run states to detect transitions
 }
 
 func NewApp(cfg *config.Config) App {
@@ -210,6 +211,13 @@ func NewApp(cfg *config.Config) App {
 		}
 	}
 
+	// Pre-seed run states from any rehydrated runs so we don't flash for
+	// failures that already existed before this session started.
+	runStates := make(map[string]run.State)
+	for _, r := range store.List() {
+		runStates[r.ID] = r.State
+	}
+
 	rl := panels.NewRunList(store)
 	rl.SetFocused(true)
 	lv := panels.NewLogView()
@@ -243,6 +251,7 @@ func NewApp(cfg *config.Config) App {
 		statusBar:       panels.NewStatusBar(store),
 		keys:            DefaultKeyMap(),
 		fullscreenPanel: -1,
+		runStates:       runStates,
 	}
 
 	if !config.LocalConfigExists() {
@@ -333,6 +342,19 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		diffCmd := a.syncSelection()
 		a.autoStartDevServers()
 		cmds := []tea.Cmd{cmd, diffCmd, listenForChanges(a.store.Changes())}
+		// Detect runs that newly transitioned to failed and surface a flash.
+		for _, r := range a.store.List() {
+			prev, seen := a.runStates[r.ID]
+			if r.State == run.StateFailed && seen && prev != run.StateFailed {
+				errMsg := r.Error
+				if errMsg == "" {
+					errMsg = "unknown error"
+				}
+				a.statusBar.SetFlashWithLevel(fmt.Sprintf("Run %s failed: %s", r.ID, errMsg), panels.FlashError)
+				cmds = append(cmds, flashClearCmd())
+			}
+			a.runStates[r.ID] = r.State
+		}
 		return a, tea.Batch(cmds...)
 
 	case SubmitNewRunMsg:
