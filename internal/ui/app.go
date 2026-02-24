@@ -577,6 +577,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "x":
 			return a.handleReject()
 		case " ":
+			if a.focusedPanel == panelLogView {
+				return a.routeKey(msg)
+			}
 			return a.handleTogglePause()
 		case "r":
 			return a.handleRestart()
