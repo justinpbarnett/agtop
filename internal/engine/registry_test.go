@@ -539,6 +539,177 @@ Build content.
 	}
 }
 
+func TestRegistryIgnoreSkill(t *testing.T) {
+	tmp := t.TempDir()
+
+	// claude/skills has a "build" skill (priority 1)
+	claudeDir := filepath.Join(tmp, ".claude", "skills")
+	writeSkillFile(t, claudeDir, "build", `---
+name: build
+description: claude build
+---
+
+Claude build.
+`)
+	// claude/skills also has an unrelated skill that should still load
+	writeSkillFile(t, claudeDir, "deploy", `---
+name: deploy
+description: claude deploy
+---
+
+Claude deploy.
+`)
+
+	cfg := testConfig()
+	cfg.Skills["build"] = config.SkillConfig{Ignore: true}
+
+	reg := NewRegistry(cfg)
+	if err := reg.Load(tmp, nil); err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+
+	// "build" from .claude/skills should be ignored
+	if _, ok := reg.Get("build"); ok {
+		t.Error("expected 'build' from .claude/skills to be ignored, but it was loaded")
+	}
+
+	// "deploy" from .claude/skills is not ignored — should still load
+	s, ok := reg.Get("deploy")
+	if !ok {
+		t.Fatal("expected 'deploy' to still load (not ignored)")
+	}
+	if s.Description != "claude deploy" {
+		t.Errorf("deploy.Description = %q, want %q", s.Description, "claude deploy")
+	}
+}
+
+func TestRegistryIgnoreSkillAgtopSourceNotFiltered(t *testing.T) {
+	tmp := t.TempDir()
+
+	// .agtop/skills has "build" (priority 0 — always allowed when ignore=true)
+	agtopDir := filepath.Join(tmp, ".agtop", "skills")
+	writeSkillFile(t, agtopDir, "build", `---
+name: build
+description: agtop build
+---
+
+Agtop build.
+`)
+
+	// .claude/skills also has "build" but with lower priority
+	claudeDir := filepath.Join(tmp, ".claude", "skills")
+	writeSkillFile(t, claudeDir, "build", `---
+name: build
+description: claude build
+---
+
+Claude build.
+`)
+
+	cfg := testConfig()
+	cfg.Skills["build"] = config.SkillConfig{Ignore: true}
+
+	reg := NewRegistry(cfg)
+	if err := reg.Load(tmp, nil); err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+
+	// .agtop/skills version should win (ignore=true never blocks agtop/builtin)
+	s, ok := reg.Get("build")
+	if !ok {
+		t.Fatal("expected 'build' from .agtop/skills to be loaded")
+	}
+	if s.Description != "agtop build" {
+		t.Errorf("build.Description = %q, want %q (agtop should survive ignore)", s.Description, "agtop build")
+	}
+	if s.Priority != PriorityProjectAgtop {
+		t.Errorf("build.Priority = %d, want %d", s.Priority, PriorityProjectAgtop)
+	}
+}
+
+func TestRegistryIgnoreSkillNoFallback(t *testing.T) {
+	tmp := t.TempDir()
+
+	// "custom" only exists in .claude/skills — no agtop/builtin version
+	claudeDir := filepath.Join(tmp, ".claude", "skills")
+	writeSkillFile(t, claudeDir, "custom", `---
+name: custom
+description: custom skill
+---
+
+Custom.
+`)
+
+	cfg := testConfig()
+	cfg.Skills["custom"] = config.SkillConfig{Ignore: true}
+
+	reg := NewRegistry(cfg)
+	if err := reg.Load(tmp, nil); err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+
+	// No fallback — skill should be absent entirely
+	if _, ok := reg.Get("custom"); ok {
+		t.Error("expected 'custom' to be absent (ignored with no fallback)")
+	}
+}
+
+func TestRegistryIgnoreSource(t *testing.T) {
+	tmp := t.TempDir()
+
+	// .claude/skills (project-claude) — should be ignored
+	claudeDir := filepath.Join(tmp, ".claude", "skills")
+	writeSkillFile(t, claudeDir, "build", `---
+name: build
+description: claude build
+---
+
+Claude build.
+`)
+	writeSkillFile(t, claudeDir, "test", `---
+name: test
+description: claude test
+---
+
+Claude test.
+`)
+
+	// .agtop/skills (project-agtop) — should still load
+	agtopDir := filepath.Join(tmp, ".agtop", "skills")
+	writeSkillFile(t, agtopDir, "deploy", `---
+name: deploy
+description: agtop deploy
+---
+
+Agtop deploy.
+`)
+
+	cfg := testConfig()
+	cfg.Project.IgnoreSkillSources = []string{"project-claude"}
+
+	reg := NewRegistry(cfg)
+	if err := reg.Load(tmp, nil); err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+
+	// All .claude/skills should be filtered
+	if _, ok := reg.Get("build"); ok {
+		t.Error("expected 'build' from project-claude to be ignored")
+	}
+	if _, ok := reg.Get("test"); ok {
+		t.Error("expected 'test' from project-claude to be ignored")
+	}
+
+	// .agtop/skills should still load
+	s, ok := reg.Get("deploy")
+	if !ok {
+		t.Fatal("expected 'deploy' from .agtop/skills to be loaded")
+	}
+	if s.Description != "agtop deploy" {
+		t.Errorf("deploy.Description = %q, want %q", s.Description, "agtop deploy")
+	}
+}
+
 func TestRegistrySkillForRunOpenCodeFallsBackToRuntimeDefault(t *testing.T) {
 	tmp := t.TempDir()
 	skillsDir := filepath.Join(tmp, ".agtop", "skills")

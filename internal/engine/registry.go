@@ -74,6 +74,28 @@ func (r *Registry) Load(projectRoot string, builtInFS fs.FS) error {
 	return nil
 }
 
+func (r *Registry) shouldIgnore(name string, priority int) bool {
+	// Per-skill ignore: skip external sources for this skill name
+	if sc, ok := r.cfg.Skills[name]; ok && sc.Ignore {
+		switch priority {
+		case PriorityProjectAgtop, PriorityUserAgtop, PriorityBuiltIn:
+			// Always allow agtop and built-in sources
+		default:
+			return true
+		}
+	}
+
+	// Source-level ignore: skip all skills from this source category
+	label := PriorityLabel(priority)
+	for _, src := range r.cfg.Project.IgnoreSkillSources {
+		if src == label {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (r *Registry) loadFromDir(dir string, priority int) {
 	pattern := filepath.Join(dir, "*", "SKILL.md")
 	matches, err := filepath.Glob(pattern)
@@ -85,6 +107,9 @@ func (r *Registry) loadFromDir(dir string, priority int) {
 		skill, err := ParseSkillFile(path, priority)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: skipping %s: %v\n", path, err)
+			continue
+		}
+		if r.shouldIgnore(skill.Name, priority) {
 			continue
 		}
 		r.skills[skill.Name] = skill
@@ -108,6 +133,9 @@ func (r *Registry) loadFromFS(fsys fs.FS, priority int) {
 		skill, err := ParseSkill(data, "builtin://"+entry.Name()+"/SKILL.md", priority)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: skipping embedded skill %s: %v\n", entry.Name(), err)
+			continue
+		}
+		if r.shouldIgnore(skill.Name, priority) {
 			continue
 		}
 		r.skills[skill.Name] = skill
