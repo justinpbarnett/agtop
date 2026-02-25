@@ -4,6 +4,7 @@
 name = "my-project"
 root = "."
 test_command = "npm test"
+# worktree_path = ".agtop/worktrees"  # Where agtop creates git worktrees (default: <root>/.agtop/worktrees). Supports ~, absolute, and relative paths.
 # ignore_skill_sources = ["project-claude"]  # Ignore all skills from .claude/skills/
 
 [project.dev_server]

@@ -145,7 +145,7 @@ func NewApp(cfg *config.Config) App {
 		pl = engine.NewPipeline(exec, store, &cfg.Merge, projectRoot)
 	}
 
-	wt := gitpkg.NewWorktreeManager(projectRoot)
+	wt := gitpkg.NewWorktreeManagerAt(projectRoot, cfg.Project.WorktreePath)
 	dg := gitpkg.NewDiffGenerator(projectRoot)
 	ds := server.NewDevServerManager(cfg.Project.DevServer)
 

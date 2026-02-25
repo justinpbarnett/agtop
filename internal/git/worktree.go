@@ -12,6 +12,21 @@ import (
 	"github.com/justinpbarnett/agtop/internal/config"
 )
 
+func resolveWorktreeDir(repoRoot, worktreePath string) string {
+	if worktreePath == "" {
+		return filepath.Join(repoRoot, ".agtop", "worktrees")
+	}
+	if strings.HasPrefix(worktreePath, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			worktreePath = filepath.Join(home, worktreePath[2:])
+		}
+	}
+	if filepath.IsAbs(worktreePath) {
+		return worktreePath
+	}
+	return filepath.Join(repoRoot, worktreePath)
+}
+
 type WorktreeInfo struct {
 	Path   string
 	Branch string
@@ -33,9 +48,13 @@ type WorktreeManager struct {
 }
 
 func NewWorktreeManager(repoRoot string) *WorktreeManager {
+	return NewWorktreeManagerAt(repoRoot, "")
+}
+
+func NewWorktreeManagerAt(repoRoot, worktreePath string) *WorktreeManager {
 	return &WorktreeManager{
 		repoRoot:    repoRoot,
-		worktreeDir: filepath.Join(repoRoot, ".agtop", "worktrees"),
+		worktreeDir: resolveWorktreeDir(repoRoot, worktreePath),
 	}
 }
 

@@ -33,7 +33,7 @@ func runCleanup(cfg *config.Config, dryRun bool) error {
 		return fmt.Errorf("load sessions: %w", err)
 	}
 
-	wt := gitpkg.NewWorktreeManager(projectRoot)
+	wt := gitpkg.NewWorktreeManagerAt(projectRoot, cfg.Project.WorktreePath)
 
 	now := time.Now()
 	removedSessions := 0
