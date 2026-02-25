@@ -29,13 +29,35 @@ One of: [Claude Code](https://github.com/anthropics/claude-code) or [OpenCode](h
 
 ### Install
 
-**Download a pre-built binary** (Linux and macOS, amd64/arm64):
+**Download a pre-built binary:**
 
+macOS (Apple Silicon):
 ```bash
-# macOS/Linux via curl — replace VERSION and ARCH as needed
-curl -L https://github.com/justinpbarnett/agtop/releases/latest/download/agtop_VERSION_linux_amd64.tar.gz | tar xz
-mv agtop /usr/local/bin/
+curl -LO https://github.com/justinpbarnett/agtop/releases/latest/download/agtop_VERSION_darwin_arm64.zip
+unzip agtop_VERSION_darwin_arm64.zip
+sudo mv agtop /usr/local/bin/
 ```
+
+macOS (Intel):
+```bash
+curl -LO https://github.com/justinpbarnett/agtop/releases/latest/download/agtop_VERSION_darwin_amd64.zip
+unzip agtop_VERSION_darwin_amd64.zip
+sudo mv agtop /usr/local/bin/
+```
+
+Linux (amd64):
+```bash
+curl -L https://github.com/justinpbarnett/agtop/releases/latest/download/agtop_VERSION_linux_amd64.tar.gz | tar xz
+sudo mv agtop /usr/local/bin/
+```
+
+Linux (arm64):
+```bash
+curl -L https://github.com/justinpbarnett/agtop/releases/latest/download/agtop_VERSION_linux_arm64.tar.gz | tar xz
+sudo mv agtop /usr/local/bin/
+```
+
+Replace `VERSION` with the latest release version (e.g., `0.1.4`).
 
 Pre-built archives for all supported platforms are available on the [Releases](https://github.com/justinpbarnett/agtop/releases) page.
 
