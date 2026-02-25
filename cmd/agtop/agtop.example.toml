@@ -4,6 +4,7 @@
 name = "my-project"
 root = "."
 test_command = "npm test"
+# ignore_skill_sources = ["project-claude"]  # Ignore all skills from .claude/skills/
 
 [project.dev_server]
 command = "npm run dev"
@@ -41,7 +42,7 @@ skills = ["spec", "decompose", "build", "test", "review", "document"]
 
 [skills.route]
 model = "haiku"
-timeout = 60
+timeout = 600
 
 [skills.spec]
 model = "opus"
@@ -51,12 +52,12 @@ model = "opus"
 
 [skills.build]
 model = "sonnet"
-timeout = 300
+timeout = 3600
 parallel = true
 
 [skills.test]
 model = "sonnet"
-timeout = 120
+timeout = 1800
 
 [skills.review]
 model = "opus"
@@ -66,11 +67,12 @@ model = "haiku"
 
 [skills.commit]
 model = "haiku"
-timeout = 30
+timeout = 1200
+# ignore = true   # Skip external versions; use agtop built-in instead
 
 [skills.pr]
 model = "haiku"
-timeout = 30
+timeout = 600
 
 [merge]
 target_branch = "main"     # branch to merge into (default: repo default branch)
@@ -96,6 +98,7 @@ max_tokens_per_run = 500000
 max_cost_per_run = 50.00
 max_concurrent_runs = 5
 rate_limit_backoff = 60    # Seconds
+rate_limit_max_retries = 3
 
 [ui]
 theme = "default"
@@ -106,6 +109,19 @@ log_scroll_speed = 5
 [update]
 auto_check = true                    # check for updates on startup
 repo = "justinpbarnett/agtop"       # GitHub owner/repo for release checks
+
+# ── Multi-Repo (Poly-Repo) ────────────────────────────────────
+# For projects with multiple independent git repos in subdirectories.
+# When configured, agtop creates a worktree per sub-repo instead of
+# one worktree for the root. PRs are created per sub-repo.
+#
+# [[repos]]
+# name = "client"
+# path = "app/client"
+#
+# [[repos]]
+# name = "server"
+# path = "app/server"
 
 # [integrations.jira]
 # base_url = "https://yourcompany.atlassian.net"
