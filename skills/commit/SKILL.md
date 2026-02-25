@@ -21,6 +21,23 @@ This skill requires no additional input.
 
 ## Instructions
 
+### Step 0: Detect Repo Topology
+
+First, determine whether this is a single-repo or multi-repo project:
+
+```bash
+git rev-parse --git-dir 2>/dev/null
+```
+
+- If this succeeds, you are in a **single-repo** project. Follow Steps 1-4 below as normal.
+- If this fails (not a git repo), scan for sub-repos:
+
+```bash
+find . -maxdepth 3 -name ".git" -type d 2>/dev/null
+```
+
+If multiple `.git` directories are found, you are in a **multi-repo** project. Run Steps 1-4 independently for each sub-repo that has changes, using `git -C <repo-path>` for all git commands. Report results grouped by sub-repo.
+
 ### Step 1: Check for Changes
 
 Run `git status --short` to see all changed and untracked files.

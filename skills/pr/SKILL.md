@@ -20,6 +20,23 @@ Creates a GitHub pull request from the current branch by analyzing commits again
 
 ## Instructions
 
+### Step 0: Detect Repo Topology
+
+First, determine whether this is a single-repo or multi-repo project:
+
+```bash
+git rev-parse --git-dir 2>/dev/null
+```
+
+- If this succeeds, you are in a **single-repo** project. Follow Steps 1-6 below.
+- If this fails (not a git repo), scan for sub-repos by checking for `.git` directories in subdirectories:
+
+```bash
+find . -maxdepth 3 -name ".git" -type d 2>/dev/null
+```
+
+If multiple `.git` directories are found in subdirectories, you are in a **multi-repo** project. Follow the "Multi-Repo" instructions at the end of this section.
+
 ### Step 1: Determine the Base Branch
 
 Identify the default branch:
@@ -106,14 +123,87 @@ EOF
 
 Print the PR URL returned by `gh pr create`.
 
+---
+
+### Multi-Repo Instructions
+
+When the working directory is NOT a git repo but contains subdirectories that ARE git repos, follow these steps instead:
+
+#### Step M1: Discover Sub-Repos
+
+Find all sub-repos with `.git` directories:
+
+```bash
+find . -maxdepth 3 -name ".git" -type d 2>/dev/null
+```
+
+For each discovered sub-repo directory, check its branch and commit status.
+
+#### Step M2: Validate Each Sub-Repo
+
+For each sub-repo, run these checks:
+
+```bash
+git -C <repo-path> branch --show-current
+git -C <repo-path> status --short
+git -C <repo-path> fetch origin main
+git -C <repo-path> log origin/main..HEAD --oneline
+```
+
+- If on `main` or `master`, skip this sub-repo (nothing to PR).
+- If there are uncommitted changes, stop and tell the user to commit first.
+- If no commits ahead of `origin/main`, skip this sub-repo.
+
+If **no sub-repo** has a feature branch with changes, stop and tell the user there is nothing to PR.
+
+#### Step M3: Generate Shared PR Content
+
+Collect commit logs from all sub-repos that have changes and generate a **single shared title** for consistency across all PRs:
+
+**Title:** Derive from the combined commit history across all sub-repos. Keep under 70 characters.
+
+- Use the same title for all sub-repo PRs
+- Do not mention AI, Claude, or automated tooling in the title
+- Match conventional commit style when appropriate
+
+**Body:** Generate per sub-repo, but use similar structure.
+
+#### Step M4: Push and Create PRs
+
+For each sub-repo with changes:
+
+```bash
+git -C <repo-path> push -u origin <branch-name>
+cd <repo-path> && gh pr create --title "<shared-title>" --body "$(cat <<'EOF'
+## Summary
+
+- bullet points here
+EOF
+)"
+```
+
+Note: `gh pr create` must be run from within the repo directory since `gh` does not support a `-C` flag.
+
+#### Step M5: Report
+
+Print all PR URLs grouped by sub-repo:
+
+```
+Pull requests created:
+
+[<sub-repo-name>] <PR URL>
+[<sub-repo-name>] <PR URL>
+```
+
 ## Workflow
 
-1. **Base branch** — Detect the default branch (main/master/etc.)
-2. **Validate** — Confirm feature branch, no uncommitted changes, commits ahead of base
-3. **Gather** — Fetch latest base, collect commit log, read spec if provided
-4. **Generate** — Create conventional title and structured body
-5. **Push** — Push branch to origin with tracking, create PR
-6. **Report** — Return the PR URL
+1. **Detect** — Determine single-repo or multi-repo topology
+2. **Base branch** — Detect the default branch (main/master/etc.)
+3. **Validate** — Confirm feature branch, no uncommitted changes, commits ahead of base
+4. **Gather** — Fetch latest base, collect commit log, read spec if provided
+5. **Generate** — Create conventional title and structured body
+6. **Push** — Push branch to origin with tracking, create PR(s)
+7. **Report** — Return the PR URL(s)
 
 ## Cookbook
 
@@ -124,7 +214,7 @@ Print the PR URL returned by `gh pr create`.
 <Then: tell the user to run `gh auth login` and follow the prompts>
 
 <If: a PR already exists for this branch>
-<Then: run `gh pr view --web` to open the existing PR instead of creating a duplicate>
+<Then: run `gh pr view --web` (or `cd <repo-path> && gh pr view --web` for multi-repo) to open the existing PR instead of creating a duplicate>
 
 <If: branch has no commits ahead of the base branch>
 <Then: tell the user there are no changes to PR and check if work was done on a different branch>
@@ -132,9 +222,15 @@ Print the PR URL returned by `gh pr create`.
 <If: invoked with a spec path>
 <Then: use the spec to write better summary bullets but don't paste the entire spec into the body>
 
+<If: multi-repo and only one sub-repo has changes>
+<Then: create a PR for just that sub-repo — don't error about the others>
+
+<If: multi-repo and sub-repos share the same branch name>
+<Then: use the same PR title for consistency across all sub-repo PRs>
+
 ## Validation
 
-Before creating the PR:
+Before creating each PR:
 
 - Branch is not the default branch (main/master/etc.)
 - No uncommitted changes exist
@@ -142,6 +238,7 @@ Before creating the PR:
 - `gh auth status` succeeds (user is authenticated)
 - Title is under 70 characters
 - Title does not mention "claude", "ai", "automated", or "copilot"
+- For multi-repo: all git commands use `-C <repo-path>` to target the correct repository
 
 ## Examples
 
@@ -170,3 +267,23 @@ Before creating the PR:
 3. Generate richer PR body incorporating spec details
 4. Push and create PR
 5. Report URL
+
+### Example 3: Multi-Repo PR
+
+**User says:** "create a pr"
+
+**Discovery:** `app/server` on `agtop/001`, `app/client` on `agtop/001`, root is not a git repo.
+
+**Actions:**
+
+1. Both sub-repos on feature branches with commits ahead
+2. Generate shared title: "feat: add attendee management"
+3. Push and create PR for `app/server`
+4. Push and create PR for `app/client` (same title)
+5. Report:
+   ```
+   Pull requests created:
+
+   [app/server] https://github.com/org/server-repo/pull/88
+   [app/client] https://github.com/org/client-repo/pull/43
+   ```

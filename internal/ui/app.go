@@ -407,19 +407,41 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			runID := a.store.Add(newRun)
 
-			wtPath, branch, err := a.worktrees.Create(runID)
-			if err != nil {
+			if len(a.config.Repos) > 0 {
+				result, err := a.worktrees.CreateMulti(runID, a.config.Repos)
+				if err != nil {
+					a.store.Update(runID, func(r *run.Run) {
+						r.State = run.StateFailed
+						r.Error = fmt.Sprintf("worktree create: %v", err)
+					})
+					return a, nil
+				}
 				a.store.Update(runID, func(r *run.Run) {
-					r.State = run.StateFailed
-					r.Error = fmt.Sprintf("worktree create: %v", err)
+					r.Worktree = result.RootPath
+					r.Branch = result.Branch
+					r.SubWorktrees = make([]run.SubWorktreeInfo, len(result.SubWorktrees))
+					for i, sw := range result.SubWorktrees {
+						r.SubWorktrees[i] = run.SubWorktreeInfo{
+							Name:     sw.Name,
+							Path:     sw.Path,
+							RepoRoot: sw.RepoRoot,
+						}
+					}
 				})
-				return a, nil
+			} else {
+				wtPath, branch, err := a.worktrees.Create(runID)
+				if err != nil {
+					a.store.Update(runID, func(r *run.Run) {
+						r.State = run.StateFailed
+						r.Error = fmt.Sprintf("worktree create: %v", err)
+					})
+					return a, nil
+				}
+				a.store.Update(runID, func(r *run.Run) {
+					r.Worktree = wtPath
+					r.Branch = branch
+				})
 			}
-
-			a.store.Update(runID, func(r *run.Run) {
-				r.Worktree = wtPath
-				r.Branch = branch
-			})
 
 			a.executor.Execute(runID, msg.Workflow, msg.Prompt)
 		}
@@ -867,7 +889,7 @@ func (a *App) syncSelection() tea.Cmd {
 
 		if selected.Worktree != "" {
 			a.logView.SetDiffLoading()
-			return a.fetchDiff(selected.ID, selected.Worktree)
+			return a.fetchDiff(selected.ID, selected.Worktree, selected.SubWorktrees)
 		}
 		if selected.State == run.StateQueued || selected.State == run.StateRouting {
 			a.logView.SetDiffWaiting()
@@ -882,9 +904,27 @@ func (a *App) syncSelection() tea.Cmd {
 	return nil
 }
 
-func (a *App) fetchDiff(runID, worktreeDir string) tea.Cmd {
+func (a *App) fetchDiff(runID, worktreeDir string, subWorktrees []run.SubWorktreeInfo) tea.Cmd {
 	dg := a.diffGen
 	return func() tea.Msg {
+		if len(subWorktrees) > 0 {
+			var allDiff, allStat strings.Builder
+			for _, sw := range subWorktrees {
+				diff, err := dg.Diff(sw.Path)
+				if err != nil {
+					continue
+				}
+				if diff != "" {
+					fmt.Fprintf(&allDiff, "── %s ──\n%s\n", sw.Name, diff)
+				}
+				stat, _ := dg.DiffStat(sw.Path)
+				if stat != "" {
+					fmt.Fprintf(&allStat, "── %s ──\n%s\n", sw.Name, stat)
+				}
+			}
+			return DiffResultMsg{RunID: runID, Diff: allDiff.String(), DiffStat: allStat.String()}
+		}
+
 		diff, err := dg.Diff(worktreeDir)
 		if err != nil {
 			return DiffResultMsg{RunID: runID, Err: err}
@@ -958,17 +998,30 @@ func (a App) handleAccept() (tea.Model, tea.Cmd) {
 	// Legacy flow: merge locally then clean up
 	a.store.Update(runID, func(r *run.Run) { r.State = run.StateAccepted })
 
+	repos := a.config.Repos
 	goldenCmd := a.config.Merge.GoldenUpdateCommand
 	go func() {
-		_, err := a.worktrees.MergeWithOptions(runID, gitpkg.MergeOptions{
-			GoldenUpdateCommand: goldenCmd,
-		})
-		if err != nil {
-			a.store.Update(runID, func(r *run.Run) {
-				r.State = run.StateFailed
-				r.Error = fmt.Sprintf("merge failed: %v", err)
+		if len(repos) > 0 {
+			if err := a.worktrees.MergeMulti(runID, repos, gitpkg.MergeOptions{
+				GoldenUpdateCommand: goldenCmd,
+			}); err != nil {
+				a.store.Update(runID, func(r *run.Run) {
+					r.State = run.StateFailed
+					r.Error = fmt.Sprintf("merge failed: %v", err)
+				})
+				return
+			}
+		} else {
+			_, err := a.worktrees.MergeWithOptions(runID, gitpkg.MergeOptions{
+				GoldenUpdateCommand: goldenCmd,
 			})
-			return
+			if err != nil {
+				a.store.Update(runID, func(r *run.Run) {
+					r.State = run.StateFailed
+					r.Error = fmt.Sprintf("merge failed: %v", err)
+				})
+				return
+			}
 		}
 		a.cleanupRun(runID)
 	}()
@@ -996,9 +1049,14 @@ func (a App) handleReject() (tea.Model, tea.Cmd) {
 
 	_ = a.devServers.Stop(runID)
 	worktrees := a.worktrees
+	repos := a.config.Repos
 	store := a.store
 	go func() {
-		_ = worktrees.Remove(runID)
+		if len(repos) > 0 {
+			_ = worktrees.RemoveMulti(runID, repos)
+		} else {
+			_ = worktrees.Remove(runID)
+		}
 		store.Update(runID, func(r *run.Run) { r.Worktree = "" })
 	}()
 
@@ -1170,8 +1228,13 @@ func (a App) cleanupRun(runID string) {
 	_ = a.devServers.Stop(runID)
 	a.store.Remove(runID)
 
+	repos := a.config.Repos
 	go func() {
-		_ = a.worktrees.Remove(runID)
+		if len(repos) > 0 {
+			_ = a.worktrees.RemoveMulti(runID, repos)
+		} else {
+			_ = a.worktrees.Remove(runID)
+		}
 		if a.persistence != nil {
 			_ = a.persistence.Remove(runID)
 		}
