@@ -49,7 +49,6 @@ type StartRunMsg struct {
 	Prompt   string
 	Workflow string
 	Model    string
-	TaskID   string
 }
 
 type App struct {
@@ -63,7 +62,6 @@ type App struct {
 	devServers     *server.DevServerManager
 	diffGen        *gitpkg.DiffGenerator
 	persistence    *run.Persistence
-	jiraExpander   *jira.Expander
 	pidWatchCancel func()
 	width          int
 	height         int
@@ -211,6 +209,9 @@ func NewApp(cfg *config.Config) App {
 			jiraExp = jira.NewExpander(jiraClient, cfg.Integrations.Jira.ProjectKey)
 		}
 	}
+	if exec != nil && jiraExp != nil {
+		exec.SetJIRAExpander(jiraExp)
+	}
 
 	// Pre-seed run states from any rehydrated runs so we don't flash for
 	// failures that already existed before this session started.
@@ -244,7 +245,6 @@ func NewApp(cfg *config.Config) App {
 		diffGen:         dg,
 		devServers:      ds,
 		persistence:     persist,
-		jiraExpander:    jiraExp,
 		pidWatchCancel:  pidWatchCancel,
 		runList:         rl,
 		logView:         lv,
@@ -361,19 +361,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(cmds...)
 
 	case SubmitNewRunMsg:
-		expander := a.jiraExpander
 		return a, func() tea.Msg {
 			prompt := msg.Prompt
-			taskID := ""
-			if expander != nil {
-				expanded, tid, err := expander.Expand(prompt)
-				if err != nil {
-					log.Printf("warning: %v", err)
-				} else {
-					prompt = expanded
-					taskID = tid
-				}
-			}
 			if len(msg.Images) > 0 {
 				var sb strings.Builder
 				sb.WriteString(prompt)
@@ -389,7 +378,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Prompt:   prompt,
 				Workflow: msg.Workflow,
 				Model:    msg.Model,
-				TaskID:   taskID,
 			}
 		}
 
@@ -398,7 +386,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			newRun := &run.Run{
 				Workflow:  msg.Workflow,
 				Prompt:    msg.Prompt,
-				TaskID:    msg.TaskID,
 				State:     run.StateQueued,
 				CreatedAt: time.Now(),
 			}

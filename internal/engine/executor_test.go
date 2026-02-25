@@ -2,7 +2,11 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +16,7 @@ import (
 
 	"github.com/justinpbarnett/agtop/internal/config"
 	"github.com/justinpbarnett/agtop/internal/cost"
+	"github.com/justinpbarnett/agtop/internal/jira"
 	"github.com/justinpbarnett/agtop/internal/process"
 	"github.com/justinpbarnett/agtop/internal/run"
 	"github.com/justinpbarnett/agtop/internal/runtime"
@@ -571,6 +576,117 @@ func TestExecutorShutdownPreservesRunState(t *testing.T) {
 	r, _ = store.Get("001")
 	if r.State != run.StateRunning {
 		t.Errorf("expected StateRunning after shutdown, got %s", r.State)
+	}
+}
+
+// newJIRATestServer returns an httptest.Server that serves a minimal JIRA issue
+// response for the given key/summary/description, and 500 for the comment endpoint.
+func newJIRATestServer(key, summary, description string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/comment") {
+			w.Write([]byte(`{"comments":[]}`))
+			return
+		}
+		descADF, _ := json.Marshal(map[string]interface{}{
+			"type": "doc",
+			"content": []map[string]interface{}{
+				{
+					"type": "paragraph",
+					"content": []map[string]interface{}{
+						{"type": "text", "text": description},
+					},
+				},
+			},
+		})
+		resp := map[string]interface{}{
+			"key": key,
+			"fields": map[string]interface{}{
+				"summary":     summary,
+				"description": json.RawMessage(descADF),
+				"issuetype":   map[string]string{"name": "Story"},
+				"priority":    map[string]string{"name": "Medium"},
+				"status":      map[string]string{"name": "To Do"},
+				"labels":      []string{},
+			},
+		}
+		b, _ := json.Marshal(resp)
+		w.Write(b)
+	}))
+}
+
+func TestExecuteWithJIRAExpansion(t *testing.T) {
+	srv := newJIRATestServer("PROJ-42", "Fix the widget", "Widget is broken")
+	defer srv.Close()
+
+	rt, _ := completingRuntime()
+	exec, store := newTestExecutor(rt)
+
+	c := jira.NewClient(srv.URL, "user@test.com", "token")
+	exp := jira.NewExpander(c, "PROJ")
+	exec.SetJIRAExpander(exp)
+
+	store.Add(&run.Run{State: run.StateQueued, Prompt: "PROJ-42"})
+	exec.Execute("001", "build", "PROJ-42")
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		r, _ := store.Get("001")
+		if r.IsTerminal() {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	r, ok := store.Get("001")
+	if !ok {
+		t.Fatal("run not found")
+	}
+	if r.TaskID != "PROJ-42" {
+		t.Errorf("expected TaskID 'PROJ-42', got %q", r.TaskID)
+	}
+	if !strings.Contains(r.Prompt, "Fix the widget") {
+		t.Errorf("expected expanded prompt to contain issue summary, got: %s", r.Prompt)
+	}
+}
+
+func TestExecuteJIRAExpansionErrorFallsThrough(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, "Internal Server Error")
+	}))
+	defer srv.Close()
+
+	rt, _ := completingRuntime()
+	exec, store := newTestExecutor(rt)
+
+	c := jira.NewClient(srv.URL, "user@test.com", "token")
+	exp := jira.NewExpander(c, "PROJ")
+	exec.SetJIRAExpander(exp)
+
+	store.Add(&run.Run{State: run.StateQueued, Prompt: "PROJ-99"})
+	exec.Execute("001", "build", "PROJ-99")
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		r, _ := store.Get("001")
+		if r.IsTerminal() {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	r, ok := store.Get("001")
+	if !ok {
+		t.Fatal("run not found")
+	}
+	// Run should complete — expansion error does not fail the workflow
+	if r.State == run.StateFailed && strings.Contains(r.Error, "JIRA") {
+		t.Errorf("JIRA expansion error should not fail the run, got error: %s", r.Error)
+	}
+	// TaskID should remain unset since expansion failed
+	if r.TaskID != "" {
+		t.Errorf("expected empty TaskID on expansion error, got %q", r.TaskID)
 	}
 }
 

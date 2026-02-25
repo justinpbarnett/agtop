@@ -11,6 +11,7 @@ import (
 
 	"github.com/justinpbarnett/agtop/internal/config"
 	"github.com/justinpbarnett/agtop/internal/cost"
+	"github.com/justinpbarnett/agtop/internal/jira"
 	"github.com/justinpbarnett/agtop/internal/process"
 	"github.com/justinpbarnett/agtop/internal/run"
 	"github.com/justinpbarnett/agtop/internal/runtime"
@@ -22,10 +23,17 @@ type Executor struct {
 	registry     *Registry
 	cfg          *config.Config
 	limiter      *cost.LimitChecker
+	jiraExpander *jira.Expander
 	mu           sync.Mutex
 	active       map[string]context.CancelFunc
 	wg           sync.WaitGroup
 	shuttingDown bool
+}
+
+// SetJIRAExpander configures the JIRA expander used to expand issue keys in
+// prompts before workflow execution. Pass nil to disable expansion.
+func (e *Executor) SetJIRAExpander(exp *jira.Expander) {
+	e.jiraExpander = exp
 }
 
 func NewExecutor(store *run.Store, manager *process.Manager, registry *Registry, cfg *config.Config) *Executor {
@@ -69,9 +77,34 @@ func (e *Executor) spawnWorker(runID string, fn func(context.Context)) {
 	}()
 }
 
+// expandJIRA expands a JIRA issue key in the prompt. If the prompt contains a
+// recognized key and expansion succeeds, the run's Prompt and TaskID are updated
+// in the store and the expanded prompt is returned. On error or no match, the
+// original prompt is returned unchanged.
+func (e *Executor) expandJIRA(runID string, prompt string) string {
+	if e.jiraExpander == nil {
+		return prompt
+	}
+	expanded, taskID, err := e.jiraExpander.Expand(prompt)
+	if err != nil {
+		e.logToBuffer(runID, "", fmt.Sprintf("JIRA expansion failed: %v", err))
+		return prompt
+	}
+	if taskID == "" {
+		return prompt
+	}
+	e.logToBuffer(runID, "", fmt.Sprintf("Expanded JIRA issue %s", taskID))
+	e.store.Update(runID, func(r *run.Run) {
+		r.Prompt = expanded
+		r.TaskID = taskID
+	})
+	return expanded
+}
+
 // Execute runs a workflow for the given run. It spawns a goroutine
 // and communicates progress via the run store. Call Cancel() to stop.
 func (e *Executor) Execute(runID string, workflowName string, userPrompt string) {
+	userPrompt = e.expandJIRA(runID, userPrompt)
 	// quick-fix is a built-in mode: send the user prompt directly to the
 	// model (no skill wrapping) and commit afterward.
 	if workflowName == "quick-fix" {
