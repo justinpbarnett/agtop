@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/justinpbarnett/agtop/internal/config"
+	"github.com/justinpbarnett/agtop/internal/detect"
 	"github.com/justinpbarnett/agtop/internal/safety"
 )
 
-func runInit(cfg *config.Config) error {
+func runInit(cfg *config.Config, useAI bool) error {
 	engine, err := safety.NewHookEngine(cfg.Safety)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
@@ -53,13 +56,31 @@ func runInit(cfg *config.Config) error {
 	}
 	fmt.Printf("  updated %s (PreToolUse hook)\n", settingsPath)
 
-	// 4. Create agtop.toml if it doesn't exist
+	// 4. Create agtop.toml if it doesn't exist (with auto-detection)
 	if _, err := os.Stat("agtop.toml"); os.IsNotExist(err) {
-		// Prefer a local agtop.example.toml (e.g. in the agtop dev repo itself),
-		// fall back to the copy embedded in the binary.
-		content := defaultConfig
+		result, detectErr := detect.Detect(".")
+		if detectErr != nil {
+			fmt.Fprintf(os.Stderr, "  warning: detection failed: %v\n", detectErr)
+		}
+
+		if result != nil && useAI {
+			fmt.Println("  running AI analysis...")
+			result, _ = detect.DetectWithAI(".", result)
+			fmt.Println("  AI analysis complete")
+		}
+
+		if result != nil {
+			printDetected(result)
+		}
+
+		template := defaultConfig
 		if local, readErr := os.ReadFile("agtop.example.toml"); readErr == nil {
-			content = local
+			template = local
+		}
+
+		content := template
+		if result != nil {
+			content = renderConfig(template, result)
 		}
 		if writeErr := os.WriteFile("agtop.toml", content, 0o644); writeErr == nil {
 			fmt.Println("  created agtop.toml")
@@ -196,4 +217,82 @@ func appendUnique(base, add []interface{}) []interface{} {
 		}
 	}
 	return result
+}
+
+func printDetected(r *detect.Result) {
+	if r.ProjectName != "" {
+		fmt.Printf("  detected project name: %s\n", r.ProjectName)
+	}
+	if r.Runtime != "" {
+		fmt.Printf("  detected runtime: %s\n", r.Runtime)
+	}
+	if r.Language != "" {
+		fmt.Printf("  detected language: %s\n", r.Language)
+	}
+	if r.TestCommand != "" {
+		fmt.Printf("  detected test command: %s\n", r.TestCommand)
+	}
+	if r.DevServer != "" {
+		fmt.Printf("  detected dev server: %s\n", r.DevServer)
+	}
+	if len(r.Repos) > 0 {
+		fmt.Printf("  detected %d sub-repos:\n", len(r.Repos))
+		for _, repo := range r.Repos {
+			fmt.Printf("    %s (%s)\n", repo.Name, repo.Path)
+		}
+	}
+}
+
+var (
+	reProjectName = regexp.MustCompile(`(?m)^name = "my-project"`)
+	reTestCommand = regexp.MustCompile(`(?m)^test_command = "npm test"`)
+	reDevServer   = regexp.MustCompile(`(?m)^command = "npm run dev"`)
+	reRuntime     = regexp.MustCompile(`(?m)^default = "claude"(\s+#.*)?`)
+)
+
+func renderConfig(template []byte, r *detect.Result) []byte {
+	s := string(template)
+
+	if r.ProjectName != "" {
+		s = reProjectName.ReplaceAllString(s, fmt.Sprintf(`name = "%s"`, r.ProjectName))
+	}
+	if r.TestCommand != "" {
+		s = reTestCommand.ReplaceAllString(s, fmt.Sprintf(`test_command = "%s"`, r.TestCommand))
+	}
+	if r.DevServer != "" {
+		s = reDevServer.ReplaceAllString(s, fmt.Sprintf(`command = "%s"`, r.DevServer))
+	}
+	if r.Runtime != "" {
+		s = reRuntime.ReplaceAllString(s, fmt.Sprintf(`default = "%s"$1`, r.Runtime))
+	}
+
+	if len(r.Repos) > 0 {
+		var repoLines strings.Builder
+		repoLines.WriteString("\n")
+		for _, repo := range r.Repos {
+			repoLines.WriteString(fmt.Sprintf("[[repos]]\nname = \"%s\"\npath = \"%s\"\n\n", repo.Name, repo.Path))
+		}
+
+		commentedBlock := "# ── Multi-Repo (Poly-Repo) ────────────────────────────────────\n" +
+			"# For projects with multiple independent git repos in subdirectories.\n" +
+			"# When configured, agtop creates a worktree per sub-repo instead of\n" +
+			"# one worktree for the root. PRs are created per sub-repo.\n" +
+			"#\n" +
+			"# [[repos]]\n" +
+			"# name = \"client\"\n" +
+			"# path = \"app/client\"\n" +
+			"#\n" +
+			"# [[repos]]\n" +
+			"# name = \"server\"\n" +
+			"# path = \"app/server\""
+
+		replacement := "# ── Multi-Repo (Poly-Repo) ────────────────────────────────────\n" +
+			"# agtop creates a worktree per sub-repo instead of one for the root.\n" +
+			"# PRs are created per sub-repo." +
+			repoLines.String()
+
+		s = strings.Replace(s, commentedBlock, replacement, 1)
+	}
+
+	return []byte(s)
 }
