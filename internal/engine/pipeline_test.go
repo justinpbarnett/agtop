@@ -872,7 +872,7 @@ func TestResolveConflictsGoldenOnlyWithUpdateCommand(t *testing.T) {
 		Branch: "feat/golden-update",
 	})
 	cfg := &config.MergeConfig{
-		GoldenUpdateCommand: "echo -n regenerated > " + relGolden,
+		GoldenUpdateCommand: "printf '%s' 'regenerated' > " + relGolden,
 	}
 	p := NewPipeline(nil, store, cfg, repo)
 
