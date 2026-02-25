@@ -33,6 +33,7 @@ type JiraConfig struct {
 type ProjectConfig struct {
 	Name               string          `toml:"name"`
 	Root               string          `toml:"root"`
+	WorktreePath       string          `toml:"worktree_path"`
 	TestCommand        string          `toml:"test_command"`
 	DevServer          DevServerConfig `toml:"dev_server"`
 	IgnoreSkillSources []string        `toml:"ignore_skill_sources"`
