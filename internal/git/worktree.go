@@ -374,10 +374,16 @@ func (w *WorktreeManager) List() ([]WorktreeInfo, error) {
 		all = append(all, current)
 	}
 
-	// Filter to only agtop-managed worktrees
+	// Filter to only agtop-managed worktrees.
+	// Resolve symlinks so paths from "git worktree list" (which may return
+	// canonical paths like /private/var/... on macOS) match w.worktreeDir.
+	resolvedWorktreeDir := w.worktreeDir
+	if r, err := filepath.EvalSymlinks(w.worktreeDir); err == nil {
+		resolvedWorktreeDir = r
+	}
 	var filtered []WorktreeInfo
 	for _, wt := range all {
-		if strings.HasPrefix(wt.Path, w.worktreeDir) {
+		if strings.HasPrefix(wt.Path, w.worktreeDir) || strings.HasPrefix(wt.Path, resolvedWorktreeDir) {
 			filtered = append(filtered, wt)
 		}
 	}

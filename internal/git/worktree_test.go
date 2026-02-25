@@ -370,7 +370,7 @@ func TestWorktreeMergeGoldenUpdateCommand(t *testing.T) {
 	gitCommit(t, repo, "update golden in main")
 
 	// Use a golden update command that writes a known value to the golden file
-	updateCmd := fmt.Sprintf("echo -n 'regenerated' > '%s'", filepath.Join("internal", "ui", "testdata", "Test.golden"))
+	updateCmd := fmt.Sprintf("printf '%%s' 'regenerated' > '%s'", filepath.Join("internal", "ui", "testdata", "Test.golden"))
 
 	result, err := wm.MergeWithOptions("032", MergeOptions{GoldenUpdateCommand: updateCmd})
 	if err != nil {
@@ -410,7 +410,7 @@ func TestRunGoldenUpdate(t *testing.T) {
 	gitCommit(t, repo, "add data")
 
 	// RunGoldenUpdate with a command that modifies the file
-	err := wm.RunGoldenUpdate("echo -n 'updated' > data.txt")
+	err := wm.RunGoldenUpdate("printf '%s' 'updated' > data.txt")
 	if err != nil {
 		t.Fatalf("RunGoldenUpdate: %v", err)
 	}
