@@ -63,10 +63,13 @@ func runInit(cfg *config.Config, useAI bool) error {
 			fmt.Fprintf(os.Stderr, "  warning: detection failed: %v\n", detectErr)
 		}
 
-		if result != nil && useAI {
-			fmt.Println("  running AI analysis...")
-			result, _ = detect.DetectWithAI(".", result)
-			fmt.Println("  AI analysis complete")
+		if result != nil && useAI && result.NeedsAI() {
+			fmt.Println("  static detection incomplete, running AI analysis...")
+			aiResult, _ := detect.DetectWithAI(".", result)
+			if aiResult != result {
+				fmt.Println("  AI analysis complete")
+			}
+			result = aiResult
 		}
 
 		if result != nil {
@@ -286,12 +289,19 @@ func renderConfig(template []byte, r *detect.Result) []byte {
 			"# name = \"server\"\n" +
 			"# path = \"app/server\""
 
-		replacement := "# ── Multi-Repo (Poly-Repo) ────────────────────────────────────\n" +
-			"# agtop creates a worktree per sub-repo instead of one for the root.\n" +
-			"# PRs are created per sub-repo." +
+		replacement := "# ── Multi-Repo (Poly-Repo) ────────────────────────────────────" +
 			repoLines.String()
 
-		s = strings.Replace(s, commentedBlock, replacement, 1)
+		if strings.Contains(s, commentedBlock) {
+			s = strings.Replace(s, commentedBlock, replacement, 1)
+		} else {
+			// Template doesn't have the commented block — append before integrations or at end
+			if idx := strings.Index(s, "# [integrations"); idx >= 0 {
+				s = s[:idx] + replacement + "\n" + s[idx:]
+			} else {
+				s += "\n" + replacement
+			}
+		}
 	}
 
 	return []byte(s)

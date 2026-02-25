@@ -2,6 +2,7 @@ package detect
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -25,6 +26,11 @@ type Result struct {
 type RepoResult struct {
 	Name string
 	Path string
+}
+
+// NeedsAI reports whether static detection left gaps that AI could fill.
+func (r *Result) NeedsAI() bool {
+	return r.TestCommand == "" || r.DevServer == ""
 }
 
 func Detect(root string) (*Result, error) {
@@ -84,6 +90,9 @@ func detectTestCommand(root string) string {
 	if cmd := detectNodeTestCommand(root); cmd != "" {
 		return cmd
 	}
+	if hasJustfileRecipe(root, "test") {
+		return "just test"
+	}
 	if hasMakefileTarget(root, "test") {
 		return "make test"
 	}
@@ -125,6 +134,12 @@ func detectDevServer(root string) string {
 			}
 			return runner + " run start"
 		}
+	}
+	if hasJustfileRecipe(root, "start") {
+		return "just start"
+	}
+	if hasJustfileRecipe(root, "dev") {
+		return "just dev"
 	}
 	if hasMakefileTarget(root, "dev") {
 		return "make dev"
@@ -189,10 +204,10 @@ func detectRepos(root string) []RepoResult {
 // --- AI-powered detection ---
 
 type aiResponse struct {
-	ProjectName string     `json:"project_name,omitempty"`
-	TestCommand string     `json:"test_command,omitempty"`
-	DevServer   string     `json:"dev_server_command,omitempty"`
-	Repos       []aiRepo   `json:"repos,omitempty"`
+	ProjectName string   `json:"project_name,omitempty"`
+	TestCommand string   `json:"test_command,omitempty"`
+	DevServer   string   `json:"dev_server_command,omitempty"`
+	Repos       []aiRepo `json:"repos,omitempty"`
 }
 
 type aiRepo struct {
@@ -203,21 +218,30 @@ type aiRepo struct {
 func DetectWithAI(root string, static *Result) (*Result, error) {
 	binary, runtimeName := findRuntimeBinary()
 	if binary == "" {
+		fmt.Fprintf(os.Stderr, "  warning: no AI runtime found, skipping AI analysis\n")
 		return static, nil
 	}
 
 	prompt := buildAIPrompt(static)
 	args := buildAIArgs(runtimeName, prompt)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir = root
+	cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
 
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "  warning: AI analysis failed: %v\n", err)
+		detail := strings.TrimSpace(stderr.String())
+		if detail != "" {
+			fmt.Fprintf(os.Stderr, "  warning: AI analysis failed: %v (%s)\n", err, detail)
+		} else {
+			fmt.Fprintf(os.Stderr, "  warning: AI analysis failed: %v\n", err)
+		}
 		return static, nil
 	}
 
@@ -242,11 +266,11 @@ func findRuntimeBinary() (string, string) {
 
 func buildAIPrompt(static *Result) string {
 	var sb strings.Builder
-	sb.WriteString("Analyze this project and output ONLY a JSON object (no markdown, no explanation) with the following fields. Only include fields you are confident about — omit uncertain fields.\n\n")
+	sb.WriteString("Analyze this project and output ONLY a JSON object (no markdown, no code fences, no explanation) with the following fields. Only include fields you are confident about — omit uncertain fields.\n\n")
 	sb.WriteString("Fields:\n")
 	sb.WriteString("- project_name: string — a good short name for this project\n")
-	sb.WriteString("- test_command: string — the command to run the full test suite\n")
-	sb.WriteString("- dev_server_command: string — the command to start the development server\n")
+	sb.WriteString("- test_command: string — the single command to run the full test suite from the project root\n")
+	sb.WriteString("- dev_server_command: string — the single command to start the development server/environment from the project root\n")
 	sb.WriteString("- repos: array of {name, path} — sub-repositories if this is a poly-repo/multi-repo project. Only include if there are multiple independent git repos in subdirectories.\n\n")
 	sb.WriteString("Current static detection found:\n")
 	if static.ProjectName != "" {
@@ -268,7 +292,7 @@ func buildAIPrompt(static *Result) string {
 		}
 		sb.WriteString("\n")
 	}
-	sb.WriteString("\nRead the project's README, configuration files, and source structure to verify or improve these values. Output ONLY the JSON object.")
+	sb.WriteString("\nRead the project's README, justfile, Makefile, package.json, and source structure to verify or improve these values. Output ONLY the raw JSON object — no markdown formatting.")
 	return sb.String()
 }
 
@@ -277,10 +301,9 @@ func buildAIArgs(runtimeName, prompt string) []string {
 	case "claude":
 		return []string{
 			"-p", prompt,
-			"--output-format", "json",
-			"--max-turns", "5",
+			"--max-turns", "10",
 			"--allowedTools", "Read,Glob,Grep",
-			"--permission-mode", "manual",
+			"--permission-mode", "default",
 		}
 	case "opencode":
 		return []string{
@@ -298,6 +321,19 @@ func parseAIResponse(data []byte) (*aiResponse, error) {
 		return nil, fmt.Errorf("no JSON object found in response")
 	}
 
+	// Check if this is a runtime JSON envelope (e.g., Claude --output-format json)
+	// which wraps the actual response in a {"type":"result","result":"..."} object.
+	var envelope map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonStr), &envelope); err == nil {
+		if _, hasType := envelope["type"]; hasType {
+			if resultStr, ok := envelope["result"].(string); ok && resultStr != "" {
+				if inner := extractJSON(resultStr); inner != "" {
+					jsonStr = inner
+				}
+			}
+		}
+	}
+
 	var resp aiResponse
 	if err := json.Unmarshal([]byte(jsonStr), &resp); err != nil {
 		return nil, fmt.Errorf("unmarshal: %w", err)
@@ -311,8 +347,26 @@ func extractJSON(s string) string {
 		return ""
 	}
 	depth := 0
+	inString := false
+	escape := false
 	for i := start; i < len(s); i++ {
-		switch s[i] {
+		ch := s[i]
+		if escape {
+			escape = false
+			continue
+		}
+		if ch == '\\' && inString {
+			escape = true
+			continue
+		}
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		switch ch {
 		case '{':
 			depth++
 		case '}':
@@ -400,4 +454,84 @@ func hasMakefileTarget(root, target string) bool {
 		}
 	}
 	return false
+}
+
+func hasJustfileRecipe(root, recipe string) bool {
+	var data []byte
+	var err error
+	for _, name := range []string{"justfile", "Justfile"} {
+		data, err = os.ReadFile(filepath.Join(root, name))
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return false
+	}
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := scanner.Text()
+		name := parseJustfileRecipeName(line)
+		if name == recipe {
+			return true
+		}
+	}
+	return false
+}
+
+// parseJustfileRecipeName extracts a recipe name from a justfile line.
+// Recipe lines start with a name, optionally followed by params, then ":".
+// Variable assignments (name := value) are not recipes.
+func parseJustfileRecipeName(line string) string {
+	if len(line) == 0 || line[0] == ' ' || line[0] == '\t' || line[0] == '#' {
+		return ""
+	}
+	colonIdx := strings.LastIndex(line, ":")
+	if colonIdx < 0 {
+		return ""
+	}
+	// Skip variable assignments: ":=" appears in the line
+	if colonIdx+1 < len(line) && line[colonIdx+1] == '=' {
+		return ""
+	}
+	// Extract the first word (the recipe name)
+	fields := strings.Fields(line[:colonIdx])
+	if len(fields) == 0 {
+		return ""
+	}
+	name := fields[0]
+	if !isIdentifier(name) {
+		return ""
+	}
+	return name
+}
+
+func filterEnv(env []string, exclude string) []string {
+	prefix := exclude + "="
+	filtered := make([]string, 0, len(env))
+	for _, e := range env {
+		if !strings.HasPrefix(e, prefix) {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
+}
+
+func isIdentifier(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for i, ch := range s {
+		if ch == '_' || ch == '-' {
+			continue
+		}
+		if ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' {
+			continue
+		}
+		if i > 0 && ch >= '0' && ch <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }

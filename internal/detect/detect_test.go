@@ -387,6 +387,28 @@ func TestParseAIResponse_Malformed(t *testing.T) {
 	}
 }
 
+func TestParseAIResponse_Envelope(t *testing.T) {
+	// Claude --output-format json wraps the response in an envelope
+	inner := `{"test_command": "go test ./...", "dev_server_command": "go run ."}`
+	envelope := map[string]interface{}{
+		"type":    "result",
+		"subtype": "success",
+		"result":  "Here is the analysis:\n" + inner,
+	}
+	data, _ := json.Marshal(envelope)
+
+	resp, err := parseAIResponse(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.TestCommand != "go test ./..." {
+		t.Errorf("test_command = %q, want %q", resp.TestCommand, "go test ./...")
+	}
+	if resp.DevServer != "go run ." {
+		t.Errorf("dev_server_command = %q, want %q", resp.DevServer, "go run .")
+	}
+}
+
 func TestMergeAIResult(t *testing.T) {
 	static := &Result{
 		ProjectName: "static-name",
@@ -476,6 +498,84 @@ func TestHasMakefileTarget(t *testing.T) {
 	}
 	if hasMakefileTarget(dir, "deploy") {
 		t.Error("should not find deploy target")
+	}
+}
+
+func TestDetectTestCommand_Justfile(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "justfile"), "build:\n    go build\n\ntest:\n    go test ./...\n")
+
+	got := detectTestCommand(dir)
+	if got != "just test" {
+		t.Errorf("got %q, want %q", got, "just test")
+	}
+}
+
+func TestDetectDevServer_Justfile(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "justfile"), "start:\n    docker compose up\n")
+
+	got := detectDevServer(dir)
+	if got != "just start" {
+		t.Errorf("got %q, want %q", got, "just start")
+	}
+}
+
+func TestDetectDevServer_JustfileDev(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "justfile"), "dev:\n    npm run dev\n")
+
+	got := detectDevServer(dir)
+	if got != "just dev" {
+		t.Errorf("got %q, want %q", got, "just dev")
+	}
+}
+
+func TestHasJustfileRecipe(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "justfile"), "set dotenv-load := false\n\n# Start dev\nstart id=\"\":\n    echo start\n\ntest:\n    echo test\n\nbuild-image tag:\n    docker build\n")
+
+	if !hasJustfileRecipe(dir, "start") {
+		t.Error("expected to find start recipe")
+	}
+	if !hasJustfileRecipe(dir, "test") {
+		t.Error("expected to find test recipe")
+	}
+	if !hasJustfileRecipe(dir, "build-image") {
+		t.Error("expected to find build-image recipe")
+	}
+	if hasJustfileRecipe(dir, "deploy") {
+		t.Error("should not find deploy recipe")
+	}
+}
+
+func TestHasJustfileRecipe_Justfile(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "Justfile"), "test:\n    echo test\n")
+
+	if !hasJustfileRecipe(dir, "test") {
+		t.Error("expected to find test recipe in Justfile (capitalized)")
+	}
+}
+
+func TestNeedsAI(t *testing.T) {
+	tests := []struct {
+		name string
+		r    Result
+		want bool
+	}{
+		{"all found", Result{TestCommand: "go test", DevServer: "make dev"}, false},
+		{"missing test", Result{DevServer: "make dev"}, true},
+		{"missing dev server", Result{TestCommand: "go test"}, true},
+		{"both missing", Result{}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.r.NeedsAI(); got != tt.want {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
