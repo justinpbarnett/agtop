@@ -200,9 +200,12 @@ func TestAppStoreUpdatePropagation(t *testing.T) {
 		t.Errorf("expected branch 'feat/new-feature', got %q", selected.Branch)
 	}
 
-	// Verify detail panel reflects the run by checking its view
+	// Verify detail panel reflects the run by checking its view.
+	// The branch line has 13 chars of prefix ("  Branch   : ") + the branch value.
+	// At LeftColWidth=30, innerWidth=28, so only 15 chars of the branch value are
+	// visible — check a prefix that fits within the panel width.
 	detailView := adapter.app.detail.View()
-	if !containsStr(detailView, "feat/new-feature") {
+	if !containsStr(detailView, "feat/new-featur") {
 		t.Error("expected detail panel to show the new run's branch")
 	}
 
