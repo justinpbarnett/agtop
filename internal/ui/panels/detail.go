@@ -179,6 +179,9 @@ func (d Detail) plainText() string {
 	}
 	row("Model", model)
 
+	if r.Cost > 0 {
+		row("Cost", text.FormatCost(r.Cost))
+	}
 	if r.Worktree != "" {
 		row("Worktree", shortenPath(r.Worktree))
 	}
@@ -293,6 +296,11 @@ func (d Detail) renderDetails() string {
 		model = "—"
 	}
 	fmt.Fprintf(&b, "  %s\n", row("Model", model))
+
+	if r.Cost > 0 {
+		costStyle := lipgloss.NewStyle().Foreground(styles.CostColor(r.Cost))
+		fmt.Fprintf(&b, "  %s\n", styledRow("Cost", text.FormatCost(r.Cost), costStyle))
+	}
 
 	if r.Worktree != "" {
 		fmt.Fprintf(&b, "  %s\n", row("Worktree", shortenPath(r.Worktree)))
