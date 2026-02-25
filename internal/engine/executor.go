@@ -346,6 +346,7 @@ func (e *Executor) executeFollowUp(ctx context.Context, runID string, followUpPr
 
 	e.commitAfterStep(ctx, runID, "build")
 
+	e.appendRunSummary(runID)
 	e.store.Update(runID, func(r *run.Run) {
 		r.State = run.StateCompleted
 		r.CurrentSkill = ""
@@ -413,6 +414,7 @@ func (e *Executor) executeQuickFix(ctx context.Context, runID string, userPrompt
 
 	e.commitAfterStep(ctx, runID, "build")
 
+	e.appendRunSummary(runID)
 	e.store.Update(runID, func(r *run.Run) {
 		r.State = run.StateCompleted
 		r.CurrentSkill = ""
@@ -577,6 +579,7 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 	}
 
 	// Workflow complete
+	e.appendRunSummary(runID)
 	finalState := terminalState(skills, previousOutput)
 	e.store.Update(runID, func(r *run.Run) {
 		r.State = finalState
@@ -934,6 +937,67 @@ func (e *Executor) logToBuffer(runID string, skill string, msg string) {
 	} else {
 		buf.Append(fmt.Sprintf("[%s] %s", ts, msg))
 	}
+}
+
+// appendRunSummary writes a concise run summary to the log buffer at the end
+// of a run, giving the user a quick smoke-check view and orienting follow-up requests.
+func (e *Executor) appendRunSummary(runID string) {
+	r, ok := e.store.Get(runID)
+	if !ok {
+		return
+	}
+	buf := e.manager.Buffer(runID)
+	if buf == nil {
+		return
+	}
+
+	ts := time.Now().Format("15:04:05")
+	sep := strings.Repeat("─", 50)
+	buf.Append(fmt.Sprintf("[%s] %s", ts, sep))
+
+	prompt := r.Prompt
+	if len(prompt) > 120 {
+		prompt = prompt[:117] + "..."
+	}
+	buf.Append(fmt.Sprintf("[%s] Task: %s", ts, prompt))
+
+	if r.Workflow != "" {
+		skillNames := make([]string, 0, len(r.SkillCosts))
+		for _, sc := range r.SkillCosts {
+			skillNames = append(skillNames, sc.SkillName)
+		}
+		if len(skillNames) > 0 {
+			buf.Append(fmt.Sprintf("[%s] Workflow: %s  •  Skills: %s", ts, r.Workflow, strings.Join(skillNames, " → ")))
+		} else {
+			buf.Append(fmt.Sprintf("[%s] Workflow: %s", ts, r.Workflow))
+		}
+	}
+
+	var parts []string
+	if !r.StartedAt.IsZero() {
+		parts = append(parts, "Time: "+formatRunDuration(time.Since(r.StartedAt)))
+	}
+	if r.Tokens > 0 {
+		parts = append(parts, fmt.Sprintf("Tokens: %d ($%.4f)", r.Tokens, r.Cost))
+	}
+	if len(parts) > 0 {
+		buf.Append(fmt.Sprintf("[%s] %s", ts, strings.Join(parts, "  •  ")))
+	}
+
+	buf.Append(fmt.Sprintf("[%s] %s", ts, sep))
+}
+
+func formatRunDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	m := int(d.Minutes())
+	s := int(d.Seconds()) % 60
+	if s == 0 {
+		return fmt.Sprintf("%dm", m)
+	}
+	return fmt.Sprintf("%dm %ds", m, s)
 }
 
 // isNonModifyingSkill returns true for skills that don't modify files in the worktree.
