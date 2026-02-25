@@ -272,17 +272,31 @@ func (e *Executor) executeFollowUp(ctx context.Context, runID string, followUpPr
 	e.store.Update(runID, func(r *run.Run) {
 		r.SkillIndex = 1
 		r.SkillTotal = 1
-		r.CurrentSkill = "build"
+		r.CurrentSkill = "quick-fix"
 	})
 
-	prompt := BuildPrompt(skill, PromptContext{
-		WorkDir:        r.Worktree,
-		Branch:         r.Branch,
-		UserPrompt:     followUpPrompt,
-		SafetyPatterns: e.cfg.Safety.BlockedPatterns,
-	})
+	var b strings.Builder
+	if len(e.cfg.Safety.BlockedPatterns) > 0 {
+		b.WriteString("## Safety Constraints\n\n")
+		b.WriteString("You MUST NOT execute any of the following command patterns under any circumstances:\n")
+		for _, p := range e.cfg.Safety.BlockedPatterns {
+			b.WriteString(fmt.Sprintf("- `%s`\n", p))
+		}
+		b.WriteString("\nIf a task requires any of these operations, STOP and report that the operation is blocked by safety policy.\n\n")
+	}
+	b.WriteString("## Context\n")
+	if r.Worktree != "" {
+		b.WriteString("\n- Working directory: ")
+		b.WriteString(r.Worktree)
+	}
+	if r.Branch != "" {
+		b.WriteString("\n- Branch: ")
+		b.WriteString(r.Branch)
+	}
+	b.WriteString("\n\n## Task\n\n")
+	b.WriteString(followUpPrompt)
 
-	_, err := e.runSkill(ctx, runID, prompt, opts, skill.Timeout)
+	_, err := e.runSkill(ctx, runID, b.String(), opts, skill.Timeout)
 	if err != nil {
 		if errors.Is(err, process.ErrDisconnected) || e.isShuttingDown() {
 			return
@@ -507,7 +521,7 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 	}
 
 	// Workflow complete
-	finalState := terminalState(skills)
+	finalState := terminalState(skills, previousOutput)
 	e.store.Update(runID, func(r *run.Run) {
 		r.State = finalState
 		r.CurrentSkill = ""
@@ -904,8 +918,6 @@ func (e *Executor) commitAfterStep(ctx context.Context, runID string) {
 	_ = result
 }
 
-// terminalState determines the final run state after all skills complete.
-// workflowNames returns the sorted list of workflow names from config.
 func workflowNames(cfg *config.Config) []string {
 	names := make([]string, 0, len(cfg.Workflows))
 	for name := range cfg.Workflows {
@@ -914,13 +926,40 @@ func workflowNames(cfg *config.Config) []string {
 	return names
 }
 
-func terminalState(skills []string) run.State {
+func terminalState(skills []string, lastOutput string) run.State {
 	if len(skills) == 0 {
 		return run.StateCompleted
 	}
 	last := skills[len(skills)-1]
 	if last == "review" {
+		if reviewPassed(lastOutput) {
+			return run.StateCompleted
+		}
 		return run.StateReviewing
 	}
 	return run.StateCompleted
+}
+
+func reviewPassed(output string) bool {
+	text := strings.TrimSpace(output)
+	if text == "" {
+		return false
+	}
+
+	var report struct {
+		Success bool `json:"success"`
+	}
+	if json.Unmarshal([]byte(text), &report) == nil {
+		return report.Success
+	}
+
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start >= 0 && end > start {
+		if json.Unmarshal([]byte(text[start:end+1]), &report) == nil {
+			return report.Success
+		}
+	}
+
+	return false
 }

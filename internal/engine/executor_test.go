@@ -337,7 +337,7 @@ func TestGroupByParallelSingleTask(t *testing.T) {
 // --- terminalState tests ---
 
 func TestTerminalStateReview(t *testing.T) {
-	state := terminalState([]string{"build", "test", "review"})
+	state := terminalState([]string{"build", "test", "review"}, "")
 	if state != "reviewing" {
 		t.Errorf("expected reviewing, got %s", state)
 	}
@@ -352,10 +352,59 @@ func TestTerminalStateCompleted(t *testing.T) {
 	}
 
 	for _, skills := range tests {
-		state := terminalState(skills)
+		state := terminalState(skills, "")
 		if state != "completed" {
 			t.Errorf("terminalState(%v) = %s, want completed", skills, state)
 		}
+	}
+}
+
+func TestTerminalStateReviewPassed(t *testing.T) {
+	output := `{"success": true, "review_summary": "All good", "review_issues": [], "screenshots": []}`
+	state := terminalState([]string{"build", "test", "review"}, output)
+	if state != run.StateCompleted {
+		t.Errorf("expected completed for passing review, got %s", state)
+	}
+}
+
+func TestTerminalStateReviewFailed(t *testing.T) {
+	output := `{"success": false, "review_summary": "Has blockers", "review_issues": [{"review_issue_number": 1, "issue_description": "bug", "issue_resolution": "fix it", "issue_severity": "blocker"}], "screenshots": []}`
+	state := terminalState([]string{"build", "test", "review"}, output)
+	if state != run.StateReviewing {
+		t.Errorf("expected reviewing for failing review, got %s", state)
+	}
+}
+
+func TestReviewPassedSuccess(t *testing.T) {
+	output := `{"success": true, "review_summary": "Looks good", "review_issues": [], "screenshots": []}`
+	if !reviewPassed(output) {
+		t.Error("expected reviewPassed to return true for success: true")
+	}
+}
+
+func TestReviewPassedFailure(t *testing.T) {
+	output := `{"success": false, "review_summary": "Has issues", "review_issues": [], "screenshots": []}`
+	if reviewPassed(output) {
+		t.Error("expected reviewPassed to return false for success: false")
+	}
+}
+
+func TestReviewPassedMalformed(t *testing.T) {
+	if reviewPassed("not json at all") {
+		t.Error("expected reviewPassed to return false for malformed input")
+	}
+}
+
+func TestReviewPassedEmpty(t *testing.T) {
+	if reviewPassed("") {
+		t.Error("expected reviewPassed to return false for empty input")
+	}
+}
+
+func TestReviewPassedWithProse(t *testing.T) {
+	output := "Here is my review:\n" + `{"success": true, "review_summary": "All good", "review_issues": [], "screenshots": []}` + "\nEnd of review."
+	if !reviewPassed(output) {
+		t.Error("expected reviewPassed to return true when JSON is embedded in prose")
 	}
 }
 
