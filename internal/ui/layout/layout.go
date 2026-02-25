@@ -37,7 +37,7 @@ const (
 	MinWidth  = 80
 	MinHeight = 24
 
-	LeftColWidth     = 30
+	LeftColWidth     = 60
 	RunListRowWeight = 0.50
 )
 

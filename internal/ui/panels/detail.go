@@ -3,6 +3,7 @@ package panels
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -338,6 +339,13 @@ func (d Detail) renderDetails() string {
 }
 
 func shortenPath(path string) string {
+	cwd, err := os.Getwd()
+	if err == nil {
+		rel, err := filepath.Rel(cwd, path)
+		if err == nil {
+			return rel
+		}
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return path

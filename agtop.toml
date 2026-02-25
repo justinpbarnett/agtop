@@ -1,76 +1,131 @@
-# agtop.toml — Project configuration for agtop
-# See: https://github.com/anthropics/agtop
+# agtop.toml — project-level configuration
 
 [project]
 name = "agtop"
+root = "."
+test_command = "go test ./..."
+# worktree_path = ".agtop/worktrees"  # Where agtop creates git worktrees (default: <root>/.agtop/worktrees). Supports ~, absolute, and relative paths.
+ignore_skill_sources = ["project-claude"]  # Ignore all skills from .claude/skills/
 
-# ── Agent Backend ──────────────────────────────────────────────
-[agent]
-backend = "claude-code"
-default_model = "sonnet"           # sonnet | opus | haiku
+[project.dev_server]
+command = "make run"
+port_strategy = "hash"   # hash | sequential | fixed
+base_port = 3100
 
-# ── Defaults ───────────────────────────────────────────────────
-[defaults]
-max_parallel = 4                   # max concurrent agent runs
-branch_mode = "worktree"           # worktree | branch
-auto_dev_server = false            # start dev server for each run
-theme = "tokyo-night"              # tokyo-night | dracula
+[runtime]
+default = "opencode"       # claude | opencode
 
-# ── Worktree Isolation ─────────────────────────────────────────
-[worktree]
-base_dir = "/tmp/agtop-worktrees"
-branch_prefix = "agtop"
+[runtime.claude]
+model = "opus"                  # Default model for skills
+permission_mode = "acceptEdits" # acceptEdits | acceptAll | manual
+max_turns = 50
+allowed_tools = ["Read", "Write", "Edit", "MultiEdit", "Bash", "Grep", "Glob"]
+subscription = false            # Set true if on Claude Max/Team — disables cost threshold
 
-# ── Dev Server ─────────────────────────────────────────────────
-[devserver]
-start = "{dev_start_cmd}"
-install_deps = "{install_deps_cmd}"
-port_range = [3001, 3999]
+[runtime.opencode]
+model = "xai/grok-beta"
+agent = "build"
 
-# ── Notifications ──────────────────────────────────────────────
-[notifications]
-# command = "notify-send"          # external notification command
-on_complete = true
-on_await = true
-bell = false
+[workflows.auto]
+skills = ["route"]
 
-# ── Phases ─────────────────────────────────────────────────────
-# Phases define the steps in a multi-phase workflow.
-# Each phase runs a skill (bundled or project-local).
+[workflows.build]
+skills = ["build", "test"]
 
-[phases]
-order = ["spec", "build", "test", "review"]
+[workflows.plan-build]
+skills = ["spec", "build", "test", "review"]
 
-[phases.spec]
-label = "Spec"
-skill = "spec"
+[workflows.sdlc]
+skills = ["spec", "decompose", "build", "test", "review", "document"]
+
+# quick-fix is a built-in mode: sends the prompt directly to the model
+# without skill wrapping, then commits. No skills configuration needed.
+
+[skills.route]
+model = "haiku"
+timeout = 600
+
+[skills.spec]
+model = "opus"
+
+[skills.decompose]
+model = "opus"
+
+[skills.build]
 model = "sonnet"
-description = "Analyze the prompt and produce an implementation plan"
+timeout = 3600
+parallel = true
 
-[phases.build]
-label = "Build"
-skill = "implement"
+[skills.test]
 model = "sonnet"
-description = "Implement the spec"
-retryable = true
+timeout = 1800
 
-[phases.test]
-label = "Test"
-skill = "test"
-model = "sonnet"
-description = "Run tests and fix failures"
-retryable = true
+[skills.review]
+model = "opus"
 
-[phases.review]
-label = "Review"
-skill = "review"
-model = "sonnet"
-description = "Review changes against the spec"
+[skills.document]
+model = "haiku"
 
-# ── Workflows ──────────────────────────────────────────────────
-# Named workflow presets that select which phases to run.
+[skills.commit]
+model = "haiku"
+timeout = 1200
+# ignore = true   # Skip external versions; use agtop built-in instead
 
-[workflows]
-quick = ["build"]
-standard = ["spec", "build", "test"]
-full = ["spec", "build", "test", "review"]
+[skills.pr]
+model = "haiku"
+timeout = 600
+
+[merge]
+target_branch = "main"     # branch to merge into (default: repo default branch)
+auto_merge = false         # enable accept-to-merge pipeline (default: false)
+merge_strategy = "squash"  # squash | merge | rebase (default: squash)
+fix_attempts = 3           # max CI fix attempts before giving up (default: 3)
+poll_interval = 30         # seconds between check status polls (default: 30)
+poll_timeout = 600         # max seconds to wait for checks (default: 600)
+
+[safety]
+blocked_patterns = [
+  'rm\s+-[rf]+\s+/',
+  'git\s+push.*--force',
+  'DROP\s+TABLE',
+  '(curl|wget).*\|\s*(sh|bash)',
+  'chmod\s+777',
+  ':(){.*};',              # Fork bomb
+]
+allow_overrides = false
+
+[limits]
+max_tokens_per_run = 500000
+max_cost_per_run = 50.00
+max_concurrent_runs = 5
+rate_limit_backoff = 60    # Seconds
+rate_limit_max_retries = 3
+
+[ui]
+theme = "default"
+show_token_count = true
+show_cost = true
+log_scroll_speed = 5
+
+[update]
+auto_check = true                    # check for updates on startup
+repo = "justinpbarnett/agtop"       # GitHub owner/repo for release checks
+
+# ── Multi-Repo (Poly-Repo) ────────────────────────────────────
+# For projects with multiple independent git repos in subdirectories.
+# When configured, agtop creates a worktree per sub-repo instead of
+# one worktree for the root. PRs are created per sub-repo.
+#
+# [[repos]]
+# name = "client"
+# path = "app/client"
+#
+# [[repos]]
+# name = "server"
+# path = "app/server"
+
+# [integrations.jira]
+# base_url = "https://yourcompany.atlassian.net"
+# project_key = "PROJ"
+# auth_env = "JIRA_API_TOKEN"      # env var containing your API token
+# user_env = "JIRA_USER_EMAIL"     # env var containing your Atlassian email
