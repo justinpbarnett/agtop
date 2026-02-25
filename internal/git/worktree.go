@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/justinpbarnett/agtop/internal/config"
 )
 
 type WorktreeInfo struct {
@@ -386,4 +388,274 @@ func (w *WorktreeManager) Exists(runID string) bool {
 	wtPath := filepath.Join(w.worktreeDir, runID)
 	_, err := os.Stat(wtPath)
 	return err == nil
+}
+
+// --- Multi-repo support ---
+
+type SubRepoWorktree struct {
+	Name     string
+	Path     string
+	Branch   string
+	RepoRoot string
+}
+
+type MultiWorktreeResult struct {
+	RootPath     string
+	Branch       string
+	SubWorktrees []SubRepoWorktree
+}
+
+func isGitRepo(path string) bool {
+	cmd := exec.Command("git", "rev-parse", "--git-dir")
+	cmd.Dir = path
+	return cmd.Run() == nil
+}
+
+func (w *WorktreeManager) CreateMulti(runID string, repos []config.RepoConfig) (*MultiWorktreeResult, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if err := os.MkdirAll(w.worktreeDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create worktree dir: %w", err)
+	}
+
+	branch := "agtop/" + runID
+	rootPath := filepath.Join(w.worktreeDir, runID)
+
+	var created []SubRepoWorktree
+	for _, repo := range repos {
+		subGitRoot := filepath.Join(w.repoRoot, repo.Path)
+		if !isGitRepo(subGitRoot) {
+			w.rollbackMulti(created)
+			return nil, fmt.Errorf("sub-repo %q at %s is not a git repository", repo.Name, subGitRoot)
+		}
+
+		wtPath := filepath.Join(rootPath, repo.Path)
+		if err := os.MkdirAll(filepath.Dir(wtPath), 0o755); err != nil {
+			w.rollbackMulti(created)
+			return nil, fmt.Errorf("create parent dir for %s: %w", repo.Name, err)
+		}
+
+		cmd := exec.Command("git", "worktree", "add", wtPath, "-b", branch)
+		cmd.Dir = subGitRoot
+		if out, err := cmd.CombinedOutput(); err != nil {
+			w.rollbackMulti(created)
+			return nil, fmt.Errorf("git worktree add for %s: %s: %w", repo.Name, strings.TrimSpace(string(out)), err)
+		}
+
+		created = append(created, SubRepoWorktree{
+			Name:     repo.Name,
+			Path:     wtPath,
+			Branch:   branch,
+			RepoRoot: subGitRoot,
+		})
+	}
+
+	return &MultiWorktreeResult{
+		RootPath:     rootPath,
+		Branch:       branch,
+		SubWorktrees: created,
+	}, nil
+}
+
+func (w *WorktreeManager) rollbackMulti(created []SubRepoWorktree) {
+	for _, sub := range created {
+		rm := exec.Command("git", "worktree", "remove", sub.Path, "--force")
+		rm.Dir = sub.RepoRoot
+		_ = rm.Run()
+
+		br := exec.Command("git", "branch", "-D", sub.Branch)
+		br.Dir = sub.RepoRoot
+		_ = br.Run()
+	}
+}
+
+func (w *WorktreeManager) RemoveMulti(runID string, repos []config.RepoConfig) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	branch := "agtop/" + runID
+	rootPath := filepath.Join(w.worktreeDir, runID)
+
+	for _, repo := range repos {
+		subGitRoot := filepath.Join(w.repoRoot, repo.Path)
+		wtPath := filepath.Join(rootPath, repo.Path)
+
+		rm := exec.Command("git", "worktree", "remove", wtPath, "--force")
+		rm.Dir = subGitRoot
+		_ = rm.Run()
+
+		br := exec.Command("git", "branch", "-D", branch)
+		br.Dir = subGitRoot
+		_ = br.Run()
+	}
+
+	_ = os.RemoveAll(rootPath)
+	return nil
+}
+
+func (w *WorktreeManager) MergeMulti(runID string, repos []config.RepoConfig, opts MergeOptions) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	branch := "agtop/" + runID
+	rootPath := filepath.Join(w.worktreeDir, runID)
+	var mergeErrors []string
+
+	for _, repo := range repos {
+		subGitRoot := filepath.Join(w.repoRoot, repo.Path)
+		wtPath := filepath.Join(rootPath, repo.Path)
+
+		if _, err := os.Stat(wtPath); err == nil {
+			rebase := exec.Command("git", "rebase", "main")
+			rebase.Dir = wtPath
+			if out, err := rebase.CombinedOutput(); err != nil {
+				abort := exec.Command("git", "rebase", "--abort")
+				abort.Dir = wtPath
+				_ = abort.Run()
+				mergeErrors = append(mergeErrors, fmt.Sprintf("%s: rebase failed: %s", repo.Name, strings.TrimSpace(string(out))))
+				continue
+			}
+		}
+
+		stashed := stashIfDirtyIn(subGitRoot)
+
+		cmd := exec.Command("git", "merge", branch)
+		cmd.Dir = subGitRoot
+		if out, err := cmd.CombinedOutput(); err != nil {
+			abort := exec.Command("git", "merge", "--abort")
+			abort.Dir = subGitRoot
+			_ = abort.Run()
+			if stashed {
+				unstashIn(subGitRoot)
+			}
+			mergeErrors = append(mergeErrors, fmt.Sprintf("%s: merge failed: %s", repo.Name, strings.TrimSpace(string(out))))
+			continue
+		}
+
+		if opts.GoldenUpdateCommand != "" {
+			_ = runGoldenUpdateIn(subGitRoot, opts.GoldenUpdateCommand)
+		}
+
+		if stashed {
+			unstashIn(subGitRoot)
+		}
+	}
+
+	if len(mergeErrors) > 0 {
+		return fmt.Errorf("multi-repo merge errors:\n  %s", strings.Join(mergeErrors, "\n  "))
+	}
+	return nil
+}
+
+func stashIfDirtyIn(dir string) bool {
+	status := exec.Command("git", "status", "--porcelain")
+	status.Dir = dir
+	out, err := status.Output()
+	if err != nil || strings.TrimSpace(string(out)) == "" {
+		return false
+	}
+	stash := exec.Command("git", "stash", "push", "-m", "agtop: auto-stash before merge")
+	stash.Dir = dir
+	return stash.Run() == nil
+}
+
+func unstashIn(dir string) {
+	pop := exec.Command("git", "stash", "pop")
+	pop.Dir = dir
+	if err := pop.Run(); err != nil {
+		reset := exec.Command("git", "checkout", "HEAD", "--", ".")
+		reset.Dir = dir
+		_ = reset.Run()
+
+		drop := exec.Command("git", "stash", "drop")
+		drop.Dir = dir
+		_ = drop.Run()
+	}
+}
+
+func runGoldenUpdateIn(dir, command string) error {
+	cmd := exec.Command("sh", "-c", command)
+	cmd.Dir = dir
+	if _, err := cmd.CombinedOutput(); err != nil {
+		return err
+	}
+
+	status := exec.Command("git", "status", "--porcelain")
+	status.Dir = dir
+	out, err := status.Output()
+	if err != nil || strings.TrimSpace(string(out)) == "" {
+		return nil
+	}
+
+	add := exec.Command("git", "add", "-A")
+	add.Dir = dir
+	if _, err := add.CombinedOutput(); err != nil {
+		return err
+	}
+
+	amend := exec.Command("git", "commit", "--amend", "--no-edit")
+	amend.Dir = dir
+	_, err = amend.CombinedOutput()
+	return err
+}
+
+func (w *WorktreeManager) ListMulti(repos []config.RepoConfig) ([]WorktreeInfo, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	seen := make(map[string]bool)
+	var result []WorktreeInfo
+
+	for _, repo := range repos {
+		subGitRoot := filepath.Join(w.repoRoot, repo.Path)
+
+		cmd := exec.Command("git", "worktree", "list", "--porcelain")
+		cmd.Dir = subGitRoot
+		out, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+
+		var current WorktreeInfo
+		scanner := bufio.NewScanner(strings.NewReader(string(out)))
+		for scanner.Scan() {
+			line := scanner.Text()
+			switch {
+			case strings.HasPrefix(line, "worktree "):
+				current = WorktreeInfo{Path: strings.TrimPrefix(line, "worktree ")}
+			case strings.HasPrefix(line, "HEAD "):
+				current.HEAD = strings.TrimPrefix(line, "HEAD ")
+			case strings.HasPrefix(line, "branch "):
+				current.Branch = strings.TrimPrefix(line, "branch refs/heads/")
+			case line == "":
+				if current.Path != "" && strings.HasPrefix(current.Path, w.worktreeDir) {
+					if !seen[current.Branch] {
+						seen[current.Branch] = true
+						result = append(result, current)
+					}
+				}
+				current = WorktreeInfo{}
+			}
+		}
+		if current.Path != "" && strings.HasPrefix(current.Path, w.worktreeDir) {
+			if !seen[current.Branch] {
+				seen[current.Branch] = true
+				result = append(result, current)
+			}
+		}
+	}
+
+	return result, nil
+}
+
+func (w *WorktreeManager) ExistsMulti(runID string, repos []config.RepoConfig) bool {
+	rootPath := filepath.Join(w.worktreeDir, runID)
+	for _, repo := range repos {
+		wtPath := filepath.Join(rootPath, repo.Path)
+		if _, err := os.Stat(wtPath); err != nil {
+			return false
+		}
+	}
+	return true
 }
