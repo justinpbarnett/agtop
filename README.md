@@ -29,6 +29,9 @@ One of: [Claude Code](https://github.com/anthropics/claude-code) or [OpenCode](h
 
 ### Install
 
+<details>
+<summary>Installation instructions</summary>
+
 **Download a pre-built binary:**
 
 macOS (Apple Silicon):
@@ -75,6 +78,8 @@ cd agtop
 make build       # outputs to bin/agtop
 make install     # installs to $GOPATH/bin
 ```
+
+</details>
 
 ### Usage
 
