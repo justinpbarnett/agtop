@@ -29,6 +29,6 @@ var (
 	SelectionStyle = lipgloss.NewStyle().Background(SelectionBg)
 
 	// Log entry styles
-	LogEntryCursorStyle  = lipgloss.NewStyle().Foreground(TitleText).Bold(true)
-	LogEntryDetailStyle  = lipgloss.NewStyle().Foreground(TextSecondary)
+	LogEntryCursorStyle = lipgloss.NewStyle().Foreground(TitleText).Bold(true)
+	LogEntryDetailStyle = lipgloss.NewStyle().Foreground(TextSecondary)
 )

@@ -220,7 +220,7 @@ func TestDiffViewSetEmpty(t *testing.T) {
 	dv := NewDiffView()
 	dv.SetSize(80, 20)
 	dv.SetDiff(sampleDiff, sampleStat) // Set real content first
-	dv.SetEmpty()                       // Then clear it
+	dv.SetEmpty()                      // Then clear it
 
 	content := dv.Content()
 	if !strings.Contains(content, "No changes") {

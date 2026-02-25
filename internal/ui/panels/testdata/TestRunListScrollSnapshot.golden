@@ -1,12 +1,12 @@
 ╭─ [1] Runs (20 active) ───────────────────────────────────╮
-│      ID  STATE          TIME   TOKENS    COST            │
+│         ID  STATE          TIME   TOKENS    COST         │
 │  ▲                                                       │
-│⠋    016  running          0s        0   $0.00            │
-│⠋    015  running          0s        0   $0.00            │
-│⠋    014  running          0s        0   $0.00            │
-│⠋    013  running          0s        0   $0.00            │
-│⠋    012  running          0s        0   $0.00            │
-│⠋    011  running          0s        0   $0.00            │
-│⠋    010  running          0s        0   $0.00            │
+│⠋  scroll15  running          0s        0   $0.00         │
+│⠋  scroll14  running          0s        0   $0.00         │
+│⠋  scroll13  running          0s        0   $0.00         │
+│⠋  scroll12  running          0s        0   $0.00         │
+│⠋  scroll11  running          0s        0   $0.00         │
+│⠋  scroll10  running          0s        0   $0.00         │
+│⠋  scroll09  running          0s        0   $0.00         │
 │  ▼                                                       │
 ╰─ [↵] runs  [n]ew  [y]ank ID  [/]filter ──────────────────╯

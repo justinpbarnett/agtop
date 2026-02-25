@@ -131,8 +131,7 @@ func TestManagerStart(t *testing.T) {
 	rt := makeMockRuntime(eventsCh, doneCh)
 	mgr, store := testManager(rt)
 
-	store.Add(&run.Run{State: run.StateQueued})
-	runID := "001"
+	runID := store.Add(&run.Run{State: run.StateQueued})
 
 	err := mgr.Start(runID, "test prompt", runtime.RunOptions{})
 	if err != nil {
@@ -184,21 +183,21 @@ func TestManagerConcurrencyLimit(t *testing.T) {
 
 	mgr := NewManager(store, rt, "claude", "", cfg, cost.NewTracker(), &cost.LimitChecker{}, nil)
 
-	store.Add(&run.Run{State: run.StateQueued})
-	store.Add(&run.Run{State: run.StateQueued})
-	store.Add(&run.Run{State: run.StateQueued})
+	id1 := store.Add(&run.Run{State: run.StateQueued})
+	id2 := store.Add(&run.Run{State: run.StateQueued})
+	id3 := store.Add(&run.Run{State: run.StateQueued})
 
-	err := mgr.Start("001", "prompt 1", runtime.RunOptions{})
+	err := mgr.Start(id1, "prompt 1", runtime.RunOptions{})
 	if err != nil {
 		t.Fatalf("start 1: %v", err)
 	}
 
-	err = mgr.Start("002", "prompt 2", runtime.RunOptions{})
+	err = mgr.Start(id2, "prompt 2", runtime.RunOptions{})
 	if err != nil {
 		t.Fatalf("start 2: %v", err)
 	}
 
-	err = mgr.Start("003", "prompt 3", runtime.RunOptions{})
+	err = mgr.Start(id3, "prompt 3", runtime.RunOptions{})
 	if err == nil {
 		t.Error("expected concurrency limit error for 3rd start")
 	}
@@ -232,12 +231,12 @@ func TestManagerPause(t *testing.T) {
 	}
 
 	mgr, store := testManager(rt)
-	store.Add(&run.Run{State: run.StateQueued})
+	runID := store.Add(&run.Run{State: run.StateQueued})
 
-	mgr.Start("001", "test", runtime.RunOptions{})
+	mgr.Start(runID, "test", runtime.RunOptions{})
 	time.Sleep(50 * time.Millisecond)
 
-	err := mgr.Pause("001")
+	err := mgr.Pause(runID)
 	if err != nil {
 		t.Fatalf("pause error: %v", err)
 	}
@@ -246,7 +245,7 @@ func TestManagerPause(t *testing.T) {
 		t.Error("expected runtime.Pause to be called")
 	}
 
-	r, _ := store.Get("001")
+	r, _ := store.Get(runID)
 	if r.State != run.StatePaused {
 		t.Errorf("expected state Paused, got %s", r.State)
 	}
@@ -279,13 +278,13 @@ func TestManagerResume(t *testing.T) {
 	}
 
 	mgr, store := testManager(rt)
-	store.Add(&run.Run{State: run.StateQueued})
+	runID := store.Add(&run.Run{State: run.StateQueued})
 
-	mgr.Start("001", "test", runtime.RunOptions{})
+	mgr.Start(runID, "test", runtime.RunOptions{})
 	time.Sleep(50 * time.Millisecond)
 
-	mgr.Pause("001")
-	err := mgr.Resume("001")
+	mgr.Pause(runID)
+	err := mgr.Resume(runID)
 	if err != nil {
 		t.Fatalf("resume error: %v", err)
 	}
@@ -294,7 +293,7 @@ func TestManagerResume(t *testing.T) {
 		t.Error("expected runtime.Resume to be called")
 	}
 
-	r, _ := store.Get("001")
+	r, _ := store.Get(runID)
 	if r.State != run.StateRunning {
 		t.Errorf("expected state Running after resume, got %s", r.State)
 	}
@@ -319,16 +318,16 @@ func TestManagerProcessExit(t *testing.T) {
 	}
 
 	mgr, store := testManager(rt)
-	store.Add(&run.Run{State: run.StateQueued})
+	runID := store.Add(&run.Run{State: run.StateQueued})
 
-	mgr.Start("001", "test", runtime.RunOptions{})
+	mgr.Start(runID, "test", runtime.RunOptions{})
 	time.Sleep(50 * time.Millisecond)
 
 	// Signal clean exit
 	doneCh <- nil
 	time.Sleep(200 * time.Millisecond)
 
-	r, _ := store.Get("001")
+	r, _ := store.Get(runID)
 	if r.State != run.StateCompleted {
 		t.Errorf("expected state Completed after clean exit, got %s", r.State)
 	}
@@ -356,16 +355,16 @@ func TestManagerProcessExitError(t *testing.T) {
 	}
 
 	mgr, store := testManager(rt)
-	store.Add(&run.Run{State: run.StateQueued})
+	runID := store.Add(&run.Run{State: run.StateQueued})
 
-	mgr.Start("001", "test", runtime.RunOptions{})
+	mgr.Start(runID, "test", runtime.RunOptions{})
 	time.Sleep(50 * time.Millisecond)
 
 	// Signal error exit
 	doneCh <- io.ErrUnexpectedEOF
 	time.Sleep(200 * time.Millisecond)
 
-	r, _ := store.Get("001")
+	r, _ := store.Get(runID)
 	if r.State != run.StateFailed {
 		t.Errorf("expected state Failed after error exit, got %s", r.State)
 	}
@@ -380,9 +379,9 @@ func TestManagerEventConsumption(t *testing.T) {
 	rt := makeMockRuntime(eventsCh, doneCh)
 	mgr, store := testManager(rt)
 
-	store.Add(&run.Run{State: run.StateQueued, CurrentSkill: "build"})
+	runID := store.Add(&run.Run{State: run.StateQueued, CurrentSkill: "build"})
 
-	err := mgr.Start("001", "test", runtime.RunOptions{})
+	err := mgr.Start(runID, "test", runtime.RunOptions{})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -391,7 +390,7 @@ func TestManagerEventConsumption(t *testing.T) {
 	eventsCh <- StreamEvent{Type: EventText, Text: "Building feature..."}
 	time.Sleep(100 * time.Millisecond)
 
-	buf := mgr.Buffer("001")
+	buf := mgr.Buffer(runID)
 	if buf == nil {
 		t.Fatal("expected non-nil buffer")
 	}
@@ -411,7 +410,7 @@ func TestManagerEventConsumption(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 
-	r, _ := store.Get("001")
+	r, _ := store.Get(runID)
 	if r.Tokens != 1500 {
 		t.Errorf("expected 1500 tokens, got %d", r.Tokens)
 	}
@@ -460,12 +459,12 @@ func TestManagerDuplicateStart(t *testing.T) {
 	}
 
 	mgr, store := testManager(rt)
-	store.Add(&run.Run{State: run.StateQueued})
+	runID := store.Add(&run.Run{State: run.StateQueued})
 
-	mgr.Start("001", "test", runtime.RunOptions{})
+	mgr.Start(runID, "test", runtime.RunOptions{})
 	time.Sleep(50 * time.Millisecond)
 
-	err := mgr.Start("001", "test again", runtime.RunOptions{})
+	err := mgr.Start(runID, "test again", runtime.RunOptions{})
 	if err == nil {
 		t.Error("expected error for duplicate start")
 	}
@@ -493,13 +492,13 @@ func TestManagerActiveCount(t *testing.T) {
 	}
 
 	mgr, store := testManager(rt)
-	store.Add(&run.Run{State: run.StateQueued})
+	runID := store.Add(&run.Run{State: run.StateQueued})
 
 	if mgr.ActiveCount() != 0 {
 		t.Errorf("expected 0 active, got %d", mgr.ActiveCount())
 	}
 
-	mgr.Start("001", "test", runtime.RunOptions{})
+	mgr.Start(runID, "test", runtime.RunOptions{})
 	time.Sleep(50 * time.Millisecond)
 
 	if mgr.ActiveCount() != 1 {
@@ -528,13 +527,13 @@ func TestManagerRemoveBuffer(t *testing.T) {
 	rt := &mockRuntime{}
 	mgr, _ := testManager(rt)
 
-	mgr.InjectBuffer("001", []string{"line1", "line2"})
-	if mgr.Buffer("001") == nil {
+	mgr.InjectBuffer("test-id", []string{"line1", "line2"})
+	if mgr.Buffer("test-id") == nil {
 		t.Fatal("expected non-nil buffer after inject")
 	}
 
-	mgr.RemoveBuffer("001")
-	if mgr.Buffer("001") != nil {
+	mgr.RemoveBuffer("test-id")
+	if mgr.Buffer("test-id") != nil {
 		t.Error("expected nil buffer after RemoveBuffer")
 	}
 }
@@ -596,8 +595,8 @@ func TestManagerSystemInitUpdatesModel(t *testing.T) {
 	rt := makeMockRuntime(eventsCh, doneCh)
 	mgr, store := testManager(rt)
 
-	store.Add(&run.Run{State: run.StateQueued})
-	if err := mgr.Start("001", "test", runtime.RunOptions{}); err != nil {
+	runID := store.Add(&run.Run{State: run.StateQueued})
+	if err := mgr.Start(runID, "test", runtime.RunOptions{}); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
@@ -608,7 +607,7 @@ func TestManagerSystemInitUpdatesModel(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 
-	r, ok := store.Get("001")
+	r, ok := store.Get(runID)
 	if !ok {
 		t.Fatal("run not found")
 	}
@@ -636,9 +635,9 @@ func TestManagerDisconnectPreservesRunState(t *testing.T) {
 	}
 
 	mgr, store := testManager(rt)
-	store.Add(&run.Run{State: run.StateQueued, CurrentSkill: "build"})
+	runID := store.Add(&run.Run{State: run.StateQueued, CurrentSkill: "build"})
 
-	err := mgr.Start("001", "test", runtime.RunOptions{})
+	err := mgr.Start(runID, "test", runtime.RunOptions{})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -651,7 +650,7 @@ func TestManagerDisconnectPreservesRunState(t *testing.T) {
 	doneCh <- nil
 	time.Sleep(200 * time.Millisecond)
 
-	r, ok := store.Get("001")
+	r, ok := store.Get(runID)
 	if !ok {
 		t.Fatal("run not found")
 	}

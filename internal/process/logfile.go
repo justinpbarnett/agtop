@@ -109,8 +109,8 @@ func OpenLogFiles(stdoutPath, stderrPath string) (*LogFiles, error) {
 	}, nil
 }
 
-func (lf *LogFiles) StdoutPath() string  { return lf.stdoutPath }
-func (lf *LogFiles) StderrPath() string  { return lf.stderrPath }
+func (lf *LogFiles) StdoutPath() string     { return lf.stdoutPath }
+func (lf *LogFiles) StderrPath() string     { return lf.stderrPath }
 func (lf *LogFiles) StdoutWriter() *os.File { return lf.stdout }
 func (lf *LogFiles) StderrWriter() *os.File { return lf.stderr }
 

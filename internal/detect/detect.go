@@ -16,7 +16,7 @@ import (
 
 type Result struct {
 	ProjectName string
-	Runtime     string       // "claude" or "opencode" or ""
+	Runtime     string // "claude" or "opencode" or ""
 	TestCommand string
 	DevServer   string
 	Repos       []RepoResult // empty = single-repo

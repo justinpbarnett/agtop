@@ -1,7 +1,8 @@
 package run
 
 import (
-	"fmt"
+	"crypto/rand"
+	"encoding/hex"
 	"sync"
 )
 
@@ -9,7 +10,6 @@ type Store struct {
 	mu          sync.RWMutex
 	runs        map[string]*Run
 	order       []string
-	nextID      int
 	subscribers []func()
 	changeCh    chan struct{}
 }
@@ -24,8 +24,7 @@ func NewStore() *Store {
 func (s *Store) Add(r *Run) string {
 	s.mu.Lock()
 	if r.ID == "" {
-		s.nextID++
-		r.ID = fmt.Sprintf("%03d", s.nextID)
+		r.ID = generateID()
 	}
 	id := r.ID
 	s.runs[id] = r
@@ -33,6 +32,14 @@ func (s *Store) Add(r *Run) string {
 	s.mu.Unlock()
 	s.notify()
 	return id
+}
+
+func generateID() string {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)[:7]
 }
 
 func (s *Store) Update(id string, fn func(*Run)) {
@@ -124,14 +131,6 @@ func (s *Store) TotalCost() float64 {
 		total += r.Cost
 	}
 	return total
-}
-
-func (s *Store) SetNextID(id int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if id > s.nextID {
-		s.nextID = id
-	}
 }
 
 func (s *Store) Subscribe(fn func()) {

@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
-	cliputil "github.com/justinpbarnett/agtop/internal/ui/clipboard"
 	"github.com/justinpbarnett/agtop/internal/ui/border"
+	cliputil "github.com/justinpbarnett/agtop/internal/ui/clipboard"
 	"github.com/justinpbarnett/agtop/internal/ui/styles"
 )
 

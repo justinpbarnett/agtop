@@ -49,7 +49,7 @@ func TestEveryLineWidth(t *testing.T) {
 			name:    "with keybinds",
 			content: "test",
 			width:   40, height: 5, focused: true,
-			kbs:     []Keybind{{Key: "e", Label: "dit"}, {Key: "k", Label: "ill"}},
+			kbs: []Keybind{{Key: "e", Label: "dit"}, {Key: "k", Label: "ill"}},
 		},
 		{
 			name:    "exact width content",

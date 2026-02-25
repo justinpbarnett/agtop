@@ -12,10 +12,10 @@ import (
 func testStore() *run.Store {
 	now := time.Now()
 	s := run.NewStore()
-	s.Add(&run.Run{Branch: "feat/add-auth", Workflow: "sdlc", State: run.StateRunning, SkillIndex: 3, SkillTotal: 7, Tokens: 12400, Cost: 0.42, CurrentSkill: "build", StartedAt: now.Add(-3 * time.Minute)})
-	s.Add(&run.Run{Branch: "fix/nav-bug", Workflow: "quick-fix", State: run.StatePaused, SkillIndex: 1, SkillTotal: 3, Tokens: 3100, Cost: 0.08, CurrentSkill: "build", StartedAt: now.Add(-7 * time.Minute)})
-	s.Add(&run.Run{Branch: "feat/dashboard", Workflow: "plan-build", State: run.StateReviewing, SkillIndex: 3, SkillTotal: 3, Tokens: 45200, Cost: 1.23, StartedAt: now.Add(-12 * time.Minute), CompletedAt: now.Add(-2 * time.Minute)})
-	s.Add(&run.Run{Branch: "fix/css-overflow", Workflow: "build", State: run.StateFailed, SkillIndex: 2, SkillTotal: 3, Tokens: 8700, Cost: 0.31, Error: "build skill timed out", StartedAt: now.Add(-5 * time.Minute), CompletedAt: now.Add(-1 * time.Minute)})
+	s.Add(&run.Run{ID: "a1b2c3d", Branch: "feat/add-auth", Workflow: "sdlc", State: run.StateRunning, SkillIndex: 3, SkillTotal: 7, Tokens: 12400, Cost: 0.42, CurrentSkill: "build", StartedAt: now.Add(-3 * time.Minute)})
+	s.Add(&run.Run{ID: "e4f5a6b", Branch: "fix/nav-bug", Workflow: "quick-fix", State: run.StatePaused, SkillIndex: 1, SkillTotal: 3, Tokens: 3100, Cost: 0.08, CurrentSkill: "build", StartedAt: now.Add(-7 * time.Minute)})
+	s.Add(&run.Run{ID: "c7d8e9f", Branch: "feat/dashboard", Workflow: "plan-build", State: run.StateReviewing, SkillIndex: 3, SkillTotal: 3, Tokens: 45200, Cost: 1.23, StartedAt: now.Add(-12 * time.Minute), CompletedAt: now.Add(-2 * time.Minute)})
+	s.Add(&run.Run{ID: "0a1b2c3", Branch: "fix/css-overflow", Workflow: "build", State: run.StateFailed, SkillIndex: 2, SkillTotal: 3, Tokens: 8700, Cost: 0.31, Error: "build skill timed out", StartedAt: now.Add(-5 * time.Minute), CompletedAt: now.Add(-1 * time.Minute)})
 	return s
 }
 
@@ -105,14 +105,15 @@ func TestRunListSelectedRun(t *testing.T) {
 	if r == nil {
 		t.Fatal("expected non-nil selected run")
 	}
-	if r.ID != "004" {
-		t.Errorf("expected run 004 (newest), got %s", r.ID)
+	// Newest run (added last) is the failed one
+	if r.State != run.StateFailed {
+		t.Errorf("expected newest run (failed), got state %s", r.State)
 	}
 
 	rl, _ = rl.Update(keyMsg("j"))
 	r = rl.SelectedRun()
-	if r.ID != "003" {
-		t.Errorf("expected run 003, got %s", r.ID)
+	if r.State != run.StateReviewing {
+		t.Errorf("expected second run (reviewing), got state %s", r.State)
 	}
 }
 

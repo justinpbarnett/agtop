@@ -299,12 +299,12 @@ func TestPersistenceRehydrateNonTerminalZeroPID(t *testing.T) {
 	}
 }
 
-func TestPersistenceRehydrateRestoresNextID(t *testing.T) {
+func TestPersistenceRehydratePreservesExistingIDs(t *testing.T) {
 	p := tempPersistence(t)
 	store := NewStore()
 
 	now := time.Now()
-	for _, id := range []string{"003", "007", "012"} {
+	for _, id := range []string{"abc1234", "def5678", "0123456"} {
 		r := Run{ID: id, State: StateCompleted, CreatedAt: now}
 		if err := p.Save(r, nil, "", ""); err != nil {
 			t.Fatalf("Save %s: %v", id, err)
@@ -313,10 +313,13 @@ func TestPersistenceRehydrateRestoresNextID(t *testing.T) {
 
 	p.Rehydrate(store, RehydrateCallbacks{})
 
-	// Next ID should be 013
-	newID := store.Add(&Run{State: StateQueued})
-	if newID != "013" {
-		t.Errorf("expected next ID 013, got %s", newID)
+	if store.Count() != 3 {
+		t.Errorf("expected 3 runs, got %d", store.Count())
+	}
+	for _, id := range []string{"abc1234", "def5678", "0123456"} {
+		if _, ok := store.Get(id); !ok {
+			t.Errorf("expected run %s in store", id)
+		}
 	}
 }
 
@@ -566,11 +569,11 @@ func TestPersistenceFinalSave(t *testing.T) {
 
 	now := time.Now()
 	// Add a running run (should be saved)
-	store.Add(&Run{State: StateRunning, PID: 12345, CreatedAt: now})
+	runningID := store.Add(&Run{State: StateRunning, PID: 12345, CreatedAt: now})
 	// Add a completed run (should be skipped — terminal)
-	store.Add(&Run{State: StateCompleted, CreatedAt: now})
+	completedID := store.Add(&Run{State: StateCompleted, CreatedAt: now})
 	// Add a paused run (should be saved — non-terminal)
-	store.Add(&Run{State: StatePaused, PID: 67890, CreatedAt: now})
+	pausedID := store.Add(&Run{State: StatePaused, PID: 67890, CreatedAt: now})
 
 	p.FinalSave(store, func(runID string) (string, string) {
 		return "/tmp/stdout-" + runID + ".log", "/tmp/stderr-" + runID + ".log"
@@ -581,7 +584,7 @@ func TestPersistenceFinalSave(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	// Only running (001) and paused (003) should be saved; completed (002) is terminal
+	// Only running and paused should be saved; completed is terminal
 	if len(sessions) != 2 {
 		t.Fatalf("expected 2 sessions from FinalSave, got %d", len(sessions))
 	}
@@ -590,14 +593,14 @@ func TestPersistenceFinalSave(t *testing.T) {
 	for _, sf := range sessions {
 		ids[sf.Run.ID] = true
 	}
-	if !ids["001"] {
-		t.Error("expected running run 001 to be saved")
+	if !ids[runningID] {
+		t.Errorf("expected running run %s to be saved", runningID)
 	}
-	if !ids["003"] {
-		t.Error("expected paused run 003 to be saved")
+	if !ids[pausedID] {
+		t.Errorf("expected paused run %s to be saved", pausedID)
 	}
-	if ids["002"] {
-		t.Error("completed run 002 should not have been saved by FinalSave")
+	if ids[completedID] {
+		t.Errorf("completed run %s should not have been saved by FinalSave", completedID)
 	}
 }
 
@@ -638,19 +641,3 @@ func TestPersistenceRoundTripPreservesPID(t *testing.T) {
 	}
 }
 
-func TestStoreSetNextID(t *testing.T) {
-	s := NewStore()
-
-	s.SetNextID(10)
-	id := s.Add(&Run{State: StateQueued})
-	if id != "011" {
-		t.Errorf("expected 011, got %s", id)
-	}
-
-	// SetNextID should not regress
-	s.SetNextID(5)
-	id2 := s.Add(&Run{State: StateQueued})
-	if id2 != "012" {
-		t.Errorf("expected 012 (no regression), got %s", id2)
-	}
-}

@@ -22,35 +22,35 @@ const (
 )
 
 type Run struct {
-	ID           string        `json:"id"`
-	Prompt         string        `json:"prompt"`
-	OriginalPrompt string        `json:"original_prompt,omitempty"`
-	TaskID         string        `json:"task_id,omitempty"`
-	Branch       string        `json:"branch"`
-	Worktree     string        `json:"worktree"`
-	Workflow     string        `json:"workflow"`
-	SpecFile     string        `json:"spec_file,omitempty"`
-	State        State         `json:"state"`
-	SkillIndex   int           `json:"skill_index"`
-	SkillTotal   int           `json:"skill_total"`
-	Tokens       int           `json:"tokens"`
-	TokensIn     int           `json:"tokens_in"`
-	TokensOut    int           `json:"tokens_out"`
-	Cost         float64       `json:"cost"`
-	CreatedAt    time.Time     `json:"created_at"`
-	StartedAt    time.Time     `json:"started_at"`
-	CompletedAt  time.Time     `json:"completed_at"`
-	CurrentSkill string        `json:"current_skill"`
-	Model        string        `json:"model"`
-	Command      string        `json:"command"`
-	Error        string        `json:"error"`
-	PID          int           `json:"pid"`
-	SkillCosts   []cost.SkillCost `json:"skill_costs"`
-	DevServerPort int          `json:"dev_server_port"`
-	DevServerURL  string       `json:"dev_server_url"`
-	MergeStatus     string           `json:"merge_status,omitempty"`
-	PRURL           string           `json:"pr_url,omitempty"`
-	FollowUpPrompts []string         `json:"follow_up_prompts,omitempty"`
+	ID              string            `json:"id"`
+	Prompt          string            `json:"prompt"`
+	OriginalPrompt  string            `json:"original_prompt,omitempty"`
+	TaskID          string            `json:"task_id,omitempty"`
+	Branch          string            `json:"branch"`
+	Worktree        string            `json:"worktree"`
+	Workflow        string            `json:"workflow"`
+	SpecFile        string            `json:"spec_file,omitempty"`
+	State           State             `json:"state"`
+	SkillIndex      int               `json:"skill_index"`
+	SkillTotal      int               `json:"skill_total"`
+	Tokens          int               `json:"tokens"`
+	TokensIn        int               `json:"tokens_in"`
+	TokensOut       int               `json:"tokens_out"`
+	Cost            float64           `json:"cost"`
+	CreatedAt       time.Time         `json:"created_at"`
+	StartedAt       time.Time         `json:"started_at"`
+	CompletedAt     time.Time         `json:"completed_at"`
+	CurrentSkill    string            `json:"current_skill"`
+	Model           string            `json:"model"`
+	Command         string            `json:"command"`
+	Error           string            `json:"error"`
+	PID             int               `json:"pid"`
+	SkillCosts      []cost.SkillCost  `json:"skill_costs"`
+	DevServerPort   int               `json:"dev_server_port"`
+	DevServerURL    string            `json:"dev_server_url"`
+	MergeStatus     string            `json:"merge_status,omitempty"`
+	PRURL           string            `json:"pr_url,omitempty"`
+	FollowUpPrompts []string          `json:"follow_up_prompts,omitempty"`
 	SubWorktrees    []SubWorktreeInfo `json:"sub_worktrees,omitempty"`
 }
 

@@ -13,16 +13,16 @@ func TestCompareVersions(t *testing.T) {
 		{"v0.1.0", "v0.2.0", -1},
 		{"v1.0.0", "v1.0.0", 0},
 		{"v2.0.0", "v1.0.0", 1},
-		{"0.1.0", "v0.1.0", 0},         // mixed v prefix
-		{"v0.1.0", "0.1.0", 0},         // mixed v prefix reversed
+		{"0.1.0", "v0.1.0", 0},           // mixed v prefix
+		{"v0.1.0", "0.1.0", 0},           // mixed v prefix reversed
 		{"0.1.0-3-gabcdef", "0.1.0", -1}, // git-describe prerelease < release
 		{"0.2.0", "0.1.0-3-gabcdef", 1},  // release > prerelease
-		{"dev", "v1.0.0", -1},           // unparseable current
-		{"v1.0.0", "dev", 1},            // unparseable latest
-		{"dev", "dev", 0},               // both unparseable
-		{"v1.2.3", "v1.2.3", 0},        // exact match
-		{"v0.0.1", "v0.0.2", -1},       // patch bump
-		{"v0.1.0", "v0.0.9", 1},        // minor > patch
+		{"dev", "v1.0.0", -1},            // unparseable current
+		{"v1.0.0", "dev", 1},             // unparseable latest
+		{"dev", "dev", 0},                // both unparseable
+		{"v1.2.3", "v1.2.3", 0},          // exact match
+		{"v0.0.1", "v0.0.2", -1},         // patch bump
+		{"v0.1.0", "v0.0.9", 1},          // minor > patch
 	}
 
 	for _, tt := range tests {

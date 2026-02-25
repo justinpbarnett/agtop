@@ -17,7 +17,7 @@ import (
 // Column widths for run list layout.
 const (
 	colIconW   = 2
-	colIDW     = 5
+	colIDW     = 8
 	colStateW  = 11
 	colTimeW   = 7
 	colTokensW = 8
@@ -138,7 +138,7 @@ func (r *RunList) updateFilter(msg tea.KeyMsg) (RunList, tea.Cmd) {
 }
 
 func (r RunList) View() string {
-	innerWidth := r.width - 2 // border sides
+	innerWidth := r.width - 2   // border sides
 	innerHeight := r.height - 2 // border top/bottom
 	if innerWidth < 0 {
 		innerWidth = 0

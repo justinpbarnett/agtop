@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -274,7 +273,6 @@ func (p *Persistence) Rehydrate(store *Store, cb RehydrateCallbacks) (RehydrateR
 	}
 
 	var result RehydrateResult
-	maxID := 0
 
 	for _, sf := range sessions {
 		r := sf.Run
@@ -320,15 +318,6 @@ func (p *Persistence) Rehydrate(store *Store, cb RehydrateCallbacks) (RehydrateR
 				cb.RecordCost(r.ID, sc)
 			}
 		}
-
-		// Track max numeric ID for counter restoration
-		if id, err := strconv.Atoi(r.ID); err == nil && id > maxID {
-			maxID = id
-		}
-	}
-
-	if maxID > 0 {
-		store.SetNextID(maxID)
 	}
 
 	// Initialize debounce state for rehydrated runs

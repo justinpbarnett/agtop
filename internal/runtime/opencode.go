@@ -24,7 +24,6 @@ func (o *OpenCodeRuntime) BuildArgs(prompt string, opts RunOptions) []string {
 	args := []string{
 		"run", prompt,
 		"--format", "json",
-		"--quiet",
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)

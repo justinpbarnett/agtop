@@ -1,6 +1,7 @@
 package panels
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -100,7 +101,7 @@ func TestRunListFilterFlow(t *testing.T) {
 func TestRunListScrollSnapshot(t *testing.T) {
 	s := run.NewStore()
 	for i := 0; i < 20; i++ {
-		s.Add(&run.Run{Branch: "branch", Workflow: "build", State: run.StateRunning})
+		s.Add(&run.Run{ID: fmt.Sprintf("scroll%02d", i), Branch: "branch", Workflow: "build", State: run.StateRunning})
 	}
 	rl := NewRunList(s)
 	rl.SetSize(60, 12)

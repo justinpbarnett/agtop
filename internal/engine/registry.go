@@ -6,10 +6,32 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/justinpbarnett/agtop/internal/config"
 	"github.com/justinpbarnett/agtop/internal/runtime"
 )
+
+// claudeToOpenCodeModel maps Claude shorthand model names to
+// the provider/model format that OpenCode expects.
+var claudeToOpenCodeModel = map[string]string{
+	"haiku":  "anthropic/claude-haiku-4-5-20251001",
+	"sonnet": "anthropic/claude-sonnet-4-6",
+	"opus":   "anthropic/claude-opus-4-6",
+}
+
+// resolveOpenCodeModel translates a Claude shorthand model name
+// (e.g. "sonnet") to OpenCode's provider/model format. Models
+// already in provider/model format are returned unchanged.
+func resolveOpenCodeModel(model string) string {
+	if strings.Contains(model, "/") {
+		return model
+	}
+	if mapped, ok := claudeToOpenCodeModel[model]; ok {
+		return mapped
+	}
+	return model
+}
 
 type SkillSource struct {
 	Dir      string
@@ -234,7 +256,7 @@ func (r *Registry) skillForOpenCode(skill *Skill) (*Skill, runtime.RunOptions, b
 	}
 
 	opts := runtime.RunOptions{
-		Model: model,
+		Model: resolveOpenCodeModel(model),
 		Agent: r.cfg.Runtime.OpenCode.Agent,
 	}
 	return skill, opts, true

@@ -14,7 +14,7 @@ type GTimerExpiredMsg struct{ ID int }
 
 // Unique panel IDs for double-tap timer disambiguation.
 const (
-	gTapIDLogView = 1
+	gTapIDLogView  = 1
 	gTapIDDiffView = 2
 	gTapIDDetail   = 3
 )

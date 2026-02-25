@@ -10,8 +10,8 @@ import (
 	"github.com/justinpbarnett/agtop/internal/config"
 	"github.com/justinpbarnett/agtop/internal/safety"
 	"github.com/justinpbarnett/agtop/internal/ui"
-	"github.com/justinpbarnett/agtop/internal/update"
 	"github.com/justinpbarnett/agtop/internal/ui/panels"
+	"github.com/justinpbarnett/agtop/internal/update"
 )
 
 func main() {

@@ -2,17 +2,20 @@ package run
 
 import (
 	"fmt"
+	"regexp"
 	"sync"
 	"testing"
 	"time"
 )
 
+var hexIDPattern = regexp.MustCompile(`^[0-9a-f]{7}$`)
+
 func TestStoreAdd(t *testing.T) {
 	s := NewStore()
 	id := s.Add(&Run{Branch: "feat/test"})
 
-	if id != "001" {
-		t.Errorf("expected id 001, got %s", id)
+	if !hexIDPattern.MatchString(id) {
+		t.Errorf("expected 7-char hex ID, got %s", id)
 	}
 
 	r, ok := s.Get(id)
@@ -21,6 +24,18 @@ func TestStoreAdd(t *testing.T) {
 	}
 	if r.Branch != "feat/test" {
 		t.Errorf("expected branch feat/test, got %s", r.Branch)
+	}
+}
+
+func TestStoreAddGeneratesUniqueIDs(t *testing.T) {
+	s := NewStore()
+	seen := make(map[string]bool)
+	for i := 0; i < 100; i++ {
+		id := s.Add(&Run{Branch: fmt.Sprintf("branch-%d", i)})
+		if seen[id] {
+			t.Errorf("duplicate ID generated: %s", id)
+		}
+		seen[id] = true
 	}
 }
 
@@ -164,17 +179,17 @@ func TestStoreSubscriber(t *testing.T) {
 		called++
 	})
 
-	s.Add(&Run{Branch: "a"})
+	id := s.Add(&Run{Branch: "a"})
 	if called != 1 {
 		t.Errorf("expected subscriber called 1 time after add, got %d", called)
 	}
 
-	s.Update("001", func(r *Run) { r.Tokens = 100 })
+	s.Update(id, func(r *Run) { r.Tokens = 100 })
 	if called != 2 {
 		t.Errorf("expected subscriber called 2 times after update, got %d", called)
 	}
 
-	s.Remove("001")
+	s.Remove(id)
 	if called != 3 {
 		t.Errorf("expected subscriber called 3 times after remove, got %d", called)
 	}

@@ -7,8 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	osExec "os/exec"
 	"os"
+	osExec "os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -460,10 +460,10 @@ func TestDeterministicCommit_NoChanges(t *testing.T) {
 	osExec.Command("git", "-C", dir, "commit", "-m", "initial").Run()
 
 	store := run.NewStore()
-	store.Add(&run.Run{Worktree: dir, State: run.StateRunning})
+	runID := store.Add(&run.Run{Worktree: dir, State: run.StateRunning})
 	ex := &Executor{store: store}
 
-	err := ex.deterministicCommit(context.Background(), "001", "build")
+	err := ex.deterministicCommit(context.Background(), runID, "build")
 	if err != nil {
 		t.Fatalf("expected no error on clean worktree, got: %v", err)
 	}
@@ -492,10 +492,10 @@ func TestDeterministicCommit_CreatesCommit(t *testing.T) {
 	}
 
 	store := run.NewStore()
-	store.Add(&run.Run{Worktree: dir, State: run.StateRunning})
+	runID := store.Add(&run.Run{Worktree: dir, State: run.StateRunning})
 	ex := &Executor{store: store}
 
-	if err := ex.deterministicCommit(context.Background(), "001", "build"); err != nil {
+	if err := ex.deterministicCommit(context.Background(), runID, "build"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -528,10 +528,10 @@ func TestDeterministicCommit_DeduplicatesIdenticalMessage(t *testing.T) {
 	}
 
 	store := run.NewStore()
-	store.Add(&run.Run{Worktree: dir, State: run.StateRunning})
+	runID := store.Add(&run.Run{Worktree: dir, State: run.StateRunning})
 	ex := &Executor{store: store}
 
-	if err := ex.deterministicCommit(context.Background(), "001", "build"); err != nil {
+	if err := ex.deterministicCommit(context.Background(), runID, "build"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -665,19 +665,19 @@ func TestExecutorShutdownPreservesRunState(t *testing.T) {
 	defer cleanup()
 	exec, store := newTestExecutor(rt)
 
-	store.Add(&run.Run{State: run.StateQueued})
-	exec.Execute("001", "build", "test prompt")
+	runID := store.Add(&run.Run{State: run.StateQueued})
+	exec.Execute(runID, "build", "test prompt")
 
 	// Wait for run to reach running state
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		r, _ := store.Get("001")
+		r, _ := store.Get(runID)
 		if r.State == run.StateRunning {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	r, _ := store.Get("001")
+	r, _ := store.Get(runID)
 	if r.State != run.StateRunning {
 		t.Fatalf("expected StateRunning before shutdown, got %s", r.State)
 	}
@@ -685,7 +685,7 @@ func TestExecutorShutdownPreservesRunState(t *testing.T) {
 	// Shutdown should cancel workflows but preserve run state
 	exec.Shutdown()
 
-	r, _ = store.Get("001")
+	r, _ = store.Get(runID)
 	if r.State != run.StateRunning {
 		t.Errorf("expected StateRunning after shutdown, got %s", r.State)
 	}
@@ -738,19 +738,19 @@ func TestExecuteWithJIRAExpansion(t *testing.T) {
 	exp := jira.NewExpander(c, "PROJ")
 	exec.SetJIRAExpander(exp)
 
-	store.Add(&run.Run{State: run.StateQueued, Prompt: "PROJ-42"})
-	exec.Execute("001", "build", "PROJ-42")
+	runID := store.Add(&run.Run{State: run.StateQueued, Prompt: "PROJ-42"})
+	exec.Execute(runID, "build", "PROJ-42")
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		r, _ := store.Get("001")
+		r, _ := store.Get(runID)
 		if r.IsTerminal() {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	r, ok := store.Get("001")
+	r, ok := store.Get(runID)
 	if !ok {
 		t.Fatal("run not found")
 	}
@@ -776,19 +776,19 @@ func TestExecuteJIRAExpansionErrorFallsThrough(t *testing.T) {
 	exp := jira.NewExpander(c, "PROJ")
 	exec.SetJIRAExpander(exp)
 
-	store.Add(&run.Run{State: run.StateQueued, Prompt: "PROJ-99"})
-	exec.Execute("001", "build", "PROJ-99")
+	runID := store.Add(&run.Run{State: run.StateQueued, Prompt: "PROJ-99"})
+	exec.Execute(runID, "build", "PROJ-99")
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		r, _ := store.Get("001")
+		r, _ := store.Get(runID)
 		if r.IsTerminal() {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	r, ok := store.Get("001")
+	r, ok := store.Get(runID)
 	if !ok {
 		t.Fatal("run not found")
 	}
@@ -859,7 +859,7 @@ func TestExecutorResumeReconnectedSkillIndex(t *testing.T) {
 	// Simulate a reconnected run at SkillIndex=2 in "plan-build" workflow
 	// plan-build = ["spec", "build", "test", "review"]; SkillIndex 2 means
 	// the 2nd skill ("build") was in progress, so resume should start from "build".
-	store.Add(&run.Run{
+	runID := store.Add(&run.Run{
 		State:      run.StateRunning,
 		Workflow:   "plan-build",
 		SkillIndex: 2,
@@ -867,19 +867,19 @@ func TestExecutorResumeReconnectedSkillIndex(t *testing.T) {
 		Prompt:     "implement feature",
 	})
 
-	exec.ResumeReconnected("001", "implement feature")
+	exec.ResumeReconnected(runID, "implement feature")
 
 	// Wait for workflow to complete
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		r, _ := store.Get("001")
+		r, _ := store.Get(runID)
 		if r.IsTerminal() {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	r, _ := store.Get("001")
+	r, _ := store.Get(runID)
 	// plan-build ends with "review", so terminal state is StateReviewing
 	if r.State != run.StateReviewing {
 		t.Errorf("expected StateReviewing, got %s (error: %s)", r.State, r.Error)

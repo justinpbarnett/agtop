@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 
-	"github.com/justinpbarnett/agtop/internal/update"
 	"github.com/justinpbarnett/agtop/internal/ui/panels"
+	"github.com/justinpbarnett/agtop/internal/update"
 )
 
 func runVersion(repo string) {

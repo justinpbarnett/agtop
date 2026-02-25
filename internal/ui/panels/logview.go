@@ -505,12 +505,12 @@ func (l *LogView) UpdateRunMeta(skill, branch string, buf *process.RingBuffer, e
 
 // Diff proxy methods — called by the app to pass diff data into the embedded DiffView.
 
-func (l *LogView) SetDiff(diff, stat string)  { l.diffView.SetDiff(diff, stat) }
-func (l *LogView) SetDiffLoading()             { l.diffView.SetLoading() }
-func (l *LogView) SetDiffError(err string)     { l.diffView.SetError(err) }
-func (l *LogView) SetDiffEmpty()               { l.diffView.SetEmpty() }
-func (l *LogView) SetDiffNoBranch()            { l.diffView.SetNoBranch() }
-func (l *LogView) SetDiffWaiting()             { l.diffView.SetWaiting() }
+func (l *LogView) SetDiff(diff, stat string) { l.diffView.SetDiff(diff, stat) }
+func (l *LogView) SetDiffLoading()           { l.diffView.SetLoading() }
+func (l *LogView) SetDiffError(err string)   { l.diffView.SetError(err) }
+func (l *LogView) SetDiffEmpty()             { l.diffView.SetEmpty() }
+func (l *LogView) SetDiffNoBranch()          { l.diffView.SetNoBranch() }
+func (l *LogView) SetDiffWaiting()           { l.diffView.SetWaiting() }
 
 func (l *LogView) updateDiffFocus() {
 	l.diffView.SetFocused(l.focused && l.activeTab == tabDiff)

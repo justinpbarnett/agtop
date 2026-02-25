@@ -14,7 +14,6 @@ import (
 	"github.com/justinpbarnett/agtop/internal/config"
 	"github.com/justinpbarnett/agtop/internal/cost"
 	"github.com/justinpbarnett/agtop/internal/engine"
-	"github.com/justinpbarnett/agtop/skills"
 	gitpkg "github.com/justinpbarnett/agtop/internal/git"
 	"github.com/justinpbarnett/agtop/internal/jira"
 	"github.com/justinpbarnett/agtop/internal/process"
@@ -27,6 +26,7 @@ import (
 	"github.com/justinpbarnett/agtop/internal/ui/panels"
 	"github.com/justinpbarnett/agtop/internal/ui/styles"
 	"github.com/justinpbarnett/agtop/internal/update"
+	"github.com/justinpbarnett/agtop/skills"
 )
 
 const (
@@ -52,36 +52,36 @@ type StartRunMsg struct {
 }
 
 type App struct {
-	config         *config.Config
-	store          *run.Store
-	manager        *process.Manager
-	registry       *engine.Registry
-	executor       *engine.Executor
-	pipeline       *engine.Pipeline
-	worktrees      *gitpkg.WorktreeManager
-	devServers     *server.DevServerManager
-	diffGen        *gitpkg.DiffGenerator
-	persistence    *run.Persistence
-	jiraExpander   *jira.Expander
-	pidWatchCancel func()
-	width          int
-	height         int
-	layout         layout.Layout
-	focusedPanel   int
-	runList        panels.RunList
-	logView        panels.LogView
-	detail         panels.Detail
-	statusBar      panels.StatusBar
-	helpOverlay    *panels.HelpOverlay
-	newRunModal    *panels.NewRunModal
-	followUpModal  *panels.FollowUpModal
-	runPickerModal *panels.RunPickerModal
-	initPrompt     *panels.InitPrompt
+	config          *config.Config
+	store           *run.Store
+	manager         *process.Manager
+	registry        *engine.Registry
+	executor        *engine.Executor
+	pipeline        *engine.Pipeline
+	worktrees       *gitpkg.WorktreeManager
+	devServers      *server.DevServerManager
+	diffGen         *gitpkg.DiffGenerator
+	persistence     *run.Persistence
+	jiraExpander    *jira.Expander
+	pidWatchCancel  func()
+	width           int
+	height          int
+	layout          layout.Layout
+	focusedPanel    int
+	runList         panels.RunList
+	logView         panels.LogView
+	detail          panels.Detail
+	statusBar       panels.StatusBar
+	helpOverlay     *panels.HelpOverlay
+	newRunModal     *panels.NewRunModal
+	followUpModal   *panels.FollowUpModal
+	runPickerModal  *panels.RunPickerModal
+	initPrompt      *panels.InitPrompt
 	keys            KeyMap
 	ready           bool
 	lastSyncedRunID string
 	updateRepo      string
-	fullscreenPanel int // -1 = normal layout, panelDetail/panelLogView = fullscreen
+	fullscreenPanel int                  // -1 = normal layout, panelDetail/panelLogView = fullscreen
 	runStates       map[string]run.State // tracks previous run states to detect transitions
 }
 
@@ -329,7 +329,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.logView.SetDiff(msg.Diff, msg.DiffStat)
 		}
 		return a, nil
-
 
 	case TickMsg:
 		return a, tickCmd()
@@ -1337,4 +1336,3 @@ func checkForUpdateCmd(repo string) tea.Cmd {
 		return UpdateAppliedMsg{Version: applied.Version}
 	}
 }
-

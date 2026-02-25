@@ -88,7 +88,7 @@ func TestGenerateGuardScriptFiltersBashUnsafe(t *testing.T) {
 	backtickPattern := "pattern with " + string(rune(96)) + "backtick" + string(rune(96))
 	cfg := config.SafetyConfig{
 		BlockedPatterns: []string{
-			`rm\s+-[rf]+\s+/`,      // safe
+			`rm\s+-[rf]+\s+/`,       // safe
 			`pattern with "quotes"`, // unsafe: double quotes
 			backtickPattern,         // unsafe: backtick
 			`DROP\s+TABLE`,          // safe

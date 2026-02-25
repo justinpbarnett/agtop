@@ -518,11 +518,10 @@ Build content.
 	if skill.Name != "build" {
 		t.Errorf("skill.Name = %q, want %q", skill.Name, "build")
 	}
-	// Model should come from OpenCode config since skill config overrides to "sonnet"
-	// but the registry mergeConfig already set skill.Model to "sonnet" from defaults.
-	// The skill-level model override takes precedence.
-	if opts.Model != "sonnet" {
-		t.Errorf("opts.Model = %q, want %q (skill config override)", opts.Model, "sonnet")
+	// Skill config overrides to "sonnet" (via mergeConfig), which gets translated
+	// to the OpenCode provider/model format.
+	if opts.Model != "anthropic/claude-sonnet-4-6" {
+		t.Errorf("opts.Model = %q, want %q (skill config override, translated)", opts.Model, "anthropic/claude-sonnet-4-6")
 	}
 	if opts.Agent != "code" {
 		t.Errorf("opts.Agent = %q, want %q", opts.Agent, "code")

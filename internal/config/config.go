@@ -1,17 +1,17 @@
 package config
 
 type Config struct {
-	Project      ProjectConfig              `toml:"project"`
-	Repos        []RepoConfig               `toml:"repos"`
-	Runtime      RuntimeConfig              `toml:"runtime"`
-	Workflows    map[string]WorkflowConfig  `toml:"workflows"`
-	Skills       map[string]SkillConfig     `toml:"skills"`
-	Safety       SafetyConfig               `toml:"safety"`
-	Limits       LimitsConfig               `toml:"limits"`
-	Merge        MergeConfig                `toml:"merge"`
-	UI           UIConfig                   `toml:"ui"`
-	Update       UpdateConfig               `toml:"update"`
-	Integrations IntegrationsConfig         `toml:"integrations"`
+	Project      ProjectConfig             `toml:"project"`
+	Repos        []RepoConfig              `toml:"repos"`
+	Runtime      RuntimeConfig             `toml:"runtime"`
+	Workflows    map[string]WorkflowConfig `toml:"workflows"`
+	Skills       map[string]SkillConfig    `toml:"skills"`
+	Safety       SafetyConfig              `toml:"safety"`
+	Limits       LimitsConfig              `toml:"limits"`
+	Merge        MergeConfig               `toml:"merge"`
+	UI           UIConfig                  `toml:"ui"`
+	Update       UpdateConfig              `toml:"update"`
+	Integrations IntegrationsConfig        `toml:"integrations"`
 }
 
 type RepoConfig struct {
@@ -46,9 +46,9 @@ type DevServerConfig struct {
 }
 
 type RuntimeConfig struct {
-	Default  string            `toml:"default"`
-	Claude   ClaudeConfig      `toml:"claude"`
-	OpenCode OpenCodeConfig    `toml:"opencode"`
+	Default  string         `toml:"default"`
+	Claude   ClaudeConfig   `toml:"claude"`
+	OpenCode OpenCodeConfig `toml:"opencode"`
 }
 
 type ClaudeConfig struct {

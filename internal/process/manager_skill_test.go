@@ -42,8 +42,7 @@ func TestStartSkillReturnsChannel(t *testing.T) {
 	rt := makeSkillMockRuntime("task completed", doneCh)
 	mgr, store := testManager(rt)
 
-	store.Add(&run.Run{State: run.StateRunning, CurrentSkill: "build"})
-	runID := "001"
+	runID := store.Add(&run.Run{State: run.StateRunning, CurrentSkill: "build"})
 
 	ch, err := mgr.StartSkill(runID, "test prompt", runtime.RunOptions{})
 	if err != nil {
@@ -74,8 +73,7 @@ func TestStartSkillDoesNotSetTerminalState(t *testing.T) {
 	rt := makeSkillMockRuntime("done", doneCh)
 	mgr, store := testManager(rt)
 
-	store.Add(&run.Run{State: run.StateRunning, CurrentSkill: "build"})
-	runID := "001"
+	runID := store.Add(&run.Run{State: run.StateRunning, CurrentSkill: "build"})
 
 	ch, err := mgr.StartSkill(runID, "test prompt", runtime.RunOptions{})
 	if err != nil {
@@ -109,8 +107,7 @@ func TestStartSkillDisconnectPreservesPID(t *testing.T) {
 	rt := makeSkillMockRuntime("done", doneCh)
 	mgr, store := testManager(rt)
 
-	store.Add(&run.Run{State: run.StateRunning, CurrentSkill: "build"})
-	runID := "001"
+	runID := store.Add(&run.Run{State: run.StateRunning, CurrentSkill: "build"})
 
 	ch, err := mgr.StartSkill(runID, "test prompt", runtime.RunOptions{})
 	if err != nil {
@@ -154,8 +151,7 @@ func TestStartSkillCapturesResultText(t *testing.T) {
 	rt := makeSkillMockRuntime(expectedText, doneCh)
 	mgr, store := testManager(rt)
 
-	store.Add(&run.Run{State: run.StateRunning, CurrentSkill: "build"})
-	runID := "001"
+	runID := store.Add(&run.Run{State: run.StateRunning, CurrentSkill: "build"})
 
 	ch, err := mgr.StartSkill(runID, "test prompt", runtime.RunOptions{})
 	if err != nil {
@@ -223,9 +219,9 @@ func TestStartSkillWithLogFilesCompletes(t *testing.T) {
 	limiter := &cost.LimitChecker{}
 	mgr := NewManager(store, rt, "claude", sessionsDir, cfg, tracker, limiter, nil)
 
-	store.Add(&run.Run{State: run.StateRunning, CurrentSkill: "route"})
+	runID := store.Add(&run.Run{State: run.StateRunning, CurrentSkill: "route"})
 
-	ch, err := mgr.StartSkill("001", "test prompt", runtime.RunOptions{})
+	ch, err := mgr.StartSkill(runID, "test prompt", runtime.RunOptions{})
 	if err != nil {
 		t.Fatalf("start skill: %v", err)
 	}

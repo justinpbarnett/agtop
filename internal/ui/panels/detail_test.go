@@ -70,7 +70,6 @@ func TestDetailBorder(t *testing.T) {
 	}
 }
 
-
 func TestDetailTerminalElapsedTime(t *testing.T) {
 	d := NewDetail()
 	d.SetSize(80, 15)

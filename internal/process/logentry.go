@@ -54,7 +54,7 @@ func NewLogEntry(ts, skill string, eventType StreamEventType, detail string) *Lo
 }
 
 var (
-	cwdOnce sync.Once
+	cwdOnce   sync.Once
 	cachedCWD string
 )
 
@@ -227,6 +227,28 @@ func interpretJSONSummary(raw, eventType, subtype string) string {
 	switch eventType {
 	case "system":
 		return interpretSystemSummary(raw, subtype)
+	case "step_start":
+		return "Step started"
+	case "step_finish":
+		var ev struct {
+			Part struct {
+				Reason string `json:"reason"`
+			} `json:"part"`
+		}
+		if json.Unmarshal([]byte(raw), &ev) == nil && ev.Part.Reason != "" {
+			return "Step finished — " + ev.Part.Reason
+		}
+		return "Step finished"
+	case "result":
+		var res struct {
+			Result string `json:"result"`
+		}
+		if json.Unmarshal([]byte(raw), &res) == nil && res.Result != "" {
+			return "Result — " + truncateLine(firstLine(res.Result), 60)
+		}
+		return "Result"
+	case "rate_limit_event":
+		return "Rate limited"
 	default:
 		label := eventType
 		if subtype != "" {
@@ -238,6 +260,14 @@ func interpretJSONSummary(raw, eventType, subtype string) string {
 
 func interpretSystemSummary(raw, subtype string) string {
 	switch subtype {
+	case "task_started":
+		var task struct {
+			Description string `json:"description"`
+		}
+		if json.Unmarshal([]byte(raw), &task) == nil && task.Description != "" {
+			return "Task started — " + truncateLine(task.Description, 60)
+		}
+		return "Task started"
 	case "init":
 		var init struct {
 			Model          string   `json:"model"`

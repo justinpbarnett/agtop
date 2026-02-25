@@ -338,7 +338,7 @@ func (w *writeCloser) Close() error {
 }
 
 type blockingReader struct {
-	w *writeCloser
+	w   *writeCloser
 	buf []byte
 }
 

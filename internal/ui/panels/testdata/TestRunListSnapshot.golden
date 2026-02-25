@@ -1,9 +1,9 @@
 ╭─ [1] Runs (2 active) ────────────────────────────────────╮
-│      ID  STATE          TIME   TOKENS    COST            │
-│✗    004  failed           4m     8.7k   $0.31            │
-│◉    003  reviewing       10m    45.2k   $1.23            │
-│◐    002  paused           7m     3.1k   $0.08            │
-│⠋    001  running          3m    12.4k   $0.42            │
+│         ID  STATE          TIME   TOKENS    COST         │
+│✗   0a1b2c3  failed           4m     8.7k   $0.31         │
+│◉   c7d8e9f  reviewing       10m    45.2k   $1.23         │
+│◐   e4f5a6b  paused           7m     3.1k   $0.08         │
+│⠋   a1b2c3d  running          3m    12.4k   $0.42         │
 │                                                          │
 │                                                          │
 │                                                          │

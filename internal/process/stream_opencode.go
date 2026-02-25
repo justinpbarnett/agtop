@@ -8,60 +8,104 @@ import (
 	"strings"
 )
 
-// OpenCode JSON event structures.
-// OpenCode's --format json outputs line-delimited JSON with a "type" field
-// and a "properties" object. The schema is not fully documented, so the
-// parser is defensive — unknown event types become EventRaw.
+// OpenCode parser handles two event formats that appear in the same stream:
+//
+// 1. Claude Code stream-json format (from the outer Claude Code process):
+//    {"type":"assistant","message":{"content":[...],"usage":{...}}}
+//    {"type":"user","message":{"content":[...]}}
+//    {"type":"result","subtype":"success","total_cost_usd":0.01,...}
+//    {"type":"rate_limit_event","rate_limit_info":{...}}
+//    {"type":"system","subtype":"init",...}
+//
+// 2. OpenCode v1.2.14 flat format (from the OpenCode runtime):
+//    {"type":"text","timestamp":...,"part":{"type":"text","text":"..."}}
+//    {"type":"tool_use","timestamp":...,"part":{"type":"tool","tool":"Read","state":{...}}}
+//    {"type":"step_finish","timestamp":...,"part":{"cost":0.002,"tokens":{...}}}
+
+// --- Shared envelope ---
 
 type ocEvent struct {
-	Type       string          `json:"type"`
-	Properties json.RawMessage `json:"properties,omitempty"`
+	Type      string          `json:"type"`
+	Subtype   string          `json:"subtype,omitempty"`
+	Timestamp int64           `json:"timestamp,omitempty"`
+	SessionID string          `json:"sessionID,omitempty"`
+	Part      json.RawMessage `json:"part,omitempty"`
+	Error     json.RawMessage `json:"error,omitempty"`
+	// Claude Code fields
+	Message  json.RawMessage `json:"message,omitempty"`
+	Result   string          `json:"result,omitempty"`
+	CostUSD  float64         `json:"total_cost_usd,omitempty"`
+	Usage    json.RawMessage `json:"usage,omitempty"`
+	IsError  bool            `json:"is_error,omitempty"`
 }
 
-type ocPartUpdated struct {
-	Part ocPart `json:"part"`
-}
+// --- OpenCode part types ---
 
 type ocPart struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ToolName  string          `json:"toolName,omitempty"`
-	ToolInput json.RawMessage `json:"input,omitempty"`
-	Content   string          `json:"content,omitempty"`
+	Type   string       `json:"type"`
+	Text   string       `json:"text,omitempty"`
+	Tool   string       `json:"tool,omitempty"`
+	State  *ocToolState `json:"state,omitempty"`
+	Cost   float64      `json:"cost,omitempty"`
+	Tokens *ocTokens    `json:"tokens,omitempty"`
+	Reason string       `json:"reason,omitempty"`
 }
 
-type ocMessageUpdated struct {
-	Message ocMessage `json:"message"`
+type ocToolState struct {
+	Status string          `json:"status"`
+	Input  json.RawMessage `json:"input,omitempty"`
+	Output string          `json:"output,omitempty"`
+	Error  string          `json:"error,omitempty"`
+	Title  string          `json:"title,omitempty"`
 }
 
-type ocMessage struct {
-	Role    string    `json:"role"`
-	Content string    `json:"content,omitempty"`
-	Parts   []ocPart  `json:"parts,omitempty"`
-	Usage   *ocUsage  `json:"usage,omitempty"`
+type ocTokens struct {
+	Total     int      `json:"total"`
+	Input     int      `json:"input"`
+	Output    int      `json:"output"`
+	Reasoning int      `json:"reasoning,omitempty"`
+	Cache     *ocCache `json:"cache,omitempty"`
 }
 
-type ocUsage struct {
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	TotalCost    float64 `json:"total_cost,omitempty"`
-}
-
-type ocSessionUpdated struct {
-	Session ocSession `json:"session"`
-}
-
-type ocSession struct {
-	Status string   `json:"status"`
-	Usage  *ocUsage `json:"usage,omitempty"`
+type ocCache struct {
+	Read  int `json:"read"`
+	Write int `json:"write"`
 }
 
 type ocError struct {
-	Error   string `json:"error,omitempty"`
-	Message string `json:"message,omitempty"`
+	Name string `json:"name,omitempty"`
+	Data struct {
+		Message    string `json:"message,omitempty"`
+		StatusCode int    `json:"statusCode,omitempty"`
+	} `json:"data,omitempty"`
 }
 
-// OpenCodeStreamParser translates OpenCode's JSON events into StreamEvent values.
+// --- Claude Code message types ---
+
+type ccContentBlock struct {
+	Type  string          `json:"type"`
+	Text  string          `json:"text,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
+}
+
+type ccMessage struct {
+	Content []ccContentBlock `json:"content"`
+}
+
+type ccUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
+type ccRateLimitInfo struct {
+	Status        string  `json:"status"`
+	RateLimitType string  `json:"rateLimitType"`
+	Utilization   float64 `json:"utilization"`
+}
+
+// OpenCodeStreamParser translates events from both Claude Code and OpenCode
+// formats into StreamEvent values.
 type OpenCodeStreamParser struct {
 	reader io.Reader
 	events chan StreamEvent
@@ -105,94 +149,146 @@ func (p *OpenCodeStreamParser) Parse(ctx context.Context) {
 		}
 
 		switch ev.Type {
-		case "message.part.updated":
-			var part ocPartUpdated
-			if err := json.Unmarshal(ev.Properties, &part); err != nil {
-				p.send(ctx, StreamEvent{Type: EventRaw, Text: line})
-				continue
-			}
-			switch part.Part.Type {
-			case "text":
-				text := part.Part.Text
-				if text == "" {
-					text = part.Part.Content
-				}
-				p.send(ctx, StreamEvent{Type: EventText, Text: text})
-			case "tool-invocation", "tool_use":
-				p.send(ctx, StreamEvent{
-					Type:      EventToolUse,
-					ToolName:  part.Part.ToolName,
-					ToolInput: string(part.Part.ToolInput),
-				})
-			case "tool-result", "tool_result":
-				text := part.Part.Text
-				if text == "" {
-					text = part.Part.Content
-				}
-				p.send(ctx, StreamEvent{Type: EventToolResult, Text: text})
-			case "reasoning", "thinking":
-				// Treat reasoning/thinking as text
-				text := part.Part.Text
-				if text == "" {
-					text = part.Part.Content
-				}
-				p.send(ctx, StreamEvent{Type: EventText, Text: text})
-			default:
-				p.send(ctx, StreamEvent{Type: EventRaw, Text: line})
-			}
+		// --- OpenCode format events ---
 
-		case "message.updated":
-			var msg ocMessageUpdated
-			if err := json.Unmarshal(ev.Properties, &msg); err != nil {
+		case "text":
+			var part ocPart
+			if err := json.Unmarshal(ev.Part, &part); err != nil {
 				p.send(ctx, StreamEvent{Type: EventRaw, Text: line})
 				continue
 			}
-			if msg.Message.Usage != nil {
-				u := msg.Message.Usage
-				total := u.InputTokens + u.OutputTokens
+			p.send(ctx, StreamEvent{Type: EventText, Text: part.Text})
+
+		case "reasoning":
+			var part ocPart
+			if err := json.Unmarshal(ev.Part, &part); err != nil {
+				p.send(ctx, StreamEvent{Type: EventRaw, Text: line})
+				continue
+			}
+			p.send(ctx, StreamEvent{Type: EventText, Text: part.Text})
+
+		case "tool_use":
+			var part ocPart
+			if err := json.Unmarshal(ev.Part, &part); err != nil {
+				p.send(ctx, StreamEvent{Type: EventRaw, Text: line})
+				continue
+			}
+			toolInput := ""
+			if part.State != nil && len(part.State.Input) > 0 {
+				toolInput = string(part.State.Input)
+			}
+			p.send(ctx, StreamEvent{
+				Type:      EventToolUse,
+				ToolName:  part.Tool,
+				ToolInput: toolInput,
+			})
+			if part.State != nil && part.State.Output != "" {
 				p.send(ctx, StreamEvent{
-					Type: EventResult,
-					Text: msg.Message.Content,
-					Usage: &UsageData{
-						InputTokens:  u.InputTokens,
-						OutputTokens: u.OutputTokens,
-						TotalTokens:  total,
-						CostUSD:      u.TotalCost,
-					},
+					Type: EventToolResult,
+					Text: part.State.Output,
 				})
 			}
 
-		case "session.updated":
-			var sess ocSessionUpdated
-			if err := json.Unmarshal(ev.Properties, &sess); err != nil {
+		case "step_start":
+			// Lifecycle marker — skip silently
+
+		case "step_finish":
+			var part ocPart
+			if err := json.Unmarshal(ev.Part, &part); err != nil {
 				p.send(ctx, StreamEvent{Type: EventRaw, Text: line})
 				continue
 			}
-			if sess.Session.Usage != nil {
-				u := sess.Session.Usage
-				total := u.InputTokens + u.OutputTokens
-				p.send(ctx, StreamEvent{
-					Type: EventResult,
-					Usage: &UsageData{
-						InputTokens:  u.InputTokens,
-						OutputTokens: u.OutputTokens,
-						TotalTokens:  total,
-						CostUSD:      u.TotalCost,
-					},
-				})
+			var usage *UsageData
+			if part.Tokens != nil {
+				total := part.Tokens.Total
+				if total == 0 {
+					total = part.Tokens.Input + part.Tokens.Output + part.Tokens.Reasoning
+				}
+				usage = &UsageData{
+					InputTokens:  part.Tokens.Input,
+					OutputTokens: part.Tokens.Output,
+					TotalTokens:  total,
+					CostUSD:      part.Cost,
+				}
 			}
+			p.send(ctx, StreamEvent{
+				Type:  EventResult,
+				Usage: usage,
+			})
 
 		case "error":
 			var errEv ocError
-			if err := json.Unmarshal(ev.Properties, &errEv); err != nil {
+			if err := json.Unmarshal(ev.Error, &errEv); err != nil {
 				p.send(ctx, StreamEvent{Type: EventError, Text: line})
 				continue
 			}
-			errText := errEv.Error
+			errText := errEv.Data.Message
 			if errText == "" {
-				errText = errEv.Message
+				errText = errEv.Name
 			}
 			p.send(ctx, StreamEvent{Type: EventError, Text: errText})
+
+		// --- Claude Code format events ---
+
+		case "assistant":
+			var msg ccMessage
+			if err := json.Unmarshal(ev.Message, &msg); err != nil {
+				p.send(ctx, StreamEvent{Type: EventRaw, Text: line})
+				continue
+			}
+			for _, block := range msg.Content {
+				switch block.Type {
+				case "text":
+					p.send(ctx, StreamEvent{Type: EventText, Text: block.Text})
+				case "tool_use":
+					p.send(ctx, StreamEvent{
+						Type:      EventToolUse,
+						ToolName:  block.Name,
+						ToolInput: string(block.Input),
+					})
+				case "tool_result":
+					p.send(ctx, StreamEvent{Type: EventToolResult, Text: block.Text})
+				}
+			}
+
+		case "user":
+			text := p.extractUserContent(line, ev)
+			if text != "" {
+				p.send(ctx, StreamEvent{Type: EventUser, Text: text})
+			}
+
+		case "result":
+			event := StreamEvent{Type: EventResult, Text: ev.Result}
+			if len(ev.Usage) > 0 {
+				var usage ccUsage
+				if json.Unmarshal(ev.Usage, &usage) == nil {
+					total := usage.InputTokens + usage.OutputTokens
+					event.Usage = &UsageData{
+						InputTokens:  usage.InputTokens,
+						OutputTokens: usage.OutputTokens,
+						TotalTokens:  total,
+						CostUSD:      ev.CostUSD,
+					}
+				}
+			}
+			p.send(ctx, event)
+
+		case "rate_limit_event":
+			var rl struct {
+				Info ccRateLimitInfo `json:"rate_limit_info"`
+			}
+			if json.Unmarshal([]byte(line), &rl) == nil {
+				if rl.Info.Status == "allowed" {
+					continue
+				}
+				p.send(ctx, StreamEvent{
+					Type: EventError,
+					Text: "Rate limited (" + rl.Info.RateLimitType + "): " + rl.Info.Status,
+				})
+			}
+
+		case "system":
+			p.send(ctx, StreamEvent{Type: EventRaw, Text: line})
 
 		default:
 			p.send(ctx, StreamEvent{Type: EventRaw, Text: line})
@@ -204,6 +300,27 @@ func (p *OpenCodeStreamParser) Parse(ctx context.Context) {
 	} else {
 		p.done <- nil
 	}
+}
+
+func (p *OpenCodeStreamParser) extractUserContent(rawLine string, ev ocEvent) string {
+	if len(ev.Message) > 0 {
+		var msg ccMessage
+		if json.Unmarshal(ev.Message, &msg) == nil {
+			for _, block := range msg.Content {
+				if block.Type == "text" && block.Text != "" {
+					return block.Text
+				}
+			}
+		}
+		// Content might be a plain string
+		var raw struct {
+			Content string `json:"content"`
+		}
+		if json.Unmarshal(ev.Message, &raw) == nil && raw.Content != "" {
+			return raw.Content
+		}
+	}
+	return ""
 }
 
 func (p *OpenCodeStreamParser) send(ctx context.Context, event StreamEvent) {
