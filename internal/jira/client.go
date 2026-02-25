@@ -13,6 +13,12 @@ import (
 	"github.com/justinpbarnett/agtop/internal/config"
 )
 
+type Comment struct {
+	Author  string
+	Body    string
+	Created string
+}
+
 type Issue struct {
 	Key                string
 	Summary            string
@@ -22,6 +28,7 @@ type Issue struct {
 	Status             string
 	Labels             []string
 	AcceptanceCriteria string
+	Comments           []Comment
 }
 
 type Client struct {
@@ -106,7 +113,62 @@ func (c *Client) FetchIssue(key string) (*Issue, error) {
 		}
 	}
 
+	comments, commErr := c.FetchComments(key)
+	if commErr != nil {
+		fmt.Fprintf(os.Stderr, "jira: warning: failed to fetch comments for %s: %v\n", key, commErr)
+	} else {
+		issue.Comments = comments
+	}
+
 	return issue, nil
+}
+
+// FetchComments retrieves the comments for a JIRA issue, ordered oldest-first.
+func (c *Client) FetchComments(key string) ([]Comment, error) {
+	url := fmt.Sprintf("%s/rest/api/3/issue/%s/comment?orderBy=created", c.baseURL, key)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("jira: creating comment request: %w", err)
+	}
+
+	auth := base64.StdEncoding.EncodeToString([]byte(c.email + ":" + c.token))
+	req.Header.Set("Authorization", "Basic "+auth)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("jira: comment request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("jira: reading comment response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("jira: comments for %s returned %d: %s", key, resp.StatusCode, truncate(string(body), 200))
+	}
+
+	var raw apiCommentResponse
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("jira: parsing comment response: %w", err)
+	}
+
+	comments := make([]Comment, 0, len(raw.Comments))
+	for _, ac := range raw.Comments {
+		comment := Comment{
+			Author:  ac.Author.DisplayName,
+			Created: ac.Created,
+		}
+		if ac.Body != nil {
+			comment.Body = extractADFText(ac.Body)
+		}
+		comments = append(comments, comment)
+	}
+
+	return comments, nil
 }
 
 // apiResponse maps the JIRA REST API v3 issue response.
@@ -126,6 +188,20 @@ type apiFields struct {
 
 type apiName struct {
 	Name string `json:"name"`
+}
+
+type apiCommentResponse struct {
+	Comments []apiComment `json:"comments"`
+}
+
+type apiComment struct {
+	Author  apiCommentAuthor `json:"author"`
+	Body    json.RawMessage  `json:"body"`
+	Created string           `json:"created"`
+}
+
+type apiCommentAuthor struct {
+	DisplayName string `json:"displayName"`
 }
 
 // extractADFText walks an Atlassian Document Format tree and extracts plain text.

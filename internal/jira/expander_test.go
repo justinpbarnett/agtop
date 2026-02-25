@@ -11,6 +11,13 @@ import (
 
 func newTestServer(key, summary, description string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if strings.HasSuffix(r.URL.Path, "/comment") {
+			w.Write([]byte(`{"comments":[]}`))
+			return
+		}
+
 		descADF, _ := json.Marshal(map[string]interface{}{
 			"type": "doc",
 			"content": []map[string]interface{}{
@@ -34,7 +41,6 @@ func newTestServer(key, summary, description string) *httptest.Server {
 				"labels":      []string{},
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
 		b, _ := json.Marshal(resp)
 		w.Write(b)
 	}))
@@ -78,11 +84,14 @@ func TestExpandWithTrailingText(t *testing.T) {
 	if taskID != "PROJ-456" {
 		t.Errorf("expected taskID 'PROJ-456', got %q", taskID)
 	}
-	if !strings.Contains(expanded, "### Additional Context") {
-		t.Error("expected Additional Context section")
+	if strings.Contains(expanded, "### Additional Context") {
+		t.Error("expected no Additional Context section — trailing text should appear naturally after the block")
 	}
 	if !strings.Contains(expanded, "focus on the API layer only") {
-		t.Error("expected trailing text in expanded prompt")
+		t.Error("expected trailing text preserved in expanded prompt")
+	}
+	if !strings.Contains(expanded, "## PROJ-456: Add avatar upload") {
+		t.Error("expected issue header in expanded prompt")
 	}
 }
 
@@ -143,6 +152,61 @@ func TestExpandFetchError(t *testing.T) {
 	}
 }
 
+func TestExpandInlineMatch(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer("PROJ-123", "Inline task", "Inline description")
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "u@t.com", "tok")
+	e := NewExpander(c, "PROJ")
+
+	expanded, taskID, err := e.Expand("implement PROJ-123 focusing on the API")
+	if err != nil {
+		t.Fatalf("Expand() error: %v", err)
+	}
+	if taskID != "PROJ-123" {
+		t.Errorf("expected taskID 'PROJ-123', got %q", taskID)
+	}
+	if !strings.Contains(expanded, "implement ") {
+		t.Error("expected prefix text preserved")
+	}
+	if !strings.Contains(expanded, "## PROJ-123: Inline task") {
+		t.Error("expected issue header in expanded prompt")
+	}
+	if !strings.Contains(expanded, "focusing on the API") {
+		t.Error("expected suffix text preserved")
+	}
+	if strings.Contains(expanded, "PROJ-123 focusing") {
+		t.Error("expected JIRA key to be replaced, not left in place alongside suffix")
+	}
+}
+
+func TestExpandMidSentence(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer("PROJ-42", "Mid-sentence task", "Mid description")
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "u@t.com", "tok")
+	e := NewExpander(c, "PROJ")
+
+	expanded, taskID, err := e.Expand("please look at PROJ-42 and implement it")
+	if err != nil {
+		t.Fatalf("Expand() error: %v", err)
+	}
+	if taskID != "PROJ-42" {
+		t.Errorf("expected taskID 'PROJ-42', got %q", taskID)
+	}
+	if !strings.Contains(expanded, "please look at ") {
+		t.Error("expected prefix text preserved")
+	}
+	if !strings.Contains(expanded, "## PROJ-42: Mid-sentence task") {
+		t.Error("expected issue header in expanded prompt")
+	}
+	if !strings.Contains(expanded, " and implement it") {
+		t.Error("expected suffix text preserved")
+	}
+}
+
 func TestIsIssueKey(t *testing.T) {
 	t.Parallel()
 	c := NewClient("http://unused", "u@t.com", "tok")
@@ -155,6 +219,7 @@ func TestIsIssueKey(t *testing.T) {
 		{"PROJ-123", true},
 		{"proj-1", true},
 		{"PROJ-999 extra text", true},
+		{"implement PROJ-123", true},
 		{"OTHER-123", false},
 		{"just a normal prompt", false},
 		{"", false},

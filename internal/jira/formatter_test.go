@@ -110,3 +110,48 @@ func TestFormatPromptNoLabels(t *testing.T) {
 		t.Error("expected no labels section for empty labels")
 	}
 }
+
+func TestFormatPromptWithComments(t *testing.T) {
+	t.Parallel()
+	issue := &Issue{
+		Key:     "PROJ-3",
+		Summary: "Task with comments",
+		Comments: []Comment{
+			{Author: "Alice", Created: "2024-01-15T10:00:00.000+0000", Body: "First comment body"},
+			{Author: "Bob", Created: "2024-01-16T12:30:00.000+0000", Body: "Second comment body"},
+		},
+	}
+
+	got := FormatPrompt(issue)
+
+	if !strings.Contains(got, "### Comments") {
+		t.Error("expected Comments section")
+	}
+	if !strings.Contains(got, "**Alice**") {
+		t.Error("expected first comment author")
+	}
+	if !strings.Contains(got, "First comment body") {
+		t.Error("expected first comment body")
+	}
+	if !strings.Contains(got, "**Bob**") {
+		t.Error("expected second comment author")
+	}
+	if !strings.Contains(got, "Second comment body") {
+		t.Error("expected second comment body")
+	}
+}
+
+func TestFormatPromptNoComments(t *testing.T) {
+	t.Parallel()
+	issue := &Issue{
+		Key:      "PROJ-4",
+		Summary:  "Task without comments",
+		Comments: []Comment{},
+	}
+
+	got := FormatPrompt(issue)
+
+	if strings.Contains(got, "### Comments") {
+		t.Error("expected no Comments section when comments are empty")
+	}
+}

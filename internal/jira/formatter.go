@@ -46,5 +46,12 @@ func FormatPrompt(issue *Issue) string {
 		b.WriteString("\n")
 	}
 
+	if len(issue.Comments) > 0 {
+		b.WriteString("\n### Comments\n")
+		for _, c := range issue.Comments {
+			fmt.Fprintf(&b, "\n**%s** (%s):\n%s\n", c.Author, c.Created, c.Body)
+		}
+	}
+
 	return b.String()
 }

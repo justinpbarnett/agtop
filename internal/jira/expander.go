@@ -16,9 +16,8 @@ type Expander struct {
 
 // NewExpander creates an Expander for the given project key.
 func NewExpander(client *Client, projectKey string) *Expander {
-	// Match the project key followed by a dash and digits at the start of the prompt,
-	// optionally followed by whitespace and additional user text.
-	pat := fmt.Sprintf(`(?i)^(%s-\d+)\s*(.*)$`, regexp.QuoteMeta(projectKey))
+	// Match the project key followed by a dash and digits anywhere in the prompt.
+	pat := fmt.Sprintf(`(?i)(%s-\d+)`, regexp.QuoteMeta(projectKey))
 	return &Expander{
 		client:     client,
 		projectKey: projectKey,
@@ -26,35 +25,31 @@ func NewExpander(client *Client, projectKey string) *Expander {
 	}
 }
 
-// Expand checks if the prompt starts with a JIRA issue key. If so, it fetches
-// the issue and returns an expanded prompt with full issue details. Any trailing
-// text after the issue key is preserved as additional context. If the prompt does
-// not match, it is returned unchanged with an empty taskID.
+// Expand searches for a JIRA issue key anywhere in the prompt. If found, it
+// fetches the issue (including comments) and replaces the key in-place with
+// the full formatted issue block, preserving any surrounding text. If no key
+// is found, the prompt is returned unchanged with an empty taskID.
 func (e *Expander) Expand(prompt string) (expanded string, taskID string, err error) {
-	matches := e.pattern.FindStringSubmatch(strings.TrimSpace(prompt))
-	if matches == nil {
+	trimmed := strings.TrimSpace(prompt)
+	loc := e.pattern.FindStringSubmatchIndex(trimmed)
+	if loc == nil {
 		return prompt, "", nil
 	}
 
-	issueKey := strings.ToUpper(matches[1])
-	extraText := strings.TrimSpace(matches[2])
+	issueKey := strings.ToUpper(trimmed[loc[2]:loc[3]])
+	prefix := trimmed[:loc[0]]
+	suffix := trimmed[loc[1]:]
 
 	issue, err := e.client.FetchIssue(issueKey)
 	if err != nil {
 		return prompt, "", fmt.Errorf("jira expand: %w", err)
 	}
 
-	result := FormatPrompt(issue)
-
-	if extraText != "" {
-		result += "\n### Additional Context\n\n" + extraText + "\n"
-	}
-
-	return result, issueKey, nil
+	return prefix + FormatPrompt(issue) + suffix, issueKey, nil
 }
 
-// IsIssueKey returns true if the prompt starts with a JIRA issue key pattern
-// for this expander's project. Does not make any network calls.
+// IsIssueKey returns true if the prompt contains a JIRA issue key pattern
+// for this expander's project anywhere in the text. Does not make any network calls.
 func (e *Expander) IsIssueKey(prompt string) bool {
 	return e.pattern.MatchString(strings.TrimSpace(prompt))
 }

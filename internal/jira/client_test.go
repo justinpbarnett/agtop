@@ -45,14 +45,18 @@ func issueJSON(key, summary, description, issueType, priority, status string, la
 func TestFetchIssue(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/rest/api/3/issue/PROJ-123" {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/rest/api/3/issue/PROJ-123":
+			if r.Header.Get("Authorization") == "" {
+				t.Error("expected Authorization header")
+			}
+			w.Write([]byte(issueJSON("PROJ-123", "Fix login bug", "Users cannot log in", "Bug", "High", "To Do", []string{"backend", "auth"})))
+		case "/rest/api/3/issue/PROJ-123/comment":
+			w.Write([]byte(`{"comments":[]}`))
+		default:
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-		if r.Header.Get("Authorization") == "" {
-			t.Error("expected Authorization header")
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(issueJSON("PROJ-123", "Fix login bug", "Users cannot log in", "Bug", "High", "To Do", []string{"backend", "auth"})))
 	}))
 	defer srv.Close()
 
@@ -295,6 +299,124 @@ func TestNewClientFromConfig(t *testing.T) {
 	}
 	if c.token != "mytoken" {
 		t.Errorf("expected token 'mytoken', got %q", c.token)
+	}
+}
+
+func TestFetchComments(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"comments": [
+				{
+					"author": {"displayName": "Alice"},
+					"created": "2024-01-15T10:00:00.000+0000",
+					"body": {"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"First comment"}]}]}
+				},
+				{
+					"author": {"displayName": "Bob"},
+					"created": "2024-01-16T12:30:00.000+0000",
+					"body": {"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Second comment"}]}]}
+				}
+			]
+		}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "user@test.com", "token")
+	comments, err := c.FetchComments("PROJ-1")
+	if err != nil {
+		t.Fatalf("FetchComments() error: %v", err)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("expected 2 comments, got %d", len(comments))
+	}
+	if comments[0].Author != "Alice" {
+		t.Errorf("expected author 'Alice', got %q", comments[0].Author)
+	}
+	if comments[0].Body != "First comment" {
+		t.Errorf("expected body 'First comment', got %q", comments[0].Body)
+	}
+	if comments[0].Created != "2024-01-15T10:00:00.000+0000" {
+		t.Errorf("unexpected created: %q", comments[0].Created)
+	}
+	if comments[1].Author != "Bob" {
+		t.Errorf("expected author 'Bob', got %q", comments[1].Author)
+	}
+}
+
+func TestFetchCommentsEmpty(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"comments":[]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "user@test.com", "token")
+	comments, err := c.FetchComments("PROJ-1")
+	if err != nil {
+		t.Fatalf("FetchComments() error: %v", err)
+	}
+	if len(comments) != 0 {
+		t.Errorf("expected 0 comments, got %d", len(comments))
+	}
+}
+
+func TestFetchCommentsError(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Internal Server Error"))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "user@test.com", "token")
+	_, err := c.FetchComments("PROJ-1")
+	if err == nil {
+		t.Fatal("expected error for 500")
+	}
+	if !contains(err.Error(), "500") {
+		t.Errorf("expected error to contain '500', got %q", err.Error())
+	}
+}
+
+func TestFetchIssueIncludesComments(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/rest/api/3/issue/PROJ-200":
+			w.Write([]byte(issueJSON("PROJ-200", "Issue with comments", "", "Task", "Medium", "Open", nil)))
+		case "/rest/api/3/issue/PROJ-200/comment":
+			w.Write([]byte(`{
+				"comments": [
+					{
+						"author": {"displayName": "Carol"},
+						"created": "2024-02-01T09:00:00.000+0000",
+						"body": {"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"A comment"}]}]}
+					}
+				]
+			}`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "user@test.com", "token")
+	issue, err := c.FetchIssue("PROJ-200")
+	if err != nil {
+		t.Fatalf("FetchIssue() error: %v", err)
+	}
+	if len(issue.Comments) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(issue.Comments))
+	}
+	if issue.Comments[0].Author != "Carol" {
+		t.Errorf("expected comment author 'Carol', got %q", issue.Comments[0].Author)
+	}
+	if issue.Comments[0].Body != "A comment" {
+		t.Errorf("expected comment body 'A comment', got %q", issue.Comments[0].Body)
 	}
 }
 
