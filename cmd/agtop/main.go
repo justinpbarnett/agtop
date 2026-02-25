@@ -5,10 +5,12 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/justinpbarnett/agtop/internal/config"
 	"github.com/justinpbarnett/agtop/internal/safety"
+	"github.com/justinpbarnett/agtop/internal/setup"
 	"github.com/justinpbarnett/agtop/internal/ui"
 	"github.com/justinpbarnett/agtop/internal/ui/panels"
 	"github.com/justinpbarnett/agtop/internal/update"
@@ -26,7 +28,8 @@ func main() {
 		switch os.Args[1] {
 		case "init":
 			useAI := !hasFlag(os.Args[2:], "--no-ai")
-			if err := runInit(cfg, useAI); err != nil {
+			runtimeFlag := flagValue(os.Args[2:], "--runtime")
+			if err := runInit(cfg, useAI, runtimeFlag); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}
@@ -71,8 +74,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", safetyErr)
 	}
 
-	// Silence internal logging so no log.Printf output leaks to the terminal
-	// and disrupts the TUI layout during normal operation.
+	// Make the embedded config template available to the setup package
+	// so in-process init (from the onboarding modal) can generate agtop.toml.
+	setup.DefaultConfig = defaultConfig
+
 	log.SetOutput(io.Discard)
 
 	model := ui.NewApp(cfg)
@@ -95,4 +100,16 @@ func hasFlag(args []string, flag string) bool {
 		}
 	}
 	return false
+}
+
+func flagValue(args []string, flag string) string {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+		if strings.HasPrefix(a, flag+"=") {
+			return strings.TrimPrefix(a, flag+"=")
+		}
+	}
+	return ""
 }

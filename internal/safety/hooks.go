@@ -54,6 +54,27 @@ func (h *HookEngine) GenerateSettings() map[string]interface{} {
 	}
 }
 
+// GenerateOpenCodeSettings returns the opencode.json permission structure
+// that allows tools needed by agtop workflows in non-interactive mode.
+func (h *HookEngine) GenerateOpenCodeSettings() map[string]interface{} {
+	bash := map[string]interface{}{
+		"*": "allow",
+	}
+	for _, p := range h.matcher.Patterns() {
+		bash[p] = "deny"
+	}
+	return map[string]interface{}{
+		"permission": map[string]interface{}{
+			"read": "allow",
+			"edit": "allow",
+			"bash": bash,
+			"glob": "allow",
+			"grep": "allow",
+			"list": "allow",
+		},
+	}
+}
+
 // Matcher returns the underlying PatternMatcher.
 func (h *HookEngine) Matcher() *PatternMatcher {
 	return h.matcher

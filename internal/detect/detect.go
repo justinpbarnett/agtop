@@ -54,6 +54,11 @@ func detectProjectName(root string) string {
 	return filepath.Base(root)
 }
 
+// DetectRuntime checks for available AI runtime binaries in PATH.
+func DetectRuntime() string {
+	return detectRuntime()
+}
+
 func detectRuntime() string {
 	if _, err := exec.LookPath("claude"); err == nil {
 		return "claude"

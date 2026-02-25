@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -21,6 +20,7 @@ import (
 	"github.com/justinpbarnett/agtop/internal/runtime"
 	"github.com/justinpbarnett/agtop/internal/safety"
 	"github.com/justinpbarnett/agtop/internal/server"
+	"github.com/justinpbarnett/agtop/internal/setup"
 	"github.com/justinpbarnett/agtop/internal/ui/clipboard"
 	"github.com/justinpbarnett/agtop/internal/ui/layout"
 	"github.com/justinpbarnett/agtop/internal/ui/panels"
@@ -76,7 +76,7 @@ type App struct {
 	newRunModal     *panels.NewRunModal
 	followUpModal   *panels.FollowUpModal
 	runPickerModal  *panels.RunPickerModal
-	initPrompt      *panels.InitPrompt
+	onboarding      *panels.OnboardingModal
 	keys            KeyMap
 	ready           bool
 	lastSyncedRunID string
@@ -258,7 +258,7 @@ func NewApp(cfg *config.Config) App {
 	}
 
 	if !config.LocalConfigExists() {
-		app.initPrompt = panels.NewInitPrompt()
+		app.onboarding = panels.NewOnboardingModal()
 	}
 
 	if cfg.Update.AutoCheck {
@@ -297,7 +297,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.newRunModal = nil
 		a.followUpModal = nil
 		a.runPickerModal = nil
-		a.initPrompt = nil
+		a.onboarding = nil
 		return a, nil
 
 	case SelectRunMsg:
@@ -306,9 +306,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.syncSelection()
 
 	case InitAcceptedMsg:
-		a.initPrompt = nil
+		a.onboarding = nil
 		a.statusBar.SetFlashWithLevel("Running agtop init...", panels.FlashInfo)
-		return a, tea.Batch(runInitCmd(), flashClearCmd())
+		return a, tea.Batch(runSetupCmd(a.config, msg.Runtime), flashClearCmd())
 
 	case InitResultMsg:
 		if msg.Err != nil {
@@ -525,9 +525,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleMouse(msg)
 
 	case tea.KeyMsg:
-		if a.initPrompt != nil {
+		if a.onboarding != nil {
 			var cmd tea.Cmd
-			*a.initPrompt, cmd = a.initPrompt.Update(msg)
+			*a.onboarding, cmd = a.onboarding.Update(msg)
 			return a, cmd
 		}
 
@@ -690,8 +690,8 @@ func (a App) View() string {
 		fullLayout = lipgloss.JoinVertical(lipgloss.Left, mainArea, statusBarView)
 	}
 
-	if a.initPrompt != nil {
-		modalView := a.initPrompt.View()
+	if a.onboarding != nil {
+		modalView := a.onboarding.View()
 		fullLayout = lipgloss.Place(a.width, a.height,
 			lipgloss.Center, lipgloss.Center, modalView,
 			lipgloss.WithWhitespaceChars(" "),
@@ -1286,13 +1286,10 @@ func (a *App) autoStartDevServers() {
 	}
 }
 
-func runInitCmd() tea.Cmd {
+func runSetupCmd(cfg *config.Config, rt string) tea.Cmd {
 	return func() tea.Msg {
-		cmd := exec.Command("agtop", "init")
-		cmd.Dir, _ = os.Getwd()
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			return InitResultMsg{Err: fmt.Errorf("%v: %s", err, output)}
+		if err := setup.Run(cfg, setup.Options{Runtime: rt}); err != nil {
+			return InitResultMsg{Err: err}
 		}
 		return InitResultMsg{}
 	}
