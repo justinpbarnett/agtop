@@ -463,7 +463,7 @@ func (p *Pipeline) fixFailures(ctx context.Context, runID, worktree, failures st
 	}
 
 	// Commit the fixes
-	p.executor.commitAfterStep(ctx, runID)
+	p.executor.commitAfterStep(ctx, runID, "review")
 
 	return nil
 }

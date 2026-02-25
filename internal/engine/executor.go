@@ -1,10 +1,12 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -343,7 +345,7 @@ func (e *Executor) executeFollowUp(ctx context.Context, runID string, followUpPr
 		return
 	}
 
-	e.commitAfterStep(ctx, runID)
+	e.commitAfterStep(ctx, runID, "build")
 
 	e.store.Update(runID, func(r *run.Run) {
 		r.State = run.StateCompleted
@@ -410,7 +412,7 @@ func (e *Executor) executeQuickFix(ctx context.Context, runID string, userPrompt
 		return
 	}
 
-	e.commitAfterStep(ctx, runID)
+	e.commitAfterStep(ctx, runID, "build")
 
 	e.store.Update(runID, func(r *run.Run) {
 		r.State = run.StateCompleted
@@ -421,6 +423,8 @@ func (e *Executor) executeQuickFix(ctx context.Context, runID string, userPrompt
 
 func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []string, userPrompt string) {
 	var previousOutput string
+	var specFile string
+	var modifiedFiles []string
 
 	for i := 0; i < len(skills); i++ {
 		skillName := skills[i]
@@ -475,6 +479,8 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 			PreviousOutput: previousOutput,
 			UserPrompt:     userPrompt,
 			SafetyPatterns: e.cfg.Safety.BlockedPatterns,
+			SpecFile:       specFile,
+			ModifiedFiles:  modifiedFiles,
 		}
 		if skillName == "route" {
 			pctx.WorkflowNames = workflowNames(e.cfg)
@@ -500,7 +506,21 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 
 		// Auto-commit after modifying skills
 		if !isNonModifyingSkill(skillName) && skillName != "commit" {
-			e.commitAfterStep(ctx, runID)
+			e.commitAfterStep(ctx, runID, skillName)
+		}
+
+		// Populate structured handoff context for downstream skills.
+		if skillName == "spec" {
+			specFile = parseSpecFilePath(previousOutput)
+		}
+		if out, err := exec.CommandContext(ctx, "git", "-C", r.Worktree, "diff", "--name-only", "HEAD~1").Output(); err == nil {
+			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+			modifiedFiles = modifiedFiles[:0]
+			for _, l := range lines {
+				if l != "" {
+					modifiedFiles = append(modifiedFiles, l)
+				}
+			}
 		}
 
 		// Handle route skill: override workflow
@@ -665,7 +685,7 @@ func (e *Executor) executeParallelGroups(ctx context.Context, runID string, grou
 		allResults = append(allResults, groupOutput)
 
 		// Auto-commit after each parallel group completes
-		e.commitAfterStep(ctx, runID)
+		e.commitAfterStep(ctx, runID, "build")
 	}
 
 	return strings.Join(allResults, "\n"), nil
@@ -923,33 +943,71 @@ func isNonModifyingSkill(name string) bool {
 	return false
 }
 
-// commitAfterStep runs the commit skill to save progress after a workflow step.
-// Errors are logged but do not fail the workflow — this is best-effort.
-func (e *Executor) commitAfterStep(ctx context.Context, runID string) {
-	skill, opts, ok := e.registry.SkillForRun("commit")
-	if !ok {
-		return
+// parseSpecFilePath extracts the first specs/*.md path from skill output text.
+func parseSpecFilePath(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if idx := strings.Index(line, "specs/"); idx >= 0 {
+			candidate := line[idx:]
+			// Trim non-path characters (backticks, asterisks, punctuation)
+			candidate = strings.TrimRight(candidate, "`:*,. ")
+			if strings.HasSuffix(candidate, ".md") {
+				return candidate
+			}
+		}
 	}
+	return ""
+}
 
+// skillCommitType maps skill names to conventional commit type prefixes.
+var skillCommitType = map[string]string{
+	"build":  "feat",
+	"review": "fix",
+	"spec":   "docs",
+}
+
+// deterministicCommit stages all changes and creates a conventional commit
+// without spawning a Claude subprocess. Errors are non-fatal.
+func (e *Executor) deterministicCommit(ctx context.Context, runID, skillName string) error {
 	r, ok := e.store.Get(runID)
 	if !ok {
-		return
+		return nil
 	}
-	opts.WorkDir = r.Worktree
+	worktree := r.Worktree
 
-	prompt := BuildPrompt(skill, PromptContext{
-		WorkDir:    r.Worktree,
-		Branch:     r.Branch,
-		UserPrompt: "Review all uncommitted changes in this worktree and create atomic commits using conventional commit format. If there are no changes to commit, do nothing.",
-	})
-
-	result, err := e.runSkill(ctx, runID, prompt, opts, skill.Timeout)
-	if err != nil {
-		return
+	// Check if there are any changes to commit.
+	statusOut, err := exec.CommandContext(ctx, "git", "-C", worktree, "status", "--porcelain").Output()
+	if err != nil || len(bytes.TrimSpace(statusOut)) == 0 {
+		return nil
 	}
 
-	// Accumulate tokens/cost from the commit skill (already tracked by process manager)
-	_ = result
+	// Stage everything.
+	if err := exec.CommandContext(ctx, "git", "-C", worktree, "add", "-A").Run(); err != nil {
+		return err
+	}
+
+	// Derive commit message from skill name.
+	commitType, ok := skillCommitType[skillName]
+	if !ok {
+		commitType = "chore"
+	}
+	msg := commitType + ": " + skillName + " changes"
+
+	// Dedup: amend if last commit has the same message.
+	lastMsg, _ := exec.CommandContext(ctx, "git", "-C", worktree, "log", "-1", "--format=%s").Output()
+	if strings.TrimSpace(string(lastMsg)) == msg {
+		return exec.CommandContext(ctx, "git", "-C", worktree, "commit", "--amend", "--no-edit").Run()
+	}
+
+	return exec.CommandContext(ctx, "git", "-C", worktree, "commit", "-m", msg).Run()
+}
+
+// commitAfterStep saves progress after a workflow step using a deterministic
+// git commit. Errors are logged but do not fail the workflow.
+func (e *Executor) commitAfterStep(ctx context.Context, runID, skillName string) {
+	if err := e.deterministicCommit(ctx, runID, skillName); err != nil {
+		e.logToBuffer(runID, skillName, fmt.Sprintf("auto-commit warning: %v", err))
+	}
 }
 
 func workflowNames(cfg *config.Config) []string {

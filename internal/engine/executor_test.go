@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	osExec "os/exec"
 	"os"
 	"path/filepath"
 	"strings"
@@ -428,6 +429,117 @@ func TestIsNonModifyingSkillFalse(t *testing.T) {
 		if isNonModifyingSkill(name) {
 			t.Errorf("isNonModifyingSkill(%q) = true, want false", name)
 		}
+	}
+}
+
+// --- deterministicCommit tests ---
+
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	cmds := [][]string{
+		{"git", "-C", dir, "init"},
+		{"git", "-C", dir, "config", "user.email", "test@example.com"},
+		{"git", "-C", dir, "config", "user.name", "Test"},
+	}
+	for _, args := range cmds {
+		if out, err := osExec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("git init cmd %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+func TestDeterministicCommit_NoChanges(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	// Make an initial commit so the repo is not empty.
+	if err := os.WriteFile(filepath.Join(dir, "init.txt"), []byte("init"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	osExec.Command("git", "-C", dir, "add", "-A").Run()
+	osExec.Command("git", "-C", dir, "commit", "-m", "initial").Run()
+
+	store := run.NewStore()
+	store.Add(&run.Run{Worktree: dir, State: run.StateRunning})
+	ex := &Executor{store: store}
+
+	err := ex.deterministicCommit(context.Background(), "001", "build")
+	if err != nil {
+		t.Fatalf("expected no error on clean worktree, got: %v", err)
+	}
+
+	// Log should still have only 1 commit.
+	out, _ := osExec.Command("git", "-C", dir, "log", "--oneline").Output()
+	if lines := strings.Split(strings.TrimSpace(string(out)), "\n"); len(lines) != 1 {
+		t.Errorf("expected 1 commit, got %d: %s", len(lines), out)
+	}
+}
+
+func TestDeterministicCommit_CreatesCommit(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	// Initial commit.
+	if err := os.WriteFile(filepath.Join(dir, "init.txt"), []byte("init"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	osExec.Command("git", "-C", dir, "add", "-A").Run()
+	osExec.Command("git", "-C", dir, "commit", "-m", "initial").Run()
+
+	// Unstaged change.
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := run.NewStore()
+	store.Add(&run.Run{Worktree: dir, State: run.StateRunning})
+	ex := &Executor{store: store}
+
+	if err := ex.deterministicCommit(context.Background(), "001", "build"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out, _ := osExec.Command("git", "-C", dir, "log", "--oneline").Output()
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 commits, got %d: %s", len(lines), out)
+	}
+
+	msg, _ := osExec.Command("git", "-C", dir, "log", "-1", "--format=%s").Output()
+	if strings.TrimSpace(string(msg)) != "feat: build changes" {
+		t.Errorf("expected 'feat: build changes', got %q", strings.TrimSpace(string(msg)))
+	}
+}
+
+func TestDeterministicCommit_DeduplicatesIdenticalMessage(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	// Initial commit.
+	if err := os.WriteFile(filepath.Join(dir, "init.txt"), []byte("init"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	osExec.Command("git", "-C", dir, "add", "-A").Run()
+	osExec.Command("git", "-C", dir, "commit", "-m", "feat: build changes").Run()
+
+	// New change.
+	if err := os.WriteFile(filepath.Join(dir, "second.txt"), []byte("second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := run.NewStore()
+	store.Add(&run.Run{Worktree: dir, State: run.StateRunning})
+	ex := &Executor{store: store}
+
+	if err := ex.deterministicCommit(context.Background(), "001", "build"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should still be 1 commit (amend, not a new one).
+	out, _ := osExec.Command("git", "-C", dir, "log", "--oneline").Output()
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 commit after amend, got %d: %s", len(lines), out)
 	}
 }
 

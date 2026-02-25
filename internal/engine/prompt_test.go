@@ -240,3 +240,56 @@ func TestBuildPromptWorkflowNamesAbsent(t *testing.T) {
 		t.Error("prompt should not contain Available workflows when none provided")
 	}
 }
+
+func TestBuildPrompt_IncludesSpecFile(t *testing.T) {
+	skill := &Skill{
+		Name:    "build",
+		Content: "# Build skill",
+	}
+	pctx := PromptContext{
+		UserPrompt: "Implement the feature",
+		SpecFile:   "specs/feat-user-auth.md",
+	}
+
+	result := BuildPrompt(skill, pctx)
+
+	if !strings.Contains(result, "Spec file: specs/feat-user-auth.md") {
+		t.Error("prompt missing spec file path")
+	}
+}
+
+func TestBuildPrompt_IncludesModifiedFiles(t *testing.T) {
+	skill := &Skill{
+		Name:    "review",
+		Content: "# Review skill",
+	}
+	pctx := PromptContext{
+		UserPrompt:    "Review the changes",
+		ModifiedFiles: []string{"internal/engine/executor.go", "internal/engine/prompt.go"},
+	}
+
+	result := BuildPrompt(skill, pctx)
+
+	if !strings.Contains(result, "Files modified by previous step: internal/engine/executor.go, internal/engine/prompt.go") {
+		t.Error("prompt missing modified files list")
+	}
+}
+
+func TestBuildPrompt_OmitsEmptyHandoffFields(t *testing.T) {
+	skill := &Skill{
+		Name:    "build",
+		Content: "# Build skill",
+	}
+	pctx := PromptContext{
+		UserPrompt: "Fix the bug",
+	}
+
+	result := BuildPrompt(skill, pctx)
+
+	if strings.Contains(result, "Spec file:") {
+		t.Error("prompt should not contain 'Spec file:' when SpecFile is empty")
+	}
+	if strings.Contains(result, "Files modified by previous step:") {
+		t.Error("prompt should not contain 'Files modified by previous step:' when ModifiedFiles is empty")
+	}
+}

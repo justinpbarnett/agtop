@@ -12,6 +12,8 @@ type PromptContext struct {
 	UserPrompt     string   // The user's original task description
 	SafetyPatterns []string // Blocked command patterns for safety preamble
 	WorkflowNames  []string // Available workflow names (injected for route skill)
+	SpecFile       string   // Path to the generated spec file (set after spec skill)
+	ModifiedFiles  []string // Files changed by the previous skill (from git diff --name-only)
 }
 
 // skillTaskOverrides maps skill names to fixed task descriptions.
@@ -60,6 +62,16 @@ func BuildPrompt(skill *Skill, pctx PromptContext) string {
 	if pctx.PreviousOutput != "" {
 		b.WriteString("\n- Previous skill output:\n")
 		b.WriteString(pctx.PreviousOutput)
+	}
+
+	if pctx.SpecFile != "" {
+		b.WriteString("\n- Spec file: ")
+		b.WriteString(pctx.SpecFile)
+	}
+
+	if len(pctx.ModifiedFiles) > 0 {
+		b.WriteString("\n- Files modified by previous step: ")
+		b.WriteString(strings.Join(pctx.ModifiedFiles, ", "))
 	}
 
 	// Use a fixed task for utility skills so the user's raw prompt doesn't
