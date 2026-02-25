@@ -26,10 +26,13 @@ func TestMinimumViable(t *testing.T) {
 		t.Errorf("left col height mismatch: runList(%d) + detail(%d) + status(1) = %d, want 24",
 			l.RunListHeight, l.DetailHeight, l.RunListHeight+l.DetailHeight+1)
 	}
-	// Left + right widths sum to terminal width
-	if l.RunListWidth+l.LogViewWidth != 80 {
-		t.Errorf("width mismatch: left(%d) + right(%d) = %d, want 80",
-			l.RunListWidth, l.LogViewWidth, l.RunListWidth+l.LogViewWidth)
+	// Left column is fixed width
+	if l.RunListWidth != LeftColWidth {
+		t.Errorf("left col width: got %d, want %d", l.RunListWidth, LeftColWidth)
+	}
+	// Right column takes remaining width
+	if l.LogViewWidth != 80-LeftColWidth {
+		t.Errorf("right col width: got %d, want %d", l.LogViewWidth, 80-LeftColWidth)
 	}
 }
 
@@ -50,10 +53,12 @@ func TestStandard120x40(t *testing.T) {
 	if l.LogViewHeight != usable {
 		t.Errorf("logView height: got %d, want %d", l.LogViewHeight, usable)
 	}
-	// Left + right widths sum to terminal width
-	if l.RunListWidth+l.LogViewWidth != 120 {
-		t.Errorf("width: left(%d) + right(%d) = %d, want 120",
-			l.RunListWidth, l.LogViewWidth, l.RunListWidth+l.LogViewWidth)
+	// Left column is fixed width; right column takes remaining space
+	if l.RunListWidth != LeftColWidth {
+		t.Errorf("left col width: got %d, want %d", l.RunListWidth, LeftColWidth)
+	}
+	if l.LogViewWidth != 120-LeftColWidth {
+		t.Errorf("right col width: got %d, want %d", l.LogViewWidth, 120-LeftColWidth)
 	}
 	// Detail and RunList share the same left column width
 	if l.DetailWidth != l.RunListWidth {

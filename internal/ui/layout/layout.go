@@ -37,7 +37,7 @@ const (
 	MinWidth  = 80
 	MinHeight = 24
 
-	LeftColWeight    = 0.30
+	LeftColWidth     = 30
 	RunListRowWeight = 0.50
 )
 
@@ -57,7 +57,7 @@ func Calculate(termWidth, termHeight int) Layout {
 
 	usableHeight := termHeight - 1 // status bar
 
-	leftWidth := int(float64(termWidth) * LeftColWeight)
+	leftWidth := LeftColWidth
 	rightWidth := termWidth - leftWidth
 
 	runListHeight := int(float64(usableHeight) * RunListRowWeight)
