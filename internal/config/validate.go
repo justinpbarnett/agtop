@@ -76,6 +76,26 @@ func validate(cfg *Config) error {
 		}
 	}
 
+	// Repos — validate when configured
+	seenRepoNames := make(map[string]int)
+	seenRepoPaths := make(map[string]int)
+	for i, repo := range cfg.Repos {
+		if repo.Name == "" {
+			errs = append(errs, fmt.Sprintf("repos[%d].name must be non-empty", i))
+		} else if prev, ok := seenRepoNames[repo.Name]; ok {
+			errs = append(errs, fmt.Sprintf("repos[%d].name %q duplicates repos[%d]", i, repo.Name, prev))
+		} else {
+			seenRepoNames[repo.Name] = i
+		}
+		if repo.Path == "" {
+			errs = append(errs, fmt.Sprintf("repos[%d].path must be non-empty", i))
+		} else if prev, ok := seenRepoPaths[repo.Path]; ok {
+			errs = append(errs, fmt.Sprintf("repos[%d].path %q duplicates repos[%d]", i, repo.Path, prev))
+		} else {
+			seenRepoPaths[repo.Path] = i
+		}
+	}
+
 	// JIRA integration — only validate when configured
 	if cfg.Integrations.Jira != nil {
 		j := cfg.Integrations.Jira

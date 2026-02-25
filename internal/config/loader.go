@@ -157,6 +157,11 @@ func merge(base *Config, override *Config) {
 		base.Project.DevServer.BasePort = override.Project.DevServer.BasePort
 	}
 
+	// Repos — replace entirely when non-nil
+	if override.Repos != nil {
+		base.Repos = override.Repos
+	}
+
 	// Runtime
 	if override.Runtime.Default != "" {
 		base.Runtime.Default = override.Runtime.Default

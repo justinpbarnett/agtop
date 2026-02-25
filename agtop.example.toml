@@ -110,6 +110,19 @@ log_scroll_speed = 5
 auto_check = true                    # check for updates on startup
 repo = "justinpbarnett/agtop"       # GitHub owner/repo for release checks
 
+# ── Multi-Repo (Poly-Repo) ────────────────────────────────────
+# For projects with multiple independent git repos in subdirectories.
+# When configured, agtop creates a worktree per sub-repo instead of
+# one worktree for the root. PRs are created per sub-repo.
+#
+# [[repos]]
+# name = "client"
+# path = "app/client"
+#
+# [[repos]]
+# name = "server"
+# path = "app/server"
+
 # [integrations.jira]
 # base_url = "https://yourcompany.atlassian.net"
 # project_key = "PROJ"

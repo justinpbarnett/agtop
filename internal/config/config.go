@@ -2,6 +2,7 @@ package config
 
 type Config struct {
 	Project      ProjectConfig              `toml:"project"`
+	Repos        []RepoConfig               `toml:"repos"`
 	Runtime      RuntimeConfig              `toml:"runtime"`
 	Workflows    map[string]WorkflowConfig  `toml:"workflows"`
 	Skills       map[string]SkillConfig     `toml:"skills"`
@@ -11,6 +12,11 @@ type Config struct {
 	UI           UIConfig                   `toml:"ui"`
 	Update       UpdateConfig               `toml:"update"`
 	Integrations IntegrationsConfig         `toml:"integrations"`
+}
+
+type RepoConfig struct {
+	Name string `toml:"name"`
+	Path string `toml:"path"`
 }
 
 type IntegrationsConfig struct {
