@@ -802,6 +802,55 @@ func TestExecuteJIRAExpansionErrorFallsThrough(t *testing.T) {
 	}
 }
 
+// --- buildFollowUpContext tests ---
+
+func TestBuildFollowUpContext_IncludesOriginalPrompt(t *testing.T) {
+	r := run.Run{
+		Prompt:          "add a login page",
+		Workflow:        "plan-build",
+		FollowUpPrompts: []string{"make the button blue"},
+	}
+	got := buildFollowUpContext(r)
+	if !strings.Contains(got, "add a login page") {
+		t.Errorf("expected original prompt in context, got: %q", got)
+	}
+	if !strings.Contains(got, "plan-build") {
+		t.Errorf("expected workflow name in context, got: %q", got)
+	}
+}
+
+func TestBuildFollowUpContext_IncludesFollowUpHistory(t *testing.T) {
+	r := run.Run{
+		Prompt:          "add auth",
+		FollowUpPrompts: []string{"fix the redirect", "add logout button", "current task"},
+	}
+	got := buildFollowUpContext(r)
+	if !strings.Contains(got, "fix the redirect") {
+		t.Errorf("expected first follow-up in context, got: %q", got)
+	}
+	if !strings.Contains(got, "add logout button") {
+		t.Errorf("expected second follow-up in context, got: %q", got)
+	}
+	// The last element is the current task and should not appear as "previous"
+	if strings.Contains(got, "current task") {
+		t.Errorf("current follow-up should not appear in previous history, got: %q", got)
+	}
+}
+
+func TestBuildFollowUpContext_EmptyFollowUps(t *testing.T) {
+	r := run.Run{
+		Prompt:   "implement feature X",
+		Workflow: "build",
+	}
+	got := buildFollowUpContext(r)
+	if !strings.Contains(got, "implement feature X") {
+		t.Errorf("expected original prompt in context, got: %q", got)
+	}
+	if strings.Contains(got, "Previous follow-up") {
+		t.Errorf("should not include follow-up section when there are no prior follow-ups, got: %q", got)
+	}
+}
+
 func TestExecutorResumeReconnectedSkillIndex(t *testing.T) {
 	rt, invocations := completingRuntime()
 	exec, store := newTestExecutor(rt)

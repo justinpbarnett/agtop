@@ -311,28 +311,27 @@ func (e *Executor) executeFollowUp(ctx context.Context, runID string, followUpPr
 		r.CurrentSkill = "quick-fix"
 	})
 
-	var b strings.Builder
-	if len(e.cfg.Safety.BlockedPatterns) > 0 {
-		b.WriteString("## Safety Constraints\n\n")
-		b.WriteString("You MUST NOT execute any of the following command patterns under any circumstances:\n")
-		for _, p := range e.cfg.Safety.BlockedPatterns {
-			b.WriteString(fmt.Sprintf("- `%s`\n", p))
+	// Gather all files modified on this branch to orient the agent.
+	var modifiedFiles []string
+	if out, err := exec.CommandContext(ctx, "git", "-C", r.Worktree, "diff", "--name-only", "main...HEAD").Output(); err == nil {
+		for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if l != "" {
+				modifiedFiles = append(modifiedFiles, l)
+			}
 		}
-		b.WriteString("\nIf a task requires any of these operations, STOP and report that the operation is blocked by safety policy.\n\n")
 	}
-	b.WriteString("## Context\n")
-	if r.Worktree != "" {
-		b.WriteString("\n- Working directory: ")
-		b.WriteString(r.Worktree)
-	}
-	if r.Branch != "" {
-		b.WriteString("\n- Branch: ")
-		b.WriteString(r.Branch)
-	}
-	b.WriteString("\n\n## Task\n\n")
-	b.WriteString(followUpPrompt)
 
-	_, err := e.runSkill(ctx, runID, b.String(), opts, skill.Timeout)
+	prompt := BuildPrompt(skill, PromptContext{
+		WorkDir:        r.Worktree,
+		Branch:         r.Branch,
+		UserPrompt:     followUpPrompt,
+		SafetyPatterns: e.cfg.Safety.BlockedPatterns,
+		SpecFile:       r.SpecFile,
+		ModifiedFiles:  modifiedFiles,
+		PreviousOutput: buildFollowUpContext(r),
+	})
+
+	_, err := e.runSkill(ctx, runID, prompt, opts, skill.Timeout)
 	if err != nil {
 		if errors.Is(err, process.ErrDisconnected) || e.isShuttingDown() {
 			return
@@ -512,6 +511,9 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 		// Populate structured handoff context for downstream skills.
 		if skillName == "spec" {
 			specFile = parseSpecFilePath(previousOutput)
+			e.store.Update(runID, func(r *run.Run) {
+				r.SpecFile = specFile
+			})
 		}
 		if out, err := exec.CommandContext(ctx, "git", "-C", r.Worktree, "diff", "--name-only", "HEAD~1").Output(); err == nil {
 			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
@@ -941,6 +943,44 @@ func isNonModifyingSkill(name string) bool {
 		return true
 	}
 	return false
+}
+
+// buildFollowUpContext assembles a concise summary of what the run already
+// accomplished. Passed as PreviousOutput so the follow-up agent starts with
+// full context instead of rediscovering the codebase from scratch.
+func buildFollowUpContext(r run.Run) string {
+	var b strings.Builder
+	b.WriteString("Original task: ")
+	b.WriteString(r.Prompt)
+
+	if r.Workflow != "" {
+		b.WriteString("\nWorkflow executed: ")
+		b.WriteString(r.Workflow)
+	}
+
+	if len(r.SkillCosts) > 0 {
+		b.WriteString("\nSkills completed:")
+		for _, sc := range r.SkillCosts {
+			b.WriteString("\n- ")
+			b.WriteString(sc.SkillName)
+		}
+	}
+
+	// List all follow-ups except the current one (last element), which is
+	// already rendered as the ## Task section of the prompt.
+	prior := r.FollowUpPrompts
+	if len(prior) > 0 {
+		prior = prior[:len(prior)-1]
+	}
+	if len(prior) > 0 {
+		b.WriteString("\nPrevious follow-up requests:")
+		for _, fp := range prior {
+			b.WriteString("\n- ")
+			b.WriteString(fp)
+		}
+	}
+
+	return b.String()
 }
 
 // parseSpecFilePath extracts the first specs/*.md path from skill output text.

@@ -29,6 +29,7 @@ type Run struct {
 	Branch       string        `json:"branch"`
 	Worktree     string        `json:"worktree"`
 	Workflow     string        `json:"workflow"`
+	SpecFile     string        `json:"spec_file,omitempty"`
 	State        State         `json:"state"`
 	SkillIndex   int           `json:"skill_index"`
 	SkillTotal   int           `json:"skill_total"`
