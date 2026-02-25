@@ -1146,7 +1146,10 @@ func (a App) handleRestart() (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	prompt := selected.Prompt
+	prompt := selected.OriginalPrompt
+	if prompt == "" {
+		prompt = selected.Prompt
+	}
 	workflow := selected.Workflow
 	model := selected.Model
 	return a, func() tea.Msg {

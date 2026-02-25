@@ -95,6 +95,7 @@ func (e *Executor) expandJIRA(runID string, prompt string) string {
 	}
 	e.logToBuffer(runID, "", fmt.Sprintf("Expanded JIRA issue %s", taskID))
 	e.store.Update(runID, func(r *run.Run) {
+		r.OriginalPrompt = prompt
 		r.Prompt = expanded
 		r.TaskID = taskID
 	})

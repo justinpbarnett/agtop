@@ -23,8 +23,9 @@ const (
 
 type Run struct {
 	ID           string        `json:"id"`
-	Prompt       string        `json:"prompt"`
-	TaskID       string        `json:"task_id,omitempty"`
+	Prompt         string        `json:"prompt"`
+	OriginalPrompt string        `json:"original_prompt,omitempty"`
+	TaskID         string        `json:"task_id,omitempty"`
 	Branch       string        `json:"branch"`
 	Worktree     string        `json:"worktree"`
 	Workflow     string        `json:"workflow"`
