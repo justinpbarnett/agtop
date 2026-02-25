@@ -62,6 +62,7 @@ type App struct {
 	devServers     *server.DevServerManager
 	diffGen        *gitpkg.DiffGenerator
 	persistence    *run.Persistence
+	jiraExpander   *jira.Expander
 	pidWatchCancel func()
 	width          int
 	height         int
@@ -245,6 +246,7 @@ func NewApp(cfg *config.Config) App {
 		diffGen:         dg,
 		devServers:      ds,
 		persistence:     persist,
+		jiraExpander:    jiraExp,
 		pidWatchCancel:  pidWatchCancel,
 		runList:         rl,
 		logView:         lv,
@@ -391,6 +393,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if msg.Model != "" {
 				newRun.Model = msg.Model
+			}
+			if a.jiraExpander != nil {
+				if key := a.jiraExpander.ExtractKey(msg.Prompt); key != "" {
+					if _, exists := a.store.Get(key); !exists {
+						newRun.ID = key
+					}
+				}
 			}
 			runID := a.store.Add(newRun)
 

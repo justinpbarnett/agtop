@@ -6,6 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/justinpbarnett/agtop/internal/config"
+	"github.com/justinpbarnett/agtop/internal/engine"
+	"github.com/justinpbarnett/agtop/internal/jira"
 	"github.com/justinpbarnett/agtop/internal/run"
 )
 
@@ -322,4 +324,70 @@ func TestCleanupRunNonExistentID(t *testing.T) {
 	// Calling cleanupRun with an ID not in the store should not panic.
 	a := newTestApp(t)
 	a.cleanupRun("nonexistent")
+}
+
+func newTestAppWithExecutor(t *testing.T) App {
+	t.Helper()
+	a := newTestApp(t)
+	reg := engine.NewRegistry(a.config)
+	a.executor = engine.NewExecutor(a.store, nil, reg, a.config)
+	return a
+}
+
+func TestStartRunMsgUsesJiraKeyAsRunID(t *testing.T) {
+	a := newTestAppWithExecutor(t)
+	a.jiraExpander = jira.NewExpander(jira.NewClient("http://unused", "", ""), "PROJ")
+
+	countBefore := a.store.Count()
+	m, _ := a.Update(StartRunMsg{Prompt: "PROJ-123", Workflow: "build"})
+	app := m.(App)
+
+	if app.store.Count() != countBefore+1 {
+		t.Fatalf("expected %d runs, got %d", countBefore+1, app.store.Count())
+	}
+	r, ok := app.store.Get("PROJ-123")
+	if !ok {
+		t.Fatal("expected run with ID 'PROJ-123' in store")
+	}
+	if r.ID != "PROJ-123" {
+		t.Errorf("expected run ID 'PROJ-123', got %q", r.ID)
+	}
+}
+
+func TestStartRunMsgFallsBackToNumericIDWithoutJiraKey(t *testing.T) {
+	a := newTestAppWithExecutor(t)
+	a.jiraExpander = jira.NewExpander(jira.NewClient("http://unused", "", ""), "PROJ")
+
+	countBefore := a.store.Count()
+	m, _ := a.Update(StartRunMsg{Prompt: "fix the login bug", Workflow: "build"})
+	app := m.(App)
+
+	if app.store.Count() != countBefore+1 {
+		t.Fatalf("expected %d runs, got %d", countBefore+1, app.store.Count())
+	}
+	_, hasJiraID := app.store.Get("PROJ-123")
+	if hasJiraID {
+		t.Error("expected no run with ID 'PROJ-123' for a non-Jira prompt")
+	}
+}
+
+func TestStartRunMsgFallsBackToNumericIDWhenJiraKeyTaken(t *testing.T) {
+	a := newTestAppWithExecutor(t)
+	a.jiraExpander = jira.NewExpander(jira.NewClient("http://unused", "", ""), "PROJ")
+
+	// First run claims PROJ-123
+	m, _ := a.Update(StartRunMsg{Prompt: "PROJ-123", Workflow: "build"})
+	app := m.(App)
+	if _, ok := app.store.Get("PROJ-123"); !ok {
+		t.Fatal("expected first run to get ID 'PROJ-123'")
+	}
+
+	// Second run with same key: ID already taken, falls back to numeric
+	countBefore := app.store.Count()
+	m, _ = app.Update(StartRunMsg{Prompt: "PROJ-123", Workflow: "build"})
+	app = m.(App)
+
+	if app.store.Count() != countBefore+1 {
+		t.Fatalf("expected %d runs, got %d", countBefore+1, app.store.Count())
+	}
 }

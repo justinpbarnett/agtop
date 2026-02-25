@@ -207,6 +207,31 @@ func TestExpandMidSentence(t *testing.T) {
 	}
 }
 
+func TestExtractKey(t *testing.T) {
+	t.Parallel()
+	c := NewClient("http://unused", "u@t.com", "tok")
+	e := NewExpander(c, "PROJ")
+
+	tests := []struct {
+		prompt string
+		want   string
+	}{
+		{"PROJ-123", "PROJ-123"},
+		{"proj-42", "PROJ-42"},
+		{"implement PROJ-456 now", "PROJ-456"},
+		{"please look at PROJ-99 and fix it", "PROJ-99"},
+		{"no key here", ""},
+		{"OTHER-123", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		if got := e.ExtractKey(tt.prompt); got != tt.want {
+			t.Errorf("ExtractKey(%q) = %q, want %q", tt.prompt, got, tt.want)
+		}
+	}
+}
+
 func TestIsIssueKey(t *testing.T) {
 	t.Parallel()
 	c := NewClient("http://unused", "u@t.com", "tok")

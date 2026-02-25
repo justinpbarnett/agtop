@@ -53,3 +53,14 @@ func (e *Expander) Expand(prompt string) (expanded string, taskID string, err er
 func (e *Expander) IsIssueKey(prompt string) bool {
 	return e.pattern.MatchString(strings.TrimSpace(prompt))
 }
+
+// ExtractKey returns the first JIRA issue key found in the prompt (e.g. "PROJ-123"),
+// or an empty string if none is found. Does not make any network calls.
+func (e *Expander) ExtractKey(prompt string) string {
+	trimmed := strings.TrimSpace(prompt)
+	loc := e.pattern.FindStringSubmatchIndex(trimmed)
+	if loc == nil {
+		return ""
+	}
+	return strings.ToUpper(trimmed[loc[2]:loc[3]])
+}
