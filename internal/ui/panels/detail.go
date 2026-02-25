@@ -2,6 +2,7 @@ package panels
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -179,7 +180,7 @@ func (d Detail) plainText() string {
 	row("Model", model)
 
 	if r.Worktree != "" {
-		row("Worktree", r.Worktree)
+		row("Worktree", shortenPath(r.Worktree))
 	}
 	if r.DevServerURL != "" {
 		row("DevServer", r.DevServerURL)
@@ -294,7 +295,7 @@ func (d Detail) renderDetails() string {
 	fmt.Fprintf(&b, "  %s\n", row("Model", model))
 
 	if r.Worktree != "" {
-		fmt.Fprintf(&b, "  %s\n", row("Worktree", r.Worktree))
+		fmt.Fprintf(&b, "  %s\n", row("Worktree", shortenPath(r.Worktree)))
 	}
 
 	if r.DevServerURL != "" {
@@ -326,4 +327,15 @@ func (d Detail) renderDetails() string {
 	}
 
 	return b.String()
+}
+
+func shortenPath(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if strings.HasPrefix(path, home) {
+		return "~" + path[len(home):]
+	}
+	return path
 }
