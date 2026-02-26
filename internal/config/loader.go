@@ -144,6 +144,9 @@ func merge(base *Config, override *Config) {
 	if override.Project.Root != "" {
 		base.Project.Root = override.Project.Root
 	}
+	if override.Project.Repos != nil {
+		base.Project.Repos = override.Project.Repos
+	}
 	if override.Project.TestCommand != "" {
 		base.Project.TestCommand = override.Project.TestCommand
 	}

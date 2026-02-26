@@ -33,7 +33,25 @@ func runCleanup(cfg *config.Config, dryRun bool) error {
 		return fmt.Errorf("load sessions: %w", err)
 	}
 
-	wt := gitpkg.NewWorktreeManagerAt(projectRoot, cfg.Project.WorktreePath)
+	// Discover repos and create appropriate worktree manager
+	var wt *gitpkg.WorktreeManager
+	var repos []string
+	if len(cfg.Project.Repos) > 0 {
+		for _, r := range cfg.Project.Repos {
+			if filepath.IsAbs(r) {
+				repos = append(repos, r)
+			} else {
+				repos = append(repos, filepath.Join(projectRoot, r))
+			}
+		}
+	} else {
+		repos, _ = gitpkg.DiscoverRepos(projectRoot)
+	}
+	if len(repos) > 1 {
+		wt = gitpkg.NewMultiRepoWorktreeManager(projectRoot, repos)
+	} else {
+		wt = gitpkg.NewWorktreeManagerAt(projectRoot, cfg.Project.WorktreePath)
+	}
 
 	now := time.Now()
 	removedSessions := 0

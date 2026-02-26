@@ -417,7 +417,7 @@ func TestReviewPassedWithProse(t *testing.T) {
 // --- isNonModifyingSkill tests ---
 
 func TestIsNonModifyingSkillTrue(t *testing.T) {
-	for _, name := range []string{"route", "decompose"} {
+	for _, name := range []string{"route", "decompose", "review"} {
 		if !isNonModifyingSkill(name) {
 			t.Errorf("isNonModifyingSkill(%q) = false, want true", name)
 		}
@@ -425,7 +425,7 @@ func TestIsNonModifyingSkillTrue(t *testing.T) {
 }
 
 func TestIsNonModifyingSkillFalse(t *testing.T) {
-	for _, name := range []string{"build", "test", "commit", "spec", "review", "document", ""} {
+	for _, name := range []string{"build", "test", "commit", "spec", "document", ""} {
 		if isNonModifyingSkill(name) {
 			t.Errorf("isNonModifyingSkill(%q) = true, want false", name)
 		}
@@ -888,5 +888,190 @@ func TestExecutorResumeReconnectedSkillIndex(t *testing.T) {
 	// Should have executed "build", "test", "review", plus auto-commits
 	if len(*invocations) < 3 {
 		t.Errorf("expected at least 3 skill invocations (build + test + review), got %d", len(*invocations))
+	}
+}
+
+func TestExecutorResumeRejectsFailedRun(t *testing.T) {
+	rt, _ := completingRuntime()
+	exec, store := newTestExecutor(rt)
+
+	id := store.Add(&run.Run{
+		State:    run.StateFailed,
+		Workflow: "build",
+		Prompt:   "test prompt",
+		Error:    "skill failed",
+	})
+
+	err := exec.Resume(id, "test prompt")
+	if err == nil {
+		t.Fatal("expected error when resuming a failed run")
+	}
+	if !strings.Contains(err.Error(), "not resumable") {
+		t.Errorf("expected 'not resumable' in error, got: %v", err)
+	}
+
+	// Verify the run state was not changed
+	r, _ := store.Get(id)
+	if r.State != run.StateFailed {
+		t.Errorf("expected state to remain StateFailed, got %s", r.State)
+	}
+}
+
+func TestIsActiveWhileRunning(t *testing.T) {
+	rt, cleanup := blockingRuntime()
+	defer cleanup()
+	exec, store := newTestExecutor(rt)
+
+	id := store.Add(&run.Run{State: run.StateQueued})
+
+	if exec.IsActive(id) {
+		t.Error("expected IsActive false before Execute")
+	}
+
+	exec.Execute(id, "build", "test prompt")
+
+	// Wait for the worker to register
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if exec.IsActive(id) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !exec.IsActive(id) {
+		t.Error("expected IsActive true while workflow is running")
+	}
+
+	// Shutdown cancels the worker; after shutdown, IsActive should be false
+	exec.Shutdown()
+	if exec.IsActive(id) {
+		t.Error("expected IsActive false after Shutdown")
+	}
+}
+
+func TestIsActiveAfterCompletion(t *testing.T) {
+	rt, _ := completingRuntime()
+	exec, store := newTestExecutor(rt)
+
+	id := store.Add(&run.Run{State: run.StateQueued})
+	exec.Execute(id, "build", "test prompt")
+
+	// Wait for workflow to complete
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		r, _ := store.Get(id)
+		if r.IsTerminal() {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if exec.IsActive(id) {
+		t.Error("expected IsActive false after workflow completion")
+	}
+}
+
+func TestExecutorResumePausedRun(t *testing.T) {
+	rt, _ := completingRuntime()
+	exec, store := newTestExecutor(rt)
+
+	id := store.Add(&run.Run{
+		State:      run.StatePaused,
+		Workflow:   "build",
+		Prompt:     "test prompt",
+		SkillIndex: 1,
+		SkillTotal: 2,
+	})
+
+	err := exec.Resume(id, "test prompt")
+	if err != nil {
+		t.Fatalf("Resume on paused run should succeed: %v", err)
+	}
+
+	// Wait for the run to transition out of paused
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		r, _ := store.Get(id)
+		if r.State != run.StatePaused {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	r, _ := store.Get(id)
+	if r.State == run.StatePaused {
+		t.Error("expected run to transition from StatePaused after Resume")
+	}
+}
+
+func TestResumePreservesSkillIndexAcrossMultipleResumes(t *testing.T) {
+	// Simulate: 4-skill workflow, pause at skill 3, resume, pause at skill 3
+	// again, resume — verify it starts at skill 3 both times (not skill 1).
+	rt, invocations := completingRuntime()
+	exec, store := newTestExecutor(rt)
+	_ = rt
+
+	// First run: pause at SkillIndex=3 (1-based) in plan-build workflow
+	// plan-build = ["spec", "build", "test", "review"]
+	id := store.Add(&run.Run{
+		State:      run.StatePaused,
+		Workflow:   "plan-build",
+		Prompt:     "implement feature",
+		SkillIndex: 3, // 1-based: spec(1), build(2), test(3)
+		SkillTotal: 4,
+	})
+
+	// First resume: should start from skill index 2 (0-based) = "test"
+	err := exec.Resume(id, "implement feature")
+	if err != nil {
+		t.Fatalf("first Resume failed: %v", err)
+	}
+
+	// Wait for workflow to complete
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		r, _ := store.Get(id)
+		if r.IsTerminal() {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	r, _ := store.Get(id)
+	if r.State != run.StateReviewing {
+		t.Fatalf("expected StateReviewing after first resume, got %s (error: %s)", r.State, r.Error)
+	}
+
+	// SkillIndex should be 4 (all 4 skills completed), not reset to a low value
+	if r.SkillIndex != 4 {
+		t.Errorf("expected SkillIndex=4 after completing all skills, got %d", r.SkillIndex)
+	}
+
+	// Now simulate a second pause at skill 3 again
+	store.Update(id, func(r *run.Run) {
+		r.State = run.StatePaused
+		r.SkillIndex = 3
+	})
+
+	*invocations = nil // reset invocation tracking
+
+	err = exec.Resume(id, "implement feature")
+	if err != nil {
+		t.Fatalf("second Resume failed: %v", err)
+	}
+
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		r, _ := store.Get(id)
+		if r.IsTerminal() {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	r, _ = store.Get(id)
+	// After second resume, SkillIndex should again be 4 (not 1 or 2)
+	if r.SkillIndex != 4 {
+		t.Errorf("expected SkillIndex=4 after second resume, got %d (Bug B regression: SkillIndex was reset to a relative value)", r.SkillIndex)
 	}
 }

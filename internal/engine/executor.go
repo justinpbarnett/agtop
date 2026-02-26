@@ -141,7 +141,7 @@ func (e *Executor) Execute(runID string, workflowName string, userPrompt string)
 	})
 
 	e.spawnWorker(runID, func(ctx context.Context) {
-		e.executeWorkflow(ctx, runID, skills, userPrompt)
+		e.executeWorkflow(ctx, runID, skills, userPrompt, 0)
 	})
 }
 
@@ -184,13 +184,22 @@ func (e *Executor) isShuttingDown() bool {
 	return e.shuttingDown
 }
 
-// Resume restarts a failed or paused run from its last incomplete skill.
+// IsActive reports whether an executor worker goroutine is currently running
+// for the given run ID (i.e. the workflow has not fully completed).
+func (e *Executor) IsActive(runID string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, ok := e.active[runID]
+	return ok
+}
+
+// Resume restarts a paused run from its last incomplete skill.
 func (e *Executor) Resume(runID string, userPrompt string) error {
 	r, ok := e.store.Get(runID)
 	if !ok {
 		return fmt.Errorf("run not found: %s", runID)
 	}
-	if r.State != run.StateFailed && r.State != run.StatePaused {
+	if r.State != run.StatePaused {
 		return fmt.Errorf("run %s is %s, not resumable", runID, r.State)
 	}
 
@@ -225,7 +234,7 @@ func (e *Executor) Resume(runID string, userPrompt string) error {
 	remainingSkills := skills[startIdx:]
 
 	e.spawnWorker(runID, func(ctx context.Context) {
-		e.executeWorkflow(ctx, runID, remainingSkills, userPrompt)
+		e.executeWorkflow(ctx, runID, remainingSkills, userPrompt, startIdx)
 	})
 
 	return nil
@@ -263,7 +272,7 @@ func (e *Executor) ResumeReconnected(runID string, userPrompt string) {
 	remainingSkills := skills[startIdx:]
 
 	e.spawnWorker(runID, func(ctx context.Context) {
-		e.executeWorkflow(ctx, runID, remainingSkills, userPrompt)
+		e.executeWorkflow(ctx, runID, remainingSkills, userPrompt, startIdx)
 	})
 }
 
@@ -422,7 +431,7 @@ func (e *Executor) executeQuickFix(ctx context.Context, runID string, userPrompt
 	})
 }
 
-func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []string, userPrompt string) {
+func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []string, userPrompt string, startOffset int) {
 	var previousOutput string
 	var specFile string
 	var modifiedFiles []string
@@ -451,9 +460,9 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 			return // cancelled while paused
 		}
 
-		// Update progress
+		// Update progress (startOffset ensures absolute indexing across resumes)
 		e.store.Update(runID, func(r *run.Run) {
-			r.SkillIndex = i + 1
+			r.SkillIndex = startOffset + i + 1
 			r.CurrentSkill = skillName
 			r.State = run.StateRunning
 		})
@@ -482,6 +491,7 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 			SafetyPatterns: e.cfg.Safety.BlockedPatterns,
 			SpecFile:       specFile,
 			ModifiedFiles:  modifiedFiles,
+			Repos:          r.Worktrees,
 		}
 		if skillName == "route" {
 			pctx.WorkflowNames = workflowNames(e.cfg)
@@ -552,6 +562,7 @@ func (e *Executor) executeWorkflow(ctx context.Context, runID string, skills []s
 
 			skills = newSkills
 			i = -1 // will be incremented to 0 by the for loop
+			startOffset = 0
 			e.store.Update(runID, func(r *run.Run) {
 				r.Workflow = resolvedWorkflow
 				r.SkillTotal = len(newSkills)
@@ -1003,7 +1014,7 @@ func formatRunDuration(d time.Duration) string {
 // isNonModifyingSkill returns true for skills that don't modify files in the worktree.
 func isNonModifyingSkill(name string) bool {
 	switch name {
-	case "route", "decompose":
+	case "route", "decompose", "review":
 		return true
 	}
 	return false

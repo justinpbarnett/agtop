@@ -391,3 +391,129 @@ func TestStartRunMsgFallsBackToNumericIDWhenJiraKeyTaken(t *testing.T) {
 		t.Fatalf("expected %d runs, got %d", countBefore+1, app.store.Count())
 	}
 }
+
+func TestAcceptBlockedWhenStoreStateIsRunning(t *testing.T) {
+	// Verify that the accept guard re-reads state from the store rather than
+	// relying on the potentially stale SelectedRun cache.
+	a := newTestApp(t)
+	a = sendWindowSize(a, 120, 40)
+
+	// Add a completed run and refresh the run list cache.
+	id := a.store.Add(&run.Run{State: run.StateCompleted, Prompt: "test"})
+	m, _ := a.Update(RunStoreUpdatedMsg{})
+	a = m.(App)
+
+	// Mutate the store directly (simulating a concurrent goroutine update)
+	// so the cached filtered list still shows "completed" but the store
+	// now says "running".
+	a.store.Update(id, func(r *run.Run) { r.State = run.StateRunning })
+
+	// Press 'a' to accept — should be blocked by the fresh store read.
+	a = sendKey(a, "a")
+
+	// The run should still be running, not accepted.
+	r, _ := a.store.Get(id)
+	if r.State != run.StateRunning {
+		t.Errorf("expected state to remain StateRunning, got %s", r.State)
+	}
+}
+
+func TestRejectBlockedWhenStoreStateIsRunning(t *testing.T) {
+	a := newTestApp(t)
+	a = sendWindowSize(a, 120, 40)
+
+	id := a.store.Add(&run.Run{State: run.StateCompleted, Prompt: "test"})
+	m, _ := a.Update(RunStoreUpdatedMsg{})
+	a = m.(App)
+
+	a.store.Update(id, func(r *run.Run) { r.State = run.StateRunning })
+
+	a = sendKey(a, "x")
+
+	r, _ := a.store.Get(id)
+	if r.State != run.StateRunning {
+		t.Errorf("expected state to remain StateRunning, got %s", r.State)
+	}
+}
+
+func TestAcceptBlockedWhileExecutorActive(t *testing.T) {
+	a := newTestApp(t)
+	a = sendWindowSize(a, 120, 40)
+
+	cfg := config.DefaultConfig()
+	exec := engine.NewExecutor(a.store, nil, engine.NewRegistry(&cfg), &cfg)
+	a.executor = exec
+
+	id := a.store.Add(&run.Run{State: run.StateCompleted, Prompt: "test"})
+	m, _ := a.Update(RunStoreUpdatedMsg{})
+	a = m.(App)
+
+	// Simulate an active executor worker by starting a quick-fix whose
+	// spawnWorker registers the run in the active map immediately.
+	// The goroutine will fail since manager is nil, but the active entry
+	// persists because the deferred cleanup only runs after fn returns.
+	exec.Execute(id, "quick-fix", "test")
+
+	// Accept should be blocked because executor reports the run as active.
+	a = sendKey(a, "a")
+
+	r, _ := a.store.Get(id)
+	if r.State == run.StateAccepted {
+		t.Error("expected accept to be blocked while executor is active")
+	}
+}
+
+func TestRejectBlockedWhileExecutorActive(t *testing.T) {
+	a := newTestApp(t)
+	a = sendWindowSize(a, 120, 40)
+
+	cfg := config.DefaultConfig()
+	exec := engine.NewExecutor(a.store, nil, engine.NewRegistry(&cfg), &cfg)
+	a.executor = exec
+
+	id := a.store.Add(&run.Run{State: run.StateCompleted, Prompt: "test"})
+	m, _ := a.Update(RunStoreUpdatedMsg{})
+	a = m.(App)
+
+	exec.Execute(id, "quick-fix", "test")
+
+	// Reject should be blocked because executor reports the run as active.
+	a = sendKey(a, "x")
+
+	r, _ := a.store.Get(id)
+	if r.State == run.StateRejected {
+		t.Error("expected reject to be blocked while executor is active")
+	}
+}
+
+func TestAcceptWorksForCompletedRunWithoutExecutor(t *testing.T) {
+	a := newTestApp(t)
+	a = sendWindowSize(a, 120, 40)
+
+	id := a.store.Add(&run.Run{State: run.StateCompleted, Prompt: "done"})
+	m, _ := a.Update(RunStoreUpdatedMsg{})
+	a = m.(App)
+
+	a = sendKey(a, "a")
+
+	r, _ := a.store.Get(id)
+	if r.State != run.StateAccepted {
+		t.Errorf("expected StateAccepted, got %s", r.State)
+	}
+}
+
+func TestRejectWorksForCompletedRunWithoutExecutor(t *testing.T) {
+	a := newTestApp(t)
+	a = sendWindowSize(a, 120, 40)
+
+	id := a.store.Add(&run.Run{State: run.StateCompleted, Prompt: "done"})
+	m, _ := a.Update(RunStoreUpdatedMsg{})
+	a = m.(App)
+
+	a = sendKey(a, "x")
+
+	r, _ := a.store.Get(id)
+	if r.State != run.StateRejected {
+		t.Errorf("expected StateRejected, got %s", r.State)
+	}
+}

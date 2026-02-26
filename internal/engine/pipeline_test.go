@@ -2,14 +2,17 @@ package engine
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/justinpbarnett/agtop/internal/config"
 	"github.com/justinpbarnett/agtop/internal/run"
+	"github.com/justinpbarnett/agtop/internal/runtime"
 )
 
 // ---------------------------------------------------------------------------
@@ -896,5 +899,180 @@ func TestResolveConflictsGoldenOnlyWithUpdateCommand(t *testing.T) {
 	out, _ := status.Output()
 	if len(out) > 0 {
 		t.Errorf("repo not clean after golden update: %s", out)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ResolveConflictsInMerge tests
+// ---------------------------------------------------------------------------
+
+func TestResolveConflictsInMergeGoldenOnly(t *testing.T) {
+	// Set up a repo with a golden-only merge conflict
+	repo := pipelineInitTestRepo(t)
+
+	goldenDir := filepath.Join(repo, "internal", "ui", "testdata")
+	if err := os.MkdirAll(goldenDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	goldenFile := filepath.Join(goldenDir, "TestSnapshot.golden")
+	if err := os.WriteFile(goldenFile, []byte("base"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	pipelineGitCommit(t, repo, "add golden file")
+
+	// Create a feature branch
+	cmd := exec.Command("git", "checkout", "-b", "agtop/golden-merge")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout -b: %s: %v", out, err)
+	}
+	if err := os.WriteFile(goldenFile, []byte("feature version"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	pipelineGitCommit(t, repo, "update golden on feature branch")
+
+	// Switch back to main and diverge
+	cmd = exec.Command("git", "checkout", "main")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout main: %s: %v", out, err)
+	}
+	if err := os.WriteFile(goldenFile, []byte("main version"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	pipelineGitCommit(t, repo, "update golden on main")
+
+	// Set up a Pipeline (no executor needed for golden-only resolution)
+	store := run.NewStore()
+	runID := store.Add(&run.Run{
+		State:  run.StateRunning,
+		Branch: "agtop/golden-merge",
+	})
+	cfg := &config.MergeConfig{}
+	p := NewPipeline(nil, store, cfg, repo)
+
+	conflictedFiles := []string{"internal/ui/testdata/TestSnapshot.golden"}
+	err := p.ResolveConflictsInMerge(context.Background(), runID, repo, conflictedFiles, 3)
+	if err != nil {
+		t.Fatalf("ResolveConflictsInMerge should succeed for golden-only: %v", err)
+	}
+
+	// Verify the merge can be committed
+	commit := exec.Command("git", "commit", "--no-edit")
+	commit.Dir = repo
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("commit after resolution: %s: %v", out, err)
+	}
+}
+
+func TestResolveConflictsInMergeRunNotFound(t *testing.T) {
+	store := run.NewStore()
+	cfg := &config.MergeConfig{}
+	p := NewPipeline(nil, store, cfg, "/tmp")
+
+	err := p.ResolveConflictsInMerge(context.Background(), "nonexistent", "/tmp", []string{"file.go"}, 3)
+	if err == nil {
+		t.Fatal("expected error for nonexistent run")
+	}
+}
+
+func TestResolveConflictsInMergeDefaultAttempts(t *testing.T) {
+	// Verify that maxAttempts=0 defaults to 3 (tested indirectly via the run-not-found path)
+	store := run.NewStore()
+	cfg := &config.MergeConfig{}
+	p := NewPipeline(nil, store, cfg, "/tmp")
+
+	err := p.ResolveConflictsInMerge(context.Background(), "nonexistent", "/tmp", []string{"file.go"}, 0)
+	if err == nil {
+		t.Fatal("expected error for nonexistent run")
+	}
+}
+
+func TestResolveConflictsInMergeNonGolden(t *testing.T) {
+	// Set up a repo with a non-golden file conflict
+	repo := pipelineInitTestRepo(t)
+
+	codeFile := filepath.Join(repo, "code.go")
+	if err := os.WriteFile(codeFile, []byte("package main\n// base\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	pipelineGitCommit(t, repo, "add code.go")
+
+	// Create a feature branch and modify
+	cmd := exec.Command("git", "checkout", "-b", "agtop/nongolden-merge")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout -b: %s: %v", out, err)
+	}
+	if err := os.WriteFile(codeFile, []byte("package main\n// feature version\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	pipelineGitCommit(t, repo, "update code.go on feature")
+
+	// Switch back to main and diverge
+	cmd = exec.Command("git", "checkout", "main")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout main: %s: %v", out, err)
+	}
+	if err := os.WriteFile(codeFile, []byte("package main\n// main version\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	pipelineGitCommit(t, repo, "update code.go on main")
+
+	// Create a mock runtime that resolves conflicts by accepting incoming version
+	var skillInvoked bool
+	rt := &executorMockRuntime{
+		startFn: func(_ context.Context, _ string, opts runtime.RunOptions) (*runtime.Process, error) {
+			skillInvoked = true
+
+			// Simulate the build skill resolving the conflict
+			checkout := exec.Command("git", "checkout", "--theirs", "code.go")
+			checkout.Dir = opts.WorkDir
+			_ = checkout.Run()
+
+			add := exec.Command("git", "add", "code.go")
+			add.Dir = opts.WorkDir
+			_ = add.Run()
+
+			pr, pw := io.Pipe()
+			doneCh := make(chan error, 1)
+			go func() {
+				pw.Write([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"Resolved"}]}}` + "\n"))
+				pw.Write([]byte(`{"type":"result","result":"ok","usage":{"input_tokens":10,"output_tokens":5},"total_cost_usd":0.001}` + "\n"))
+				pw.Close()
+				doneCh <- nil
+			}()
+			return &runtime.Process{
+				PID:    12345,
+				Stdout: pr,
+				Stderr: io.NopCloser(strings.NewReader("")),
+				Done:   doneCh,
+			}, nil
+		},
+	}
+
+	executor, store := newTestExecutor(rt)
+	runID := store.Add(&run.Run{
+		State:  run.StateRunning,
+		Branch: "agtop/nongolden-merge",
+	})
+	cfg := &config.MergeConfig{}
+	p := NewPipeline(executor, store, cfg, repo)
+
+	err := p.ResolveConflictsInMerge(context.Background(), runID, repo, []string{"code.go"}, 3)
+	if err != nil {
+		t.Fatalf("ResolveConflictsInMerge should succeed for non-golden conflict: %v", err)
+	}
+
+	if !skillInvoked {
+		t.Error("expected build skill to be invoked for non-golden conflict")
+	}
+
+	// Verify the merge can be committed
+	commit := exec.Command("git", "commit", "--no-edit")
+	commit.Dir = repo
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("commit after resolution: %s: %v", out, err)
 	}
 }

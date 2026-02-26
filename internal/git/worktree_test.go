@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -211,9 +212,31 @@ func TestWorktreeMergeConflict(t *testing.T) {
 		}
 	}
 
-	// Merge should fail
-	if err := wm.Merge("021"); err == nil {
+	// Merge should fail with MergeConflictError
+	mergeErr := wm.Merge("021")
+	if mergeErr == nil {
 		t.Fatal("Merge should have failed due to conflict")
+	}
+
+	var conflictErr *MergeConflictError
+	if !errors.As(mergeErr, &conflictErr) {
+		t.Fatalf("expected MergeConflictError, got %T: %v", mergeErr, mergeErr)
+	}
+	if len(conflictErr.ConflictedFiles) == 0 {
+		t.Error("expected ConflictedFiles to be non-empty")
+	}
+	foundConflict := false
+	for _, f := range conflictErr.ConflictedFiles {
+		if f == "conflict.txt" {
+			foundConflict = true
+			break
+		}
+	}
+	if !foundConflict {
+		t.Errorf("expected conflict.txt in ConflictedFiles, got %v", conflictErr.ConflictedFiles)
+	}
+	if conflictErr.Branch != "agtop/021" {
+		t.Errorf("expected Branch 'agtop/021', got %q", conflictErr.Branch)
 	}
 
 	// Verify repo is clean (merge was aborted) — exclude untracked files
@@ -322,10 +345,26 @@ func TestWorktreeMergeMixedConflict(t *testing.T) {
 	}
 	gitCommit(t, repo, "update golden and code in main")
 
-	// Merge should fail — non-golden conflict blocks it
-	_, err = wm.MergeWithOptions("031", MergeOptions{})
-	if err == nil {
+	// Merge should fail with MergeConflictError — non-golden conflict blocks it
+	_, mergeErr := wm.MergeWithOptions("031", MergeOptions{})
+	if mergeErr == nil {
 		t.Fatal("MergeWithOptions should fail when non-golden conflicts exist")
+	}
+
+	var conflictErr *MergeConflictError
+	if !errors.As(mergeErr, &conflictErr) {
+		t.Fatalf("expected MergeConflictError, got %T: %v", mergeErr, mergeErr)
+	}
+	// The non-golden file should be in the conflict list
+	foundCode := false
+	for _, f := range conflictErr.ConflictedFiles {
+		if f == "code.go" {
+			foundCode = true
+			break
+		}
+	}
+	if !foundCode {
+		t.Errorf("expected code.go in ConflictedFiles, got %v", conflictErr.ConflictedFiles)
 	}
 
 	// Verify repo is clean after abort
@@ -597,6 +636,50 @@ func TestWorktreeMergeDirtyUnrelatedFile(t *testing.T) {
 	}
 	if string(content) != "work in progress" {
 		t.Errorf("unrelated.txt = %q, want %q", content, "work in progress")
+	}
+}
+
+func TestMergeConflictErrorMessage(t *testing.T) {
+	err := &MergeConflictError{
+		Branch:          "agtop/test",
+		ConflictedFiles: []string{"file1.go", "file2.go"},
+		Output:          "CONFLICT (content): Merge conflict in file1.go",
+	}
+
+	msg := err.Error()
+	if msg == "" {
+		t.Error("expected non-empty error message")
+	}
+	// Verify it satisfies the error interface
+	var e error = err
+	_ = e
+}
+
+func TestMergeConflictErrorTypeAssertion(t *testing.T) {
+	// Verify errors.As works with *MergeConflictError
+	var err error = &MergeConflictError{
+		Branch:          "agtop/test",
+		ConflictedFiles: []string{"file.go"},
+		Output:          "conflict output",
+	}
+
+	var conflictErr *MergeConflictError
+	if !errors.As(err, &conflictErr) {
+		t.Fatal("errors.As should succeed for *MergeConflictError")
+	}
+	if conflictErr.Branch != "agtop/test" {
+		t.Errorf("Branch = %q, want %q", conflictErr.Branch, "agtop/test")
+	}
+	if len(conflictErr.ConflictedFiles) != 1 || conflictErr.ConflictedFiles[0] != "file.go" {
+		t.Errorf("ConflictedFiles = %v, want [file.go]", conflictErr.ConflictedFiles)
+	}
+}
+
+func TestRepoRoot(t *testing.T) {
+	repo := initTestRepo(t)
+	wm := NewWorktreeManager(repo)
+	if wm.RepoRoot() != repo {
+		t.Errorf("RepoRoot() = %q, want %q", wm.RepoRoot(), repo)
 	}
 }
 

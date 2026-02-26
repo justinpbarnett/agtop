@@ -225,6 +225,17 @@ func TestBuildPromptWorkflowNames(t *testing.T) {
 	}
 }
 
+func TestReviewTaskOverrideDoesNotContainFix(t *testing.T) {
+	override, ok := skillTaskOverrides["review"]
+	if !ok {
+		t.Fatal("expected review entry in skillTaskOverrides")
+	}
+	lower := strings.ToLower(override)
+	if strings.Contains(lower, "fix") {
+		t.Errorf("review task override should not contain 'fix': %q", override)
+	}
+}
+
 func TestBuildPromptWorkflowNamesAbsent(t *testing.T) {
 	skill := &Skill{
 		Name:    "build",

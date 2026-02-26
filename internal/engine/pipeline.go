@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ type Pipeline struct {
 	store    *run.Store
 	cfg      *config.MergeConfig
 	repoRoot string
+	repos    []string // all repo roots (multi-repo support)
 }
 
 func NewPipeline(executor *Executor, store *run.Store, cfg *config.MergeConfig, repoRoot string) *Pipeline {
@@ -29,7 +31,38 @@ func NewPipeline(executor *Executor, store *run.Store, cfg *config.MergeConfig, 
 		store:    store,
 		cfg:      cfg,
 		repoRoot: repoRoot,
+		repos:    []string{repoRoot},
 	}
+}
+
+// NewMultiRepoPipeline creates a Pipeline that operates across multiple repos.
+func NewMultiRepoPipeline(executor *Executor, store *run.Store, cfg *config.MergeConfig, projectRoot string, repos []string) *Pipeline {
+	return &Pipeline{
+		executor: executor,
+		store:    store,
+		cfg:      cfg,
+		repoRoot: projectRoot,
+		repos:    repos,
+	}
+}
+
+func (p *Pipeline) isMultiRepo() bool {
+	return len(p.repos) > 1
+}
+
+// repoWorktrees returns a map of repo relative path → worktree path for a
+// composite worktree root. In single-repo mode, returns a single entry.
+func (p *Pipeline) repoWorktrees(compositeRoot string) map[string]string {
+	result := make(map[string]string, len(p.repos))
+	if !p.isMultiRepo() {
+		result["."] = compositeRoot
+		return result
+	}
+	for _, repo := range p.repos {
+		rel, _ := filepath.Rel(p.repoRoot, repo)
+		result[rel] = filepath.Join(compositeRoot, rel)
+	}
+	return result
 }
 
 // Run executes the full merge pipeline for a run. It is intended to be called
@@ -43,41 +76,92 @@ func (p *Pipeline) Run(ctx context.Context, runID string) {
 
 	worktree := r.Worktree
 	branch := r.Branch
+	repoWTs := p.repoWorktrees(worktree)
 
-	target, err := p.resolveTarget(worktree)
+	// Resolve target from the first repo worktree
+	var firstWT string
+	for _, wt := range repoWTs {
+		firstWT = wt
+		break
+	}
+	target, err := p.resolveTarget(firstWT)
 	if err != nil {
 		p.fail(runID, fmt.Sprintf("resolve target branch: %v", err))
 		return
 	}
 
-	// Stage 1: Rebase
+	// Stage 1: Rebase each repo
 	p.setMergeStatus(runID, "rebasing")
-	if err := p.rebase(ctx, runID, worktree, target); err != nil {
-		p.fail(runID, fmt.Sprintf("rebase failed: %v", err))
-		return
-	}
-
-	// Stage 2: Push
-	p.setMergeStatus(runID, "pushing")
-	if err := p.push(worktree, branch); err != nil {
-		p.fail(runID, fmt.Sprintf("push failed: %v", err))
-		return
-	}
-
-	// Stage 3: Create PR (skip if one already exists from a previous attempt)
-	prURL := r.PRURL
-	if prURL == "" {
-		p.setMergeStatus(runID, "pr-created")
-		prURL, err = p.createPR(worktree, branch, target, r.Prompt)
-		if err != nil {
-			p.fail(runID, fmt.Sprintf("create PR failed: %v", err))
+	for repoName, wt := range repoWTs {
+		if err := p.rebase(ctx, runID, wt, target); err != nil {
+			suffix := ""
+			if p.isMultiRepo() {
+				suffix = fmt.Sprintf(" (repo: %s)", repoName)
+			}
+			p.fail(runID, fmt.Sprintf("rebase failed%s: %v", suffix, err))
 			return
 		}
-		p.store.Update(runID, func(r *run.Run) {
-			r.PRURL = prURL
-		})
+	}
+
+	// Stage 2: Push each repo
+	p.setMergeStatus(runID, "pushing")
+	for repoName, wt := range repoWTs {
+		if err := p.push(wt, branch); err != nil {
+			suffix := ""
+			if p.isMultiRepo() {
+				suffix = fmt.Sprintf(" (repo: %s)", repoName)
+			}
+			p.fail(runID, fmt.Sprintf("push failed%s: %v", suffix, err))
+			return
+		}
+	}
+
+	// Stage 3: Create PR for each repo (skip if already exists from a previous attempt)
+	if p.isMultiRepo() {
+		prURLs := r.PRURLs
+		if prURLs == nil {
+			prURLs = make(map[string]string)
+		}
+		allExist := len(prURLs) == len(repoWTs)
+		if !allExist {
+			p.setMergeStatus(runID, "pr-created")
+			for repoName, wt := range repoWTs {
+				if prURLs[repoName] != "" {
+					continue
+				}
+				prURL, err := p.createPR(wt, branch, target, r.Prompt)
+				if err != nil {
+					p.fail(runID, fmt.Sprintf("create PR failed (repo: %s): %v", repoName, err))
+					return
+				}
+				prURLs[repoName] = prURL
+			}
+			p.store.Update(runID, func(r *run.Run) {
+				r.PRURLs = prURLs
+				// Set PRURL to first for backward compatibility
+				for _, u := range prURLs {
+					r.PRURL = u
+					break
+				}
+			})
+		} else {
+			p.setMergeStatus(runID, "pr-created")
+		}
 	} else {
-		p.setMergeStatus(runID, "pr-created")
+		prURL := r.PRURL
+		if prURL == "" {
+			p.setMergeStatus(runID, "pr-created")
+			prURL, err = p.createPR(firstWT, branch, target, r.Prompt)
+			if err != nil {
+				p.fail(runID, fmt.Sprintf("create PR failed: %v", err))
+				return
+			}
+			p.store.Update(runID, func(r *run.Run) {
+				r.PRURL = prURL
+			})
+		} else {
+			p.setMergeStatus(runID, "pr-created")
+		}
 	}
 
 	// Stage 4: Poll checks and fix failures
@@ -88,41 +172,78 @@ func (p *Pipeline) Run(ctx context.Context, runID string) {
 
 	for attempt := 0; attempt <= fixAttempts; attempt++ {
 		p.setMergeStatus(runID, "checks-pending")
-		passed, failures, err := p.pollChecks(ctx, worktree, branch)
-		if err != nil {
-			p.fail(runID, fmt.Sprintf("poll checks: %v", err))
-			return
+
+		allPassed := true
+		var allFailures []string
+		for repoName, wt := range repoWTs {
+			passed, failures, err := p.pollChecks(ctx, wt, branch)
+			if err != nil {
+				suffix := ""
+				if p.isMultiRepo() {
+					suffix = fmt.Sprintf(" (repo: %s)", repoName)
+				}
+				p.fail(runID, fmt.Sprintf("poll checks%s: %v", suffix, err))
+				return
+			}
+			if !passed {
+				allPassed = false
+				if failures != "" {
+					prefix := ""
+					if p.isMultiRepo() {
+						prefix = repoName + ": "
+					}
+					allFailures = append(allFailures, prefix+failures)
+				}
+			}
 		}
 
-		if passed {
+		if allPassed {
 			break
 		}
 
 		if attempt == fixAttempts {
-			p.fail(runID, fmt.Sprintf("checks still failing after %d fix attempts: %s", fixAttempts, failures))
+			p.fail(runID, fmt.Sprintf("checks still failing after %d fix attempts: %s", fixAttempts, strings.Join(allFailures, "; ")))
 			return
 		}
 
-		// Fix failures
+		// Fix failures (use composite worktree so agent sees full project)
 		p.setMergeStatus(runID, "fixing")
-		if err := p.fixFailures(ctx, runID, worktree, failures); err != nil {
+		if err := p.fixFailures(ctx, runID, worktree, strings.Join(allFailures, "; ")); err != nil {
 			p.fail(runID, fmt.Sprintf("fix attempt %d failed: %v", attempt+1, err))
 			return
 		}
 
-		// Push fixes
+		// Push fixes for each repo
 		p.setMergeStatus(runID, "pushing")
-		if err := p.push(worktree, branch); err != nil {
-			p.fail(runID, fmt.Sprintf("push after fix failed: %v", err))
-			return
+		for repoName, wt := range repoWTs {
+			if err := p.push(wt, branch); err != nil {
+				suffix := ""
+				if p.isMultiRepo() {
+					suffix = fmt.Sprintf(" (repo: %s)", repoName)
+				}
+				p.fail(runID, fmt.Sprintf("push after fix failed%s: %v", suffix, err))
+				return
+			}
 		}
 	}
 
-	// Stage 5: Merge
+	// Stage 5: Merge each repo's PR
 	p.setMergeStatus(runID, "merging")
-	if err := p.merge(worktree, prURL); err != nil {
-		p.fail(runID, fmt.Sprintf("merge failed: %v", err))
-		return
+	if p.isMultiRepo() {
+		r, _ = p.store.Get(runID) // refresh to get PRURLs
+		for repoName, prURL := range r.PRURLs {
+			wt := repoWTs[repoName]
+			if err := p.merge(wt, prURL); err != nil {
+				p.fail(runID, fmt.Sprintf("merge failed (repo: %s): %v", repoName, err))
+				return
+			}
+		}
+	} else {
+		r, _ = p.store.Get(runID)
+		if err := p.merge(firstWT, r.PRURL); err != nil {
+			p.fail(runID, fmt.Sprintf("merge failed: %v", err))
+			return
+		}
 	}
 
 	// Success
@@ -305,6 +426,87 @@ func (p *Pipeline) runGoldenUpdate(worktree string) {
 	if err := commit.Run(); err != nil {
 		log.Printf("warning: commit after golden update: %v", err)
 	}
+}
+
+// ResolveConflictsInMerge resolves merge conflicts (as opposed to rebase
+// conflicts) using AI. It auto-resolves golden test snapshot files, then
+// invokes the build skill to handle remaining non-golden conflicts. The
+// caller is responsible for completing the merge commit after this returns.
+func (p *Pipeline) ResolveConflictsInMerge(ctx context.Context, runID, repoRoot string, conflictedFiles []string, maxAttempts int) error {
+	if maxAttempts <= 0 {
+		maxAttempts = 3
+	}
+
+	// Re-run the merge so we're in a conflicted state the agent can work with
+	r, ok := p.store.Get(runID)
+	if !ok {
+		return fmt.Errorf("run %s not found", runID)
+	}
+
+	branch := r.Branch
+	mergeCmd := exec.Command("git", "merge", branch)
+	mergeCmd.Dir = repoRoot
+	mergeCmd.CombinedOutput() // expect failure — we want the conflict state
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		// Get current conflicts
+		cmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
+		cmd.Dir = repoRoot
+		out, err := cmd.Output()
+		if err != nil || strings.TrimSpace(string(out)) == "" {
+			// No conflicts — merge is resolved
+			return nil
+		}
+
+		files := strings.Split(strings.TrimSpace(string(out)), "\n")
+
+		// Auto-resolve golden files
+		_, nonGolden := gitpkg.ResolveGoldenConflictsFromList(repoRoot, files)
+		if len(nonGolden) == 0 {
+			return nil
+		}
+
+		// Invoke the build skill to resolve non-golden conflicts
+		skill, opts, ok := p.executor.registry.SkillForRun("build")
+		if !ok {
+			return fmt.Errorf("build skill not found for conflict resolution")
+		}
+		opts.WorkDir = repoRoot
+
+		prompt := BuildPrompt(skill, PromptContext{
+			WorkDir: repoRoot,
+			Branch:  r.Branch,
+			UserPrompt: fmt.Sprintf(
+				"The following files have merge conflicts that need to be resolved:\n\n%s\n\n"+
+					"Open each conflicted file, resolve the conflict markers (<<<<<<< ======= >>>>>>>), "+
+					"keeping the correct code for both sides. After resolving, stage the files with git add.",
+				strings.Join(nonGolden, "\n"),
+			),
+		})
+
+		_, err = p.executor.runSkill(ctx, runID, prompt, opts, skill.Timeout)
+		if err != nil {
+			if attempt == maxAttempts-1 {
+				return fmt.Errorf("agent conflict resolution failed after %d attempts: %w", maxAttempts, err)
+			}
+			continue
+		}
+
+		// Stage all resolved files
+		add := exec.Command("git", "add", "-A")
+		add.Dir = repoRoot
+		_ = add.Run()
+
+		// Check if any conflicts remain
+		checkCmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
+		checkCmd.Dir = repoRoot
+		remaining, _ := checkCmd.Output()
+		if strings.TrimSpace(string(remaining)) == "" {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("could not resolve merge conflicts after %d attempts", maxAttempts)
 }
 
 func (p *Pipeline) push(worktree, branch string) error {
