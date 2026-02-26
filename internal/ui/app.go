@@ -314,6 +314,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			a.statusBar.SetFlashWithLevel(fmt.Sprintf("Init failed: %v", msg.Err), panels.FlashError)
 		} else {
+			if newCfg, err := config.Load(); err == nil {
+				*a.config = *newCfg
+			}
 			a.statusBar.SetFlashWithLevel("agtop init complete", panels.FlashSuccess)
 		}
 		return a, flashClearCmd()
