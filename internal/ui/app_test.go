@@ -16,7 +16,7 @@ func newTestApp(t *testing.T) App {
 	cfg := config.DefaultConfig()
 	cfg.Project.Root = t.TempDir() // isolate from real session data
 	a := NewApp(&cfg)
-	a.initPrompt = nil // dismiss init prompt for tests
+	a.onboarding = nil // dismiss onboarding modal for tests
 	return a
 }
 

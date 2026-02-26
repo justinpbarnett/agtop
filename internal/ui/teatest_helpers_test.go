@@ -24,7 +24,7 @@ func newTestAppAdapter(tb testing.TB) *appAdapter {
 	cfg := config.DefaultConfig()
 	cfg.Project.Root = tb.(*testing.T).TempDir() // isolate from real session data
 	a := NewApp(&cfg)
-	a.initPrompt = nil // dismiss init prompt for tests
+	a.onboarding = nil // dismiss onboarding modal for tests
 	return &appAdapter{app: a}
 }
 

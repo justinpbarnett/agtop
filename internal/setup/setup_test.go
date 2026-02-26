@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/justinpbarnett/agtop/internal/config"
@@ -106,7 +107,7 @@ default = "claude"       # claude | opencode
 		t.Fatal("expected agtop.toml")
 	}
 	content := string(data)
-	if !contains(content, `default = "opencode"`) {
+	if !strings.Contains(content, `default = "opencode"`) {
 		t.Errorf("expected runtime default to be opencode in agtop.toml, got:\n%s", content)
 	}
 }
@@ -192,15 +193,3 @@ func TestMergeOpenCodeConfigPreservesExisting(t *testing.T) {
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStr(s, substr))
-}
-
-func containsStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
